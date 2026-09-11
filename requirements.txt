@@ -1,0 +1,9 @@
+Flask>=3.0,<4.0
+Flask-SocketIO>=5.3,<6.0
+demucs>=4.0,<5.0
+yt-dlp>=2024.12.23
+
+# CPU users can install directly from PyPI.
+# CUDA users should install matching torch/torchaudio wheels from https://pytorch.org/get-started/locally/
+torch>=2.4,<2.7
+torchaudio>=2.4,<2.7

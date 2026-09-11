@@ -4,29 +4,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>KTV 系統管理後台</title>
     <style>
-        body { background: #f4f4f9; color: #333; font-family: sans-serif; padding: 20px; max-width: 600px; margin: auto; }
+        body { background: #f4f4f9; color: #333; font-family: sans-serif; padding: 20px; max-width: 700px; margin: auto; }
         .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
         h3 { margin-top: 0; color: #333; }
-        input { width: 100%; padding: 10px; margin-bottom: 15px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px; }
+        input, select { width: 100%; padding: 10px; margin-bottom: 12px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px; }
         button { padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; color: white; width: 100%; margin-bottom: 10px; }
-        
+
         .btn-dl { background: #FF9800; }
         .btn-update { background: #607D8B; }
         .btn-dl:disabled, .btn-update:disabled { background: #ccc; cursor: not-allowed; }
-        textarea { width: 100%; height: 200px; background: #222; color: #0f0; padding: 10px; box-sizing: border-box; font-family: monospace; border-radius: 5px; resize: none; }
-        
-        /* 導航列樣式 */
+        textarea { width: 100%; height: 220px; background: #222; color: #0f0; padding: 10px; box-sizing: border-box; font-family: monospace; border-radius: 5px; resize: none; }
+
         .nav-bar { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
         .nav-btn { flex: 1; text-align: center; padding: 12px 10px; text-decoration: none; border-radius: 8px; font-weight: bold; color: white; font-size: 14px; min-width: 100px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s;}
         .nav-btn:active { transform: scale(0.95); }
         .nav-remote { background: #E91E63; }
         .nav-console { background: #9C27B0; }
         .nav-player { background: #2196F3; }
+
+        .tips { margin: 0; padding-left: 18px; color: #444; font-size: 14px; }
+        .tips li { margin-bottom: 5px; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 </head>
 <body>
-    
+
     <div class="nav-bar">
         <a href="/remote" class="nav-btn nav-remote">📱 遙控器</a>
         <a href="/combo" class="nav-btn nav-combo">🖥️ 雙合一控制台</a>
@@ -39,7 +41,37 @@
         <input type="text" id="yt_url" placeholder="https://www.youtube.com/watch?v=...">
         <label>2. 設定歌名 (必填):</label>
         <input type="text" id="yt_title" placeholder="例如：告五人 - 披星戴月的想你">
-        <button id="btn_dl" class="btn-dl" onclick="startDownload()">開始製作 (L:原唱 / R:伴奏)</button>
+
+        <label>3. Demucs stems:</label>
+        <select id="stems_mode">
+            <option value="2">2 stems（vocals + accompaniment）</option>
+            <option value="4">4 stems（vocals/drums/bass/other）</option>
+        </select>
+
+        <label>4. 混音策略:</label>
+        <select id="mix_mode">
+            <option value="pseudo-spatial">pseudo-spatial（預設，較自然）</option>
+            <option value="stereo-balance">stereo-balance（溫和左右平衡）</option>
+            <option value="legacy">legacy（舊版硬切）</option>
+        </select>
+
+        <label>5. 運算裝置:</label>
+        <select id="device_mode">
+            <option value="auto">auto（優先 CUDA，不可用自動改 CPU）</option>
+            <option value="cuda">cuda（指定 CUDA，不可用自動改 CPU）</option>
+            <option value="cpu">cpu（僅使用 CPU）</option>
+        </select>
+
+        <button id="btn_dl" class="btn-dl" onclick="startDownload()">開始製作 (Demucs)</button>
+    </div>
+
+    <div class="card">
+        <h3>🎛️ 混音策略說明</h3>
+        <ul class="tips">
+            <li><b>legacy</b>：保持舊版「L:原曲 / R:伴奏」硬切相容行為。</li>
+            <li><b>stereo-balance</b>：左右聲道都保留原曲與伴奏，只是權重不同。</li>
+            <li><b>pseudo-spatial</b>：加入保守延遲、輕量 EQ 與反射感，聽感更自然。</li>
+        </ul>
     </div>
 
     <div class="card">
@@ -60,13 +92,13 @@
 
         socket.on('admin_log', (data) => {
             logArea.value += data.msg + "\n";
-            logArea.scrollTop = logArea.scrollHeight; // 自動捲動到最底
+            logArea.scrollTop = logArea.scrollHeight;
         });
 
         socket.on('task_status', (data) => {
             if(data.status === 'idle') {
                 btnDl.disabled = false;
-                btnDl.innerText = "開始製作 (L:原唱 / R:伴奏)";
+                btnDl.innerText = "開始製作 (Demucs)";
                 btnUpdate.disabled = false;
                 document.getElementById('yt_url').value = '';
                 document.getElementById('yt_title').value = '';
@@ -84,7 +116,13 @@
                 alert("網址與歌名皆為必填！");
                 return;
             }
-            socket.emit('start_download', {url: url, title: title});
+            socket.emit('start_download', {
+                url,
+                title,
+                stems: document.getElementById('stems_mode').value,
+                mix_mode: document.getElementById('mix_mode').value,
+                device: document.getElementById('device_mode').value,
+            });
         }
 
         function updateYtDlp() {

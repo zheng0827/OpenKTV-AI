@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+ktv_songs/
+temp_processing/
