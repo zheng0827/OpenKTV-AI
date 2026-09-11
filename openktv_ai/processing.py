@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import os
 import shutil
 import subprocess
@@ -8,6 +9,63 @@ import time
 from pathlib import Path
 
 from .config import AppSettings
+
+
+def _demucs_required_cache_files(model_name: str) -> list[str]:
+    import demucs.pretrained as pretrained  # pylint: disable=import-outside-toplevel
+
+    files_map = pretrained._parse_remote_files(pretrained.REMOTE_ROOT / "files.txt")  # pylint: disable=protected-access
+    urls: list[str] = []
+
+    if model_name in files_map:
+        urls = [files_map[model_name]]
+    else:
+        bag_file = pretrained.REMOTE_ROOT / f"{model_name}.yaml"
+        if not bag_file.exists():
+            raise FileNotFoundError(f"找不到 Demucs 模型設定: {model_name}")
+
+        signatures: list[str] = []
+        for line in bag_file.read_text(encoding="utf-8").splitlines():
+            if line.strip().startswith("models:"):
+                _, value = line.split(":", 1)
+                signatures = list(ast.literal_eval(value.strip()))
+                break
+
+        if not signatures:
+            raise RuntimeError(f"無法解析 Demucs 權重清單: {model_name}")
+        urls = [files_map[sig] for sig in signatures]
+
+    return [url.rsplit("/", 1)[-1] for url in urls]
+
+
+def demucs_weights_ready(model_name: str) -> bool:
+    try:
+        import torch  # pylint: disable=import-outside-toplevel
+    except Exception:
+        return False
+
+    checkpoint_dir = Path(torch.hub.get_dir()) / "checkpoints"
+    required = _demucs_required_cache_files(model_name)
+    return all((checkpoint_dir / filename).exists() for filename in required)
+
+
+def ensure_demucs_weights(model_name: str, log_cb=print) -> None:
+    log_cb(f"🔍 啟動前檢查 Demucs 權重: {model_name}")
+    if demucs_weights_ready(model_name):
+        log_cb("✅ Demucs 權重已存在，略過下載。")
+        return
+
+    log_cb("⬇️ Demucs 權重不存在，開始自動下載...")
+    try:
+        import demucs.pretrained as pretrained  # pylint: disable=import-outside-toplevel
+
+        pretrained.get_model(model_name)
+    except Exception as error:  # pylint: disable=broad-except
+        raise RuntimeError(f"Demucs 權重下載失敗: {error}") from error
+
+    if not demucs_weights_ready(model_name):
+        raise RuntimeError("Demucs 權重下載完成，但快取檔檢查失敗。")
+    log_cb("✅ Demucs 權重下載完成。")
 
 
 def _is_cuda_available() -> bool:

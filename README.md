@@ -27,6 +27,8 @@ pip install -r requirements.txt
 python main.py
 ```
 
+啟動前會先檢查 Demucs 權重；若本機沒有對應模型快取，系統會自動下載後再啟動服務。
+
 啟動後可使用：
 - `/player` 播放端
 - `/remote` 遙控端

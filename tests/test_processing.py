@@ -1,9 +1,16 @@
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from openktv_ai.config import AppSettings
-from openktv_ai.processing import build_demucs_command, build_mix_filter, resolve_device
+from openktv_ai.processing import (
+    build_demucs_command,
+    build_mix_filter,
+    demucs_weights_ready,
+    ensure_demucs_weights,
+    resolve_device,
+)
 
 
 class ProcessingTests(unittest.TestCase):
@@ -59,6 +66,23 @@ class ProcessingTests(unittest.TestCase):
     @patch('openktv_ai.processing._is_cuda_available', return_value=False)
     def test_resolve_device_falls_back_to_cpu(self, _mock_available):
         self.assertEqual(resolve_device('cuda'), 'cpu')
+
+    @patch('openktv_ai.processing._demucs_required_cache_files', return_value=['a.th', 'b.th'])
+    @patch('pathlib.Path.exists')
+    def test_demucs_weights_ready_true(self, mock_exists, _mock_required):
+        fake_torch = SimpleNamespace(hub=SimpleNamespace(get_dir=lambda: '/tmp/torch'))
+        mock_exists.side_effect = [True, True]
+        with patch.dict('sys.modules', {'torch': fake_torch}):
+            self.assertTrue(demucs_weights_ready('htdemucs_ft'))
+
+    @patch('openktv_ai.processing.demucs_weights_ready', side_effect=[False, True])
+    def test_ensure_demucs_weights_downloads_when_missing(self, _mock_ready):
+        fake_get_model = Mock()
+        fake_pretrained = SimpleNamespace(get_model=fake_get_model)
+        fake_demucs = SimpleNamespace(pretrained=fake_pretrained)
+        with patch.dict('sys.modules', {'demucs': fake_demucs, 'demucs.pretrained': fake_pretrained}):
+            ensure_demucs_weights('htdemucs_ft', log_cb=lambda *_args, **_kwargs: None)
+        fake_get_model.assert_called_once_with('htdemucs_ft')
 
 
 if __name__ == '__main__':

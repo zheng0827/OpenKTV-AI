@@ -12,6 +12,7 @@ import tkinter as tk
 from tkinter import messagebox
 
 from openktv_ai import load_settings
+from openktv_ai.processing import ensure_demucs_weights
 from openktv_ai.web import create_app, get_local_ip, register_socket_handlers
 
 
@@ -155,6 +156,15 @@ if __name__ == "__main__":
         except Exception:
             print("找不到 FFmpeg")
     else:
+        try:
+            ensure_demucs_weights(settings.demucs_model, log_cb=print)
+        except Exception as error:
+            try:
+                messagebox.showerror("錯誤", str(error))
+            except Exception:
+                print(str(error))
+            sys.exit(1)
+
         thread = threading.Thread(target=run_server_thread)
         thread.daemon = True
         thread.start()
