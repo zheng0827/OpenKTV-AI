@@ -13,12 +13,16 @@ OpenKTV-AI 是一個區網 KTV 系統：輸入 YouTube 連結後，會自動下�
 
 ```bash
 pip install -r requirements.txt
+pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu132
 ```
 
 > PyTorch / torchaudio：
 > - CPU：可直接安裝 requirements。
 > - CUDA：請依官方頁面安裝對應 CUDA wheel（版本策略：`torch, torchaudio >=2.4,<2.7`）。
-
+以 RTX 5060 8GB Laptop，CUDA Version 13.2 為例
+```bash
+pip install --pre torch torchaudio --index-url https://download.pytorch.org/whl/nightly/cu132
+```
 ---
 
 ## 2) 啟動
@@ -78,10 +82,10 @@ python main.py
 1. 下載影片
 2. Demucs 分離
 3. FFmpeg 混音
-4. 輸出 mp4 到歌庫
+4. 輸出 mp4 與 m4a 到曲庫
 
 ### 輸出路徑/命名
-- 最終輸出仍是 `ktv_songs/<歌名>.mp4`
+- 最終輸出仍是 `ktv_songs/<歌名>.mp4` 與 `ktv_songs/<歌名>.m4a`
 - 若重名仍會自動加上 job id 後綴
 
 ### stems 相容層
@@ -92,8 +96,8 @@ python main.py
 
 ## 5) 混音模式說明
 
-- `legacy`：舊行為（L: 原曲、R: 伴奏）
-- `stereo-balance`：左右都保留兩者，只調整權重，聽感較溫和
+- `legacy`：舊行為（L: 原曲、R: 伴奏）                                              - **預計移除**
+- `stereo-balance`：左右都保留兩者，只調整權重，聽感較溫和                            - **預計移除**
 - `pseudo-spatial`（新預設）：小延遲 + 輕 EQ + 少量 early reflection + 保守聲像混合
 
 ---
@@ -126,5 +130,12 @@ python main.py
 - `openktv_ai/config.py`：設定集中管理
 - `openktv_ai/web.py`：app factory、Blueprint routes、SocketIO handlers
 - `openktv_ai/processing.py`：下載/分離/混音核心流程
+
+---
+
+## 8) TO DO LIST
+- 可以輸入 YT playlist 連結並選取多個曲目，而不是一首一首歌慢慢下載
+- 去抓同步或整篇的完整歌詞，搭配語音辨識AI模型，製作出類似 KTV 以秒為單位的歌詞字幕
+- 改善串流模式
 
 既有端點路徑維持不變，不需修改前端連結。
