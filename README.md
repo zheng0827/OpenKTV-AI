@@ -13,12 +13,12 @@ OpenKTV-AI 是一個區網 KTV 系統：輸入 YouTube 連結後，會自動下�
 
 ```bash
 pip install -r requirements.txt
-pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu132
 ```
 
 > PyTorch / torchaudio：
 > - CPU：可直接安裝 requirements。
 > - CUDA：請依官方頁面安裝對應 CUDA wheel（版本策略：`torch, torchaudio >=2.4,<2.7`）。
+
 以 RTX 5060 8GB Laptop，CUDA Version 13.2 為例
 ```bash
 pip install --pre torch torchaudio --index-url https://download.pytorch.org/whl/nightly/cu132
