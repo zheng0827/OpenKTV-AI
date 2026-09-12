@@ -14,6 +14,7 @@
     <div id="overlay">等待連線...</div>
     <div id="waiting" onclick="initAudioContext()">📺 KTV 準備就緒 (點我啟動音效)</div>
     <video id="vid" playsinline crossorigin="anonymous"></video>
+    <audio id="instrumental" preload="auto" crossorigin="anonymous"></audio>
 
     <script>
         const socket = io();
@@ -21,9 +22,10 @@
         const overlay = document.getElementById('overlay');
         const waiting = document.getElementById('waiting');
         
-        let audioCtx, source, splitter, gainL, gainR, merger;
+        let audioCtx, source, instrumentalSource, originalGain, instrumentalGain, masterGain;
         let isAudioSetup = false;
-        let currentMode = 'stereo';
+        let currentMode = 'original';
+        let instrumentalAvailable = false;
 
         function initAudioContext() {
             if(!audioCtx) {
@@ -41,26 +43,67 @@
             if(isAudioSetup) return;
             if(!audioCtx) initAudioContext();
 
+            const instrumental = document.getElementById('instrumental');
             source = audioCtx.createMediaElementSource(video);
-            splitter = audioCtx.createChannelSplitter(2);
-            merger = audioCtx.createChannelMerger(2);
-            gainL = audioCtx.createGain();
-            gainR = audioCtx.createGain();
+            instrumentalSource = audioCtx.createMediaElementSource(instrumental);
+            originalGain = audioCtx.createGain();
+            instrumentalGain = audioCtx.createGain();
+            masterGain = audioCtx.createGain();
 
-            source.connect(splitter);
-            splitter.connect(gainL, 0); 
-            gainL.connect(merger, 0, 0); 
-            gainL.connect(merger, 0, 1); 
-            splitter.connect(gainR, 1);
-            gainR.connect(merger, 0, 0); 
-            gainR.connect(merger, 0, 1); 
-            merger.connect(audioCtx.destination);
+            source.connect(originalGain).connect(masterGain);
+            instrumentalSource.connect(instrumentalGain).connect(masterGain);
+            masterGain.connect(audioCtx.destination);
             
             isAudioSetup = true;
             setAudioMode(currentMode);
         }
 
         socket.on('connect', () => { overlay.innerText = "✅ 已連線主機"; });
+
+        socket.on('playback_state', (data) => {
+            const instrumental = document.getElementById('instrumental');
+            currentMode = data.audio_mode || 'original';
+            if (!data.filename) {
+                video.pause();
+                instrumental.pause();
+                waiting.style.display = 'block';
+                return;
+            }
+
+            const isNewSong = video.dataset.filename !== data.filename;
+            if (isNewSong) {
+                video.dataset.filename = data.filename;
+                video.src = "/songs/" + encodeURIComponent(data.filename);
+                instrumentalAvailable = Boolean(data.instrumental_filename);
+                instrumental.src = instrumentalAvailable ? "/songs/" + encodeURIComponent(data.instrumental_filename) : "";
+                waiting.style.display = 'none';
+            }
+
+            const sync = () => {
+                const target = Math.max(0, Number(data.position) || 0);
+                const align = (media) => {
+                    const drift = target - media.currentTime;
+                    if (Math.abs(drift) > 0.35) {
+                        media.currentTime = target;
+                        media.playbackRate = 1;
+                    } else {
+                        media.playbackRate = 1 + Math.max(-0.05, Math.min(0.05, drift * 0.12));
+                    }
+                };
+                align(video);
+                if (instrumentalAvailable) align(instrumental);
+                if (!isAudioSetup) setupAudio();
+                setAudioMode(currentMode);
+                if (data.is_playing) {
+                    video.play().catch(() => {});
+                    if (instrumentalAvailable && currentMode === 'instrumental') instrumental.play().catch(() => {});
+                } else {
+                    video.pause();
+                    instrumental.pause();
+                }
+            };
+            if (isNewSong) video.onloadedmetadata = sync; else sync();
+        });
 
         socket.on('play_video', (data) => {
             waiting.style.display = 'none';
@@ -84,25 +127,33 @@
             }
         });
 
+        video.onended = function() { socket.emit('song_ended', {filename: video.dataset.filename}); };
+
         socket.on('set_audio', (mode) => {
             currentMode = mode;
             setAudioMode(mode);
         });
 
         function setAudioMode(mode) {
-            if(!isAudioSetup || !gainL || !gainR) return;
+            if(!isAudioSetup || !originalGain || !instrumentalGain) return;
             const now = audioCtx.currentTime;
             if (mode === 'original') { 
-                gainL.gain.setTargetAtTime(1, now, 0.1);
-                gainR.gain.setTargetAtTime(0, now, 0.1);
+                originalGain.gain.setTargetAtTime(1, now, 0.1);
+                instrumentalGain.gain.setTargetAtTime(0, now, 0.1);
+                document.getElementById('instrumental').pause();
                 overlay.innerText = "🎤 目前模式：原唱";
             } else if (mode === 'instrumental') { 
-                gainL.gain.setTargetAtTime(0, now, 0.1);
-                gainR.gain.setTargetAtTime(1, now, 0.1);
+                originalGain.gain.setTargetAtTime(0, now, 0.1);
+                instrumentalGain.gain.setTargetAtTime(1, now, 0.1);
+                if (instrumentalAvailable) {
+                    const instrumental = document.getElementById('instrumental');
+                    instrumental.currentTime = video.currentTime;
+                    if (!video.paused) instrumental.play().catch(() => {});
+                }
                 overlay.innerText = "🚫 目前模式：伴奏";
             } else { 
-                gainL.gain.setTargetAtTime(1, now, 0.1);
-                gainR.gain.setTargetAtTime(1, now, 0.1);
+                originalGain.gain.setTargetAtTime(1, now, 0.1);
+                instrumentalGain.gain.setTargetAtTime(0, now, 0.1);
                 overlay.innerText = "🎵 目前模式：立體聲";
             }
         }

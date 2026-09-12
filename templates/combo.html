@@ -68,6 +68,7 @@
         </div>
         
         <video id="vid" playsinline crossorigin="anonymous" ondblclick="toggleFullScreen()"></video>
+        <audio id="instrumental" preload="auto" crossorigin="anonymous"></audio>
     </div>
 
     <div id="remote-container">
@@ -114,10 +115,11 @@ const socket = io();
         const waitingBtn = document.getElementById('waiting');
         const playerContainer = document.getElementById('player-container');
         
-        let audioCtx, source, splitter, gainL, gainR, merger, masterGain, pitchShift;
+        let audioCtx, source, instrumentalSource, originalGain, instrumentalGain, masterGain, pitchShift;
         let isAudioSetup = false;
         let currentMode = 'original';
-        let currentKey = 0; 
+        let currentKey = 0;
+        let instrumentalAvailable = false;
 
         function toggleFullScreen() {
             if (!document.fullscreenElement) {
@@ -144,20 +146,18 @@ const socket = io();
             if(isAudioSetup) return;
             if(!audioCtx) initSystem();
             
+            const instrumental = document.getElementById('instrumental');
             source = audioCtx.createMediaElementSource(video);
-            splitter = audioCtx.createChannelSplitter(2);
-            merger = audioCtx.createChannelMerger(2);
-            gainL = audioCtx.createGain();
-            gainR = audioCtx.createGain();
-            masterGain = audioCtx.createGain(); 
+            instrumentalSource = audioCtx.createMediaElementSource(instrumental);
+            originalGain = audioCtx.createGain();
+            instrumentalGain = audioCtx.createGain();
+            masterGain = audioCtx.createGain();
 
             Tone.setContext(audioCtx);
             pitchShift = new Tone.PitchShift({ pitch: 0, windowSize: 0.1 }).toDestination();
 
-            source.connect(splitter);
-            splitter.connect(gainL, 0); gainL.connect(merger, 0, 0); gainL.connect(merger, 0, 1);
-            splitter.connect(gainR, 1); gainR.connect(merger, 0, 0); gainR.connect(merger, 0, 1);
-            merger.connect(masterGain);
+            source.connect(originalGain).connect(masterGain);
+            instrumentalSource.connect(instrumentalGain).connect(masterGain);
             
             Tone.connect(masterGain, pitchShift);
             
@@ -189,6 +189,57 @@ const socket = io();
         });
 
         // 👑 修正點 1：刪除重複的 play_video 事件，合併為一個乾淨的版本
+        socket.on('playback_state', (data) => {
+            const instrumental = document.getElementById('instrumental');
+            currentMode = data.audio_mode || 'original';
+            if (!data.filename) {
+                video.pause();
+                instrumental.pause();
+                video.style.display = 'none';
+                idleScreen.style.display = 'block';
+                nextInfo.style.display = 'none';
+                return;
+            }
+
+            const isNewSong = video.dataset.filename !== data.filename;
+            if (isNewSong) {
+                video.dataset.filename = data.filename;
+                video.src = "/songs/" + encodeURIComponent(data.filename);
+                instrumentalAvailable = Boolean(data.instrumental_filename);
+                instrumental.src = instrumentalAvailable ? "/songs/" + encodeURIComponent(data.instrumental_filename) : "";
+                idleScreen.style.display = 'none';
+                video.style.display = 'block';
+            }
+            const sync = () => {
+                const target = Math.max(0, Number(data.position) || 0);
+                const align = (media) => {
+                    const drift = target - media.currentTime;
+                    if (Math.abs(drift) > 0.35) {
+                        media.currentTime = target;
+                        media.playbackRate = 1;
+                    } else {
+                        media.playbackRate = 1 + Math.max(-0.05, Math.min(0.05, drift * 0.12));
+                    }
+                };
+                align(video);
+                if (instrumentalAvailable) align(instrumental);
+                if (!isAudioSetup) setupAudio();
+                setAudioMode(currentMode);
+                if (data.effects && masterGain) {
+                    if (data.effects.volume !== undefined) masterGain.gain.setTargetAtTime(data.effects.volume, audioCtx.currentTime, 0.1);
+                    if (data.effects.pitch !== undefined && pitchShift) pitchShift.pitch = data.effects.pitch;
+                }
+                if (data.is_playing) {
+                    video.play().catch(() => {});
+                    if (instrumentalAvailable && currentMode === 'instrumental') instrumental.play().catch(() => {});
+                } else {
+                    video.pause();
+                    instrumental.pause();
+                }
+            };
+            if (isNewSong) video.onloadedmetadata = sync; else sync();
+        });
+
         socket.on('play_video', (data) => {
             idleScreen.style.display = 'none';
             video.style.display = 'block';
@@ -203,7 +254,7 @@ const socket = io();
         });
 
         // 👑 修正點 2：當影片播完時，發送 song_ended 讓後端決定下一首歌
-        video.onended = function() { socket.emit('song_ended'); };
+        video.onended = function() { socket.emit('song_ended', {filename: video.dataset.filename}); };
 
         socket.on('connect', () => { overlay.innerText = "✅ 已連線"; });
 
@@ -223,13 +274,19 @@ const socket = io();
         });
 
         function setAudioMode(mode) {
-            if(!isAudioSetup || !gainL || !gainR) return;
+            if(!isAudioSetup || !originalGain || !instrumentalGain) return;
             const now = audioCtx.currentTime;
             if (mode === 'original') { 
-                gainL.gain.setTargetAtTime(1, now, 0.1); gainR.gain.setTargetAtTime(0, now, 0.1);
+                originalGain.gain.setTargetAtTime(1, now, 0.1); instrumentalGain.gain.setTargetAtTime(0, now, 0.1);
+                document.getElementById('instrumental').pause();
                 overlay.innerText = "🎤 模式：原唱";
             } else if (mode === 'instrumental') { 
-                gainL.gain.setTargetAtTime(0, now, 0.1); gainR.gain.setTargetAtTime(1, now, 0.1);
+                originalGain.gain.setTargetAtTime(0, now, 0.1); instrumentalGain.gain.setTargetAtTime(1, now, 0.1);
+                if (instrumentalAvailable) {
+                    const instrumental = document.getElementById('instrumental');
+                    instrumental.currentTime = video.currentTime;
+                    if (!video.paused) instrumental.play().catch(() => {});
+                }
                 overlay.innerText = "🚫 模式：伴奏";
             }
         }

@@ -157,7 +157,11 @@ if __name__ == "__main__":
             print("找不到 FFmpeg")
     else:
         try:
-            ensure_demucs_weights(settings.demucs_model, log_cb=print)
+            ensure_demucs_weights(
+                settings.demucs_model,
+                cache_dir=settings.demucs_cache_dir,
+                log_cb=print,
+            )
         except Exception as error:
             try:
                 messagebox.showerror("錯誤", str(error))

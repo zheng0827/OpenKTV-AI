@@ -5,6 +5,7 @@ import os
 import socket
 import subprocess
 import threading
+import time
 from typing import Callable
 
 from flask import Blueprint, Flask, current_app, render_template, send_from_directory
@@ -76,7 +77,50 @@ def create_app(settings: AppSettings | None = None) -> tuple[Flask, SocketIO, Ap
 
 
 def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: Callable[[str], None]):
-    state = {"is_processing": False, "playlist_queue": []}
+    state = {
+        "is_processing": False,
+        "playlist_queue": [],
+        "current_song": None,
+        "is_playing": False,
+        "position": 0.0,
+        "started_at": None,
+        "audio_mode": "original",
+        "effects": {"volume": 1.0, "pitch": 0},
+    }
+
+    def current_position() -> float:
+        if state["is_playing"] and state["started_at"] is not None:
+            return state["position"] + max(0.0, time.time() - state["started_at"])
+        return state["position"]
+
+    def playback_payload() -> dict:
+        filename = state["current_song"]
+        instrumental_filename = None
+        if filename:
+            candidate = f"{os.path.splitext(filename)[0]}.instrumental.m4a"
+            if (settings.songs_dir / candidate).is_file():
+                instrumental_filename = candidate
+        return {
+            "filename": filename,
+            "title": filename or "",
+            "instrumental_filename": instrumental_filename,
+            "is_playing": state["is_playing"],
+            "position": current_position(),
+            "audio_mode": state["audio_mode"],
+            "effects": state["effects"],
+        }
+
+    def broadcast_playback_state():
+        socketio.emit("playback_state", playback_payload())
+
+    def playback_sync_loop():
+        """Continuously correct clock drift between independent browser players."""
+        while True:
+            socketio.sleep(2)
+            if state["current_song"] and state["is_playing"]:
+                broadcast_playback_state()
+
+    socketio.start_background_task(playback_sync_loop)
 
     def broadcast_log(message: str):
         log_cb(message)
@@ -84,9 +128,18 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
 
     def enqueue_song(filename: str):
         state["playlist_queue"].append(filename)
-        emit("update_queue", state["playlist_queue"], broadcast=True)
+        socketio.emit("update_queue", state["playlist_queue"])
         if len(state["playlist_queue"]) == 1:
-            emit("play_video", {"filename": filename, "title": filename}, broadcast=True)
+            state.update(current_song=filename, is_playing=True, position=0.0, started_at=time.time())
+            broadcast_playback_state()
+
+    @socketio.on("connect")
+    def handle_connect():
+        # A player opened after the song has started receives the same song,
+        # position, audio mode, and effects as every already-connected player.
+        emit("playback_state", playback_payload())
+        emit("update_queue", state["playlist_queue"])
+        emit("apply_effect", state["effects"])
 
     @socketio.on("add_to_queue")
     def handle_add_queue(data):
@@ -99,30 +152,45 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
         enqueue_song(filename)
 
     @socketio.on("song_ended")
-    def handle_song_ended():
+    def handle_song_ended(data=None):
+        # Every open player can report an ending. Only the player that ended
+        # the server's current song may advance the shared queue.
+        if isinstance(data, dict) and data.get("filename") != state["current_song"]:
+            return
         if state["playlist_queue"]:
             state["playlist_queue"].pop(0)
-            emit("update_queue", state["playlist_queue"], broadcast=True)
+            socketio.emit("update_queue", state["playlist_queue"])
             if state["playlist_queue"]:
                 next_song = state["playlist_queue"][0]
-                emit("play_video", {"filename": next_song, "title": next_song}, broadcast=True)
+                state.update(current_song=next_song, is_playing=True, position=0.0, started_at=time.time())
+                broadcast_playback_state()
             else:
-                emit("stop_video", broadcast=True)
+                state.update(current_song=None, is_playing=False, position=0.0, started_at=None)
+                broadcast_playback_state()
 
     @socketio.on("control")
     def handle_control(action):
         if action == "cut":
             handle_song_ended()
-        else:
-            emit("command", action, broadcast=True)
+        elif action == "pause" and state["current_song"]:
+            state["position"] = current_position()
+            state["is_playing"] = not state["is_playing"]
+            state["started_at"] = time.time() if state["is_playing"] else None
+            broadcast_playback_state()
+        elif action == "stop":
+            state.update(is_playing=False, position=0.0, started_at=None)
+            broadcast_playback_state()
 
     @socketio.on("control_effect")
     def handle_effect(data):
-        emit("apply_effect", data, broadcast=True)
+        state["effects"].update({key: value for key, value in data.items() if key in {"volume", "pitch"}})
+        socketio.emit("apply_effect", state["effects"])
 
     @socketio.on("change_track")
     def handle_track(mode):
-        emit("set_audio", mode, broadcast=True)
+        if mode in {"original", "instrumental"}:
+            state["audio_mode"] = mode
+            socketio.emit("set_audio", mode)
 
     @socketio.on("start_download")
     def handle_start_download(data):

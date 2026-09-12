@@ -3,6 +3,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 
 def _to_float(value: str, default: float) -> float:
     try:
@@ -29,6 +31,7 @@ class AppSettings:
     host: str
     port: int
     secret_key: str
+    demucs_cache_dir: Path
     demucs_model: str
     separator_stems: int
     device_preference: str
@@ -65,6 +68,9 @@ def resolve_base_dir() -> Path:
 
 def load_settings(base_dir: Path | None = None) -> AppSettings:
     root = base_dir or resolve_base_dir()
+    # Local values are convenient for development. Existing system environment
+    # variables still take precedence for production deployments.
+    load_dotenv(dotenv_path=root / ".env", override=False)
 
     stems = os.getenv("KTV_SEPARATOR_STEMS", "2").strip()
     separator_stems = 4 if stems == "4" else 2
@@ -79,6 +85,7 @@ def load_settings(base_dir: Path | None = None) -> AppSettings:
         host=os.getenv("KTV_HOST", "0.0.0.0"),
         port=_to_int(os.getenv("KTV_PORT"), 5000),
         secret_key=os.getenv("KTV_SECRET_KEY", "ktv_secret"),
+        demucs_cache_dir=Path(os.getenv("KTV_DEMUCS_CACHE_DIR", root / "model_cache" / "demucs")),
         demucs_model=os.getenv("KTV_DEMUCS_MODEL", "htdemucs_ft"),
         separator_stems=separator_stems,
         device_preference=os.getenv("KTV_DEVICE", "auto").strip().lower(),

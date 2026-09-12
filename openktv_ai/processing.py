@@ -11,6 +11,66 @@ from pathlib import Path
 from .config import AppSettings
 
 
+def configure_demucs_cache(cache_dir: Path) -> Path:
+    """Configure the Torch Hub and Hugging Face directories used by Demucs."""
+    resolved_dir = cache_dir.expanduser().resolve()
+    resolved_dir.mkdir(parents=True, exist_ok=True)
+    # Demucs downloads checkpoints through torch.hub. Setting both forms keeps
+    # the directory stable even if torch was imported earlier.
+    os.environ["TORCH_HOME"] = str(resolved_dir)
+    # Some Demucs builds resolve safetensors through huggingface_hub instead.
+    # Keep that cache alongside the Torch checkpoints unless the user has
+    # deliberately configured a shared Hugging Face cache already.
+    os.environ.setdefault("HF_HOME", str(resolved_dir / "huggingface"))
+
+    try:
+        import torch  # pylint: disable=import-outside-toplevel
+
+        torch.hub.set_dir(str(resolved_dir))
+    except Exception:
+        # The model download below will surface a useful dependency error.
+        pass
+
+    return resolved_dir
+
+
+def demucs_checkpoint_dir(cache_dir: Path | None = None) -> Path:
+    if cache_dir is not None:
+        configure_demucs_cache(cache_dir)
+
+    import torch  # pylint: disable=import-outside-toplevel
+
+    return Path(torch.hub.get_dir()) / "checkpoints"
+
+
+def _huggingface_demucs_weights_ready(model_name: str, cache_dir: Path | None) -> bool:
+    """Check the safetensors layout used by recent Demucs releases."""
+    hf_home = (
+        cache_dir.expanduser().resolve() / "huggingface"
+        if cache_dir is not None
+        else Path(os.environ.get("HF_HOME", "~/.cache/huggingface")).expanduser()
+    )
+    snapshots_root = hf_home / "hub"
+
+    # The repository name varies between Demucs releases, so discover a
+    # snapshot by its model manifest rather than hard-coding a repository.
+    for manifest in snapshots_root.glob(f"models--adefossez--*/snapshots/*/{model_name}.yaml"):
+        try:
+            signatures: list[str] = []
+            for line in manifest.read_text(encoding="utf-8").splitlines():
+                if line.strip().startswith("models:"):
+                    _, value = line.split(":", 1)
+                    signatures = list(ast.literal_eval(value.strip()))
+                    break
+        except (OSError, SyntaxError, ValueError):
+            continue
+
+        if signatures and all((manifest.parent / f"{signature}.safetensors").is_file() for signature in signatures):
+            return True
+
+    return False
+
+
 def _demucs_required_cache_files(model_name: str) -> list[str]:
     import demucs.pretrained as pretrained  # pylint: disable=import-outside-toplevel
 
@@ -38,20 +98,28 @@ def _demucs_required_cache_files(model_name: str) -> list[str]:
     return [url.rsplit("/", 1)[-1] for url in urls]
 
 
-def demucs_weights_ready(model_name: str) -> bool:
+def demucs_weights_ready(model_name: str, cache_dir: Path | None = None) -> bool:
+    # Demucs 4.0 originally used Torch Hub (.th files), while newer builds
+    # obtain safetensors from Hugging Face. Support both cache formats.
+    if _huggingface_demucs_weights_ready(model_name, cache_dir):
+        return True
+
     try:
-        import torch  # pylint: disable=import-outside-toplevel
+        checkpoint_dir = demucs_checkpoint_dir(cache_dir)
     except Exception:
         return False
 
-    checkpoint_dir = Path(torch.hub.get_dir()) / "checkpoints"
     required = _demucs_required_cache_files(model_name)
     return all((checkpoint_dir / filename).exists() for filename in required)
 
 
-def ensure_demucs_weights(model_name: str, log_cb=print) -> None:
+def ensure_demucs_weights(model_name: str, log_cb=print, cache_dir: Path | None = None) -> None:
+    if cache_dir is not None:
+        cache_dir = configure_demucs_cache(cache_dir)
+        log_cb(f"Demucs weights cache: {demucs_checkpoint_dir()}")
+
     log_cb(f"🔍 啟動前檢查 Demucs 權重: {model_name}")
-    if demucs_weights_ready(model_name):
+    if demucs_weights_ready(model_name, cache_dir=cache_dir):
         log_cb("✅ Demucs 權重已存在，略過下載。")
         return
 
@@ -63,7 +131,7 @@ def ensure_demucs_weights(model_name: str, log_cb=print) -> None:
     except Exception as error:  # pylint: disable=broad-except
         raise RuntimeError(f"Demucs 權重下載失敗: {error}") from error
 
-    if not demucs_weights_ready(model_name):
+    if not demucs_weights_ready(model_name, cache_dir=cache_dir):
         raise RuntimeError("Demucs 權重下載完成，但快取檔檢查失敗。")
     log_cb("✅ Demucs 權重下載完成。")
 
@@ -133,23 +201,31 @@ def build_mix_filter(mode: str, settings: AppSettings) -> str:
             f"[base]pan=stereo|c0={l_orig}*c0+{l_acc}*c1|c1={r_orig}*c0+{r_acc}*c1[a]"
         )
 
+    return (
+        # Preserve the separated vocal track exactly as Demucs produced it.
+        # Spatial processing is applied only to accompaniment.
+        "[1:a]anull[vocals];"
+        + build_pseudo_accompaniment_filter("[2:a]", settings, "acc")
+        # Fixed headroom avoids a limiter changing the vocal when it is mixed
+        # with accompaniment. The companion track receives the same gain.
+        + "[vocals][acc]amix=inputs=2:normalize=0,volume=0.5[a]"
+    )
+
+
+def build_pseudo_accompaniment_filter(input_stream: str, settings: AppSettings, output_label: str) -> str:
+    """Return the shared pseudo-spatial processing used in both audio modes."""
     delay_right = settings.pseudo_delay_ms
     delay_left = max(2, delay_right // 2)
     return (
-        "[0:a]pan=mono|c0=0.5*FL+0.5*FR,highpass=f=80,"
-        f"volume={settings.pseudo_original_gain}[orig];"
-        "[2:a]aformat=channel_layouts=stereo,asplit=2[acc_dry][acc_ref];"
+        f"{input_stream}aformat=channel_layouts=stereo,asplit=2[acc_dry][acc_ref];"
         f"[acc_ref]adelay={delay_left}|{delay_right},"
         f"volume={settings.pseudo_reflection_gain}[acc_er];"
         "[acc_dry][acc_er]amix=inputs=2:normalize=0,"
-        "pan=mono|c0=0.5*FL+0.5*FR,"
-        "equalizer=f=220:t=q:w=1.0:g=-0.8,"
-        "equalizer=f=4300:t=q:w=1.0:g=0.8,"
-        f"volume={settings.pseudo_accompaniment_gain}[acc];"
-        "[orig][acc]amerge=inputs=2[blend];"
-        f"[blend]pan=stereo|c0={settings.pseudo_left_original}*c0+{settings.pseudo_left_accompaniment}*c1"
-        f"|c1={settings.pseudo_right_original}*c0+{settings.pseudo_right_accompaniment}*c1,"
-        "alimiter=limit=0.95[a]"
+        "highpass=f=55,"
+        "equalizer=f=180:t=q:w=0.8:g=-1.2,"
+        "equalizer=f=3200:t=q:w=1.0:g=0.7,"
+        f"volume={settings.pseudo_accompaniment_gain},"
+        f"alimiter=limit=0.95[{output_label}];"
     )
 
 
@@ -198,6 +274,28 @@ def _prepare_accompaniment(stems_dir: Path, output_path: Path, stems: int) -> No
         str(output_path),
     ]
     _run_command(cmd)
+
+
+def _export_instrumental_track(
+    accompaniment: Path,
+    output_path: Path,
+    mix_mode: str,
+    settings: AppSettings,
+) -> None:
+    """Create the browser-playable companion track used by the player UI."""
+    command = ["ffmpeg", "-y", "-i", str(accompaniment)]
+    if (mix_mode or "").lower() == "pseudo-spatial":
+        processed_filter = build_pseudo_accompaniment_filter("[0:a]", settings, "processed_acc")
+        command.extend(
+            [
+                "-filter_complex",
+                processed_filter + "[processed_acc]volume=0.5[mastered_acc]",
+                "-map",
+                "[mastered_acc]",
+            ]
+        )
+    command.extend(["-c:a", "aac", "-b:a", "192k", str(output_path)])
+    _run_command(command)
 
 
 class KTVProcessor:
@@ -280,6 +378,7 @@ class KTVProcessor:
 
             temp_input = job_temp_dir / "input.mp4"
             temp_output = job_temp_dir / "output.mp4"
+            temp_instrumental = job_temp_dir / "instrumental.m4a"
 
             self.log("步驟 1/4: 下載影片...")
             cmd_dl = [
@@ -300,13 +399,16 @@ class KTVProcessor:
             vocals, accompaniment = self._separate_audio(temp_input, job_temp_dir, stems, mix_mode, device_pref)
 
             self._mix_audio(temp_input, vocals, accompaniment, temp_output, mix_mode)
+            _export_instrumental_track(accompaniment, temp_instrumental, mix_mode, self.settings)
 
             self.log(f"步驟 4/4: 儲存為 {safe_title}.mp4")
             final = self.settings.songs_dir / f"{safe_title}.mp4"
             if final.exists():
                 final = self.settings.songs_dir / f"{safe_title}_{job_id}.mp4"
+            final_instrumental = final.with_name(f"{final.stem}.instrumental.m4a")
 
             shutil.move(str(temp_output), str(final))
+            shutil.move(str(temp_instrumental), str(final_instrumental))
             self.log("✅ 製作完成！已自動同步至歌單。")
             return True
 
