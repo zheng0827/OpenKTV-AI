@@ -239,10 +239,11 @@ def build_demucs_command(
 def build_mix_filter(_mode: str, settings: AppSettings) -> str:
     return (
         # Preserve the separated vocal track exactly as Demucs produced it.
+        # Spatial processing is applied only to accompaniment.
         "[1:a]anull[vocals];"
-        # Spatial processing is applied only to accompaniment/backing track.
         + build_pseudo_accompaniment_filter("[2:a]", settings, "acc")
-        # Keep headroom stable to avoid re-triggering loudness control artifacts.
+        # Fixed headroom avoids a limiter changing the vocal when it is mixed
+        # with accompaniment. The companion track receives the same gain.
         + "[vocals][acc]amix=inputs=2:normalize=0,volume=0.5[a]"
     )
 
@@ -260,8 +261,7 @@ def build_pseudo_accompaniment_filter(input_stream: str, settings: AppSettings, 
         "equalizer=f=180:t=q:w=0.8:g=-1.2,"
         "equalizer=f=3200:t=q:w=1.0:g=0.7,"
         f"volume={settings.pseudo_backing_gain},"
-        "alimiter=limit=0.95"
-        f"[{output_label}];"
+        f"alimiter=limit=0.95[{output_label}];"
     )
 
 
@@ -466,6 +466,7 @@ class KTVProcessor:
                 alignment_python=self.settings.alignment_python or None,
             )
 
+
             self._mix_audio(temp_input, vocals, temp_backing_refilled, temp_output, mix_mode)
             _export_instrumental_track(temp_backing_refilled, temp_instrumental, mix_mode, self.settings)
 
@@ -476,8 +477,10 @@ class KTVProcessor:
             final_instrumental = final.with_name(f"{final.stem}.instrumental.m4a")
             final_vocals = final.with_name(f"{final.stem}.vocals.wav")
             final_lrc = final.with_name(f"{final.stem}.lrc")
+            final_backing_refilled  = final.with_name(f"{final.stem}.backing_refilled.lrc")
 
             shutil.move(str(temp_output), str(final))
+            shutil.move(str(temp_backing_refilled), str(final_backing_refilled))
             shutil.move(str(temp_instrumental), str(final_instrumental))
             shutil.move(str(temp_vocals), str(final_vocals))
             shutil.move(str(temp_lrc), str(final_lrc))
