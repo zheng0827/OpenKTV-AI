@@ -36,8 +36,10 @@
 6. **歌詞與索引**
    - 新增 `openktv_ai/lyrics_pipeline/` 專責處理：
      - faster-whisper 句級定位
+     - 可選擇 WhisperX 直轉錄（`KTV_ASR_BACKEND=whisperx`）或 `auto` 自動回退
      - 強制對齊 word-level（whisperx，可走獨立 python，支援自動偵測 `.venv-whisperx`）
      - 對白偵測與回填 backing track
+     - 產生 `<song>.dialogue_audit.json` 供檢查被過濾的歌詞行與對白段
      - 當外部歌詞與人聲匹配率過低時，自動 fallback 為 WhisperX 轉寫歌詞，避免錯誤回填人聲到伴奏
    - 產生 `ktv-lrc` 格式 `.lrc`，供播放器字幕特效使用。
    - 曲庫索引 CSV：`library_index.csv`。
@@ -78,6 +80,7 @@ python main.py
 - `KTV_DEMUCS_MODEL=htdemucs_ft`
 - `KTV_MIX_MODE=pseudo-spatial`（固定策略）
 - `KTV_WHISPER_MODEL=large-v3`
+- `KTV_ASR_BACKEND=auto|whisperx`
 - `KTV_WHISPER_COMPUTE_TYPE=auto`
 - `KTV_WHISPER_LANGUAGE=zh`
 - `KTV_ALIGNMENT_PYTHON`（選填，指定 whisperx 獨立環境 python）
