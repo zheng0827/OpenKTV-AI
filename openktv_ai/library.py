@@ -12,7 +12,7 @@ from pathlib import Path
 TIMESTAMP_RE = re.compile(r"\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]|^[%$&](\d+(?:\.\d+)?)")
 LRC_INLINE_TIMESTAMP_RE = re.compile(r"\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\]")
 SYMBOL_NOISE_LINE_RE = re.compile(r"^[^0-9A-Za-z\u3400-\u9fff]+$")
-REPEATED_SYMBOL_RE = re.compile(r"([^\w\s\u3400-\u9fff])\1{3,}")
+REPEATED_SYMBOL_RE = re.compile(r"([^\w\s\u3400-\u9fff])\1{2,}")
 
 
 def parse_first_lyric_time(lrc_path: Path) -> float | None:
