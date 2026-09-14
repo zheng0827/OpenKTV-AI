@@ -30,6 +30,15 @@ class LyricsPipelineTests(unittest.TestCase):
         self.assertLessEqual(aligned[0].end, aligned[1].start)
         self.assertLessEqual(aligned[1].end, aligned[2].start)
 
+    def test_align_lyrics_prefix_pending_lines_stay_near_first_anchor(self):
+        lines = ["前面未對上", "第二句"]
+        segments = [{"start": 20.0, "end": 21.0, "text": "第二句", "words": []}]
+        aligned = align_lyrics(lines, segments)
+        self.assertEqual([line.text for line in aligned], lines)
+        self.assertGreater(aligned[0].start, 0.0)
+        self.assertGreaterEqual(aligned[0].start, aligned[1].start - 8.0)
+        self.assertLessEqual(aligned[0].end, aligned[1].start)
+
     def test_detect_dialogue_non_overlap(self):
         aligned = [LyricLine(start=1.0, end=2.0, text="歌詞", words=[])]
         segments = [

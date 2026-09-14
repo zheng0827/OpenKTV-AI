@@ -94,8 +94,9 @@ function updateMode(mode) {
     if (!audioReady) return;
     const now = audioCtx.currentTime;
     if (mode === 'instrumental') {
-        originalGain.gain.setTargetAtTime(0.25, now, 0.08);
-        instGain.gain.setTargetAtTime(1.0, now, 0.08);
+        const hasInstrumental = instrumentalAvailable && Boolean(instrumental.src);
+        originalGain.gain.setTargetAtTime(hasInstrumental ? 0.0 : 1.0, now, 0.08);
+        instGain.gain.setTargetAtTime(hasInstrumental ? 1.0 : 0.0, now, 0.08);
         if (instrumentalAvailable && !video.paused) instrumental.play().catch(() => {});
         overlay.innerText = '🚫 伴奏模式';
     } else {
@@ -191,20 +192,19 @@ function updateLyrics(now) {
 
     lineA = null;
     lineB = null;
+    let activeIndex = -1;
     for (let i = 0; i < lyricLines.length; i++) {
         const line = lyricLines[i];
         if (now >= line.start && now <= line.end + 0.2) {
-            lineA = line;
-            lineB = lyricLines[i + 1] || null;
-            break;
-        }
-        if (now < line.start) {
-            lineA = line;
-            lineB = lyricLines[i + 1] || null;
+            activeIndex = i;
             break;
         }
     }
-    if (!lineA) {
+
+    if (activeIndex >= 0) {
+        lineA = lyricLines[activeIndex];
+        lineB = lyricLines[activeIndex + 1] || null;
+    } else if (now > lyricLines[lyricLines.length - 1].end + 0.2) {
         lineA = lyricLines[lyricLines.length - 1] || null;
         lineB = null;
     }

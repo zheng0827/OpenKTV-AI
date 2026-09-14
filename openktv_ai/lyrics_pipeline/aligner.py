@@ -258,6 +258,14 @@ def _append_interpolated_lines(out: list[LyricLine], texts: list[str], start: fl
         out.append(_build_line(text, line_start, line_end))
 
 
+def _estimate_prefix_start(anchor_start: float, line_count: int) -> float:
+    """Place unmatched prefix lines shortly before the first reliable anchor."""
+    if line_count <= 0:
+        return max(0.0, anchor_start)
+    lead_seconds = min(8.0, max(0.8, line_count * 2.5))
+    return max(0.0, anchor_start - lead_seconds)
+
+
 def interpolate_words(text: str, start: float, end: float) -> list[dict[str, Any]]:
     pieces = tokenize(text)
     if not pieces:
@@ -275,7 +283,8 @@ def align_lyrics(lyrics_lines: list[str], segments: list[dict[str, Any]]) -> lis
     out: list[LyricLine] = []
     search_idx = 0
     pending_lines: list[str] = []
-    previous_end = 0.0
+    previous_end: float | None = None
+    has_anchor = False
     for lyric in lyrics_lines:
         idx, score = find_segment(lyric, segments, search_idx)
         if idx is None:
@@ -287,7 +296,9 @@ def align_lyrics(lyrics_lines: list[str], segments: list[dict[str, Any]]) -> lis
             continue
 
         if pending_lines:
-            _append_interpolated_lines(out, pending_lines, previous_end, float(segment["start"]))
+            anchor_start = float(segment["start"])
+            pending_start = previous_end if has_anchor and previous_end is not None else _estimate_prefix_start(anchor_start, len(pending_lines))
+            _append_interpolated_lines(out, pending_lines, pending_start, anchor_start)
             pending_lines = []
 
         words = segment.get("words", [])
@@ -299,10 +310,20 @@ def align_lyrics(lyrics_lines: list[str], segments: list[dict[str, Any]]) -> lis
         out.append(LyricLine(start=float(segment["start"]), end=float(segment["end"]), text=traditional(lyric), words=matched_words))
         search_idx = idx + 1
         previous_end = float(segment["end"])
+        has_anchor = True
 
     if pending_lines:
-        tail_end = float(segments[-1]["end"]) if segments else previous_end + max(1.0, len(pending_lines))
-        _append_interpolated_lines(out, pending_lines, previous_end, tail_end)
+        if has_anchor and previous_end is not None:
+            tail_start = previous_end
+            tail_end = float(segments[-1]["end"]) if segments else previous_end + max(1.0, len(pending_lines))
+        elif segments:
+            first_start = float(segments[0]["start"])
+            tail_start = _estimate_prefix_start(first_start, len(pending_lines))
+            tail_end = max(first_start, tail_start + 0.001 * len(pending_lines))
+        else:
+            tail_start = 0.0
+            tail_end = max(1.0, len(pending_lines))
+        _append_interpolated_lines(out, pending_lines, tail_start, tail_end)
     return out
 
 
