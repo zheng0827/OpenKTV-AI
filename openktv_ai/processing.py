@@ -1,5 +1,59 @@
 from __future__ import annotations
 
+# Windows NVIDIA CUDA DLL 自動掛載
+import os
+import sys
+import site
+import subprocess
+from pathlib import Path
+
+def inject_nvidia_dlls():
+    search_paths = []
+    try:
+        search_paths.extend(site.getsitepackages())
+    except Exception:
+        pass
+
+    try:
+        search_paths.append(site.getusersitepackages())
+    except Exception:
+        pass
+
+    search_paths.append(sys.prefix)
+
+    seen = set()
+
+    for base_path in search_paths:
+        nvidia_dir = os.path.join(base_path, "nvidia")
+        if not os.path.isdir(nvidia_dir):
+            continue
+        for root, dirs, files in os.walk(nvidia_dir):
+            if os.path.basename(root).lower() != "bin":
+                continue
+            root = os.path.abspath(root)
+            if root in seen:
+                continue
+            seen.add(root)
+            
+            current_path = os.environ.get("PATH", "")
+
+            if root not in current_path.split(os.pathsep):
+                os.environ["PATH"] = root +os.pathsep +current_path
+
+            if hasattr(os, "add_dll_directory"):
+                try:
+                    os.add_dll_directory(root)
+                except Exception:
+                    pass
+
+            if "cublas64_12.dll" in files:
+                print(f"✅ 找到 CUDA DLL：{root}")
+
+    print("✅ NVIDIA DLL 搜尋路徑初始化完成")
+
+if "--alignment-worker" not in sys.argv:
+    inject_nvidia_dlls()
+
 import ast
 import os
 import shutil
