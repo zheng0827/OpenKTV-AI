@@ -216,13 +216,16 @@ def apply_forced_alignment(
                 "--alignment-output",
                 str(output_json),
             ]
-            completed = subprocess.run(command, check=False, capture_output=True, text=True)
-            if completed.returncode == 0 and output_json.exists():
-                try:
-                    aligned_segments = json.loads(output_json.read_text(encoding="utf-8"))
-                    return _merge_alignment(base_segments, aligned_segments)
-                except Exception:
-                    pass
+            try:
+                completed = subprocess.run(command, check=False, capture_output=True, text=True)
+                if completed.returncode == 0 and output_json.exists():
+                    try:
+                        aligned_segments = json.loads(output_json.read_text(encoding="utf-8"))
+                        return _merge_alignment(base_segments, aligned_segments)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
     try:
         import whisperx  # pylint: disable=import-outside-toplevel
