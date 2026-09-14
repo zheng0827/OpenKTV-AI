@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KTV Queue</title>
+    <style>
+        body { margin: 0; padding: 12px; background: #111; color: #fff; font-family: Arial, sans-serif; }
+        .top { display: flex; gap: 8px; margin-bottom: 10px; }
+        .link { flex: 1; text-align: center; text-decoration: none; color: #fff; background: #37474f; border-radius: 8px; padding: 10px; }
+        .panel { background: #1f1f1f; border-radius: 10px; padding: 10px; margin-bottom: 10px; }
+        .songs, .queue { list-style: none; margin: 0; padding: 0; }
+        li { background: #2b2b2b; padding: 8px; border-radius: 8px; margin: 6px 0; display: flex; gap: 6px; align-items: center; }
+        li.sung { opacity: 0.45; }
+        .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        button { border: 0; border-radius: 999px; padding: 6px 10px; color: #fff; }
+        .add { background: #00897b; }
+        .next { background: #1976d2; }
+        .remove { background: #c62828; }
+        input { width: 100%; box-sizing: border-box; background: #333; border: 1px solid #555; color: #fff; border-radius: 8px; padding: 10px; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+</head>
+<body>
+    <div class="top">
+        <a class="link" href="/remote">📱 Remote</a>
+        <a class="link" href="/admin">⚙️ Admin</a>
+    </div>
+
+    <div class="panel">
+        <h3>目前與後續佇列</h3>
+        <button class="next" id="skipIntroBtn" style="display:none;margin-bottom:8px;" onclick="socket.emit('skip_intro')">⏩ 跳過前奏</button>
+        <ul id="queue" class="queue"></ul>
+    </div>
+
+    <div class="panel">
+        <h3>點歌</h3>
+        <input id="search" type="text" placeholder="搜尋歌曲" oninput="renderSongs()">
+        <ul id="songs" class="songs"></ul>
+    </div>
+
+    <script>
+        const socket = io({ query: { role: 'queue' } });
+        const queueEl = document.getElementById('queue');
+        const songsEl = document.getElementById('songs');
+        let songs = [];
+
+        function addSong(filename) { socket.emit('add_to_queue', { filename, title: filename }); }
+        function addNext(filename) { socket.emit('queue_insert_next', { filename, title: filename }); }
+        function removeItem(queueId) { socket.emit('queue_remove', { queue_id: queueId }); }
+
+        function renderSongs() {
+            const key = document.getElementById('search').value.toLowerCase();
+            songsEl.innerHTML = '';
+            songs.filter(x => x.toLowerCase().includes(key)).forEach(song => {
+                const li = document.createElement('li');
+                li.innerHTML = `<span class="name">${song}</span>
+                                <button class="add" onclick="addSong('${song.replace(/'/g, "\\'")}')">點播</button>
+                                <button class="next" onclick="addNext('${song.replace(/'/g, "\\'")}')">插播</button>`;
+                songsEl.appendChild(li);
+            });
+        }
+
+        function renderQueue(items) {
+            queueEl.innerHTML = '';
+            if (!items || !items.length) {
+                queueEl.innerHTML = '<li><span class="name">(目前無歌曲)</span></li>';
+                return;
+            }
+            items.forEach(item => {
+                const li = document.createElement('li');
+                if (item.state === 'sung') li.classList.add('sung');
+                const titlePrefix = item.state === 'playing' ? '🎤 目前播放' : item.state === 'sung' ? '✅ 已唱' : '⏭ 待播';
+                li.innerHTML = `<span class="name">${titlePrefix}：${item.title || item.filename}</span>` +
+                               (item.state === 'queued' ? `<button class="remove" onclick="removeItem(${item.queue_id})">刪除</button>` : '');
+                queueEl.appendChild(li);
+            });
+        }
+
+        function loadSongs() {
+            fetch('/api/list').then(r => r.json()).then(data => {
+                songs = data;
+                renderSongs();
+            });
+        }
+
+        socket.on('playback_snapshot', (snapshot) => renderQueue(snapshot.queue || []));
+        socket.on('playback_snapshot', (snapshot) => {
+            const current = Number(snapshot.position || 0);
+            const hideAt = Number(snapshot.intro_skip_hide_after);
+            const skipTo = Number(snapshot.intro_skip_to);
+            const show = Number.isFinite(hideAt) && Number.isFinite(skipTo) && current < hideAt && !snapshot.intro_skip_used;
+            document.getElementById('skipIntroBtn').style.display = show ? 'inline-block' : 'none';
+        });
+        socket.on('update_queue_state', renderQueue);
+        socket.on('refresh_list', loadSongs);
+
+        loadSongs();
+    </script>
+</body>
+</html>

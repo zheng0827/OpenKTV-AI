@@ -1,156 +1,101 @@
-# 🎤 OpenKTV-AI
+# OpenKTV-AI
 
-OpenKTV-AI 是一個區網 KTV 系統：輸入 YouTube 連結後，會自動下載影片、抽取音訊、分離人聲/伴奏，再輸出可播放的 KTV 影片。
+本分支 (`copilot/migrate-audio-separation-to-demucs`) 目前採用 **Demucs + 伺服器權威播放同步**。
 
-本次版本重點：
-- 音訊分離核心由 **Spleeter 改為 Meta Demucs**（預設 `htdemucs_ft`）
-- Flask 升級為較新版，並調整為 **app factory + config 分層**
-- 混音由舊版硬分改為可切換策略（含 `legacy` 相容模式）
+## 核心變更
+
+1. **播放權限模型**
+   - `/player` 僅負責唯讀播放顯示，不允許本地控制成為權威。
+   - 控制操作僅允許 `remote / queue / admin / combo` 角色發送。
+   - 伺服器以 `playback_snapshot`（含 `play/pause/seek/position/server_time`）持續同步所有裝置。
+
+2. **Queue 重構**
+   - 新增 `/queue` 頁面：點播、插播、刪除、目前播放與後續清單、已唱灰化。
+   - `/remote` 新增跳轉 Queue 按鈕。
+   - `/combo` 改為左側嵌入 player、右側可切 `remote / queue`。
+
+3. **前奏跳過（Intro Skip）**
+   - 由伺服器從 `.ktv.lrc` / `.lrc` 解析第一句時間，自動計算「第一句前 N 秒」（預設 5 秒）。
+   - 僅在可用時間窗內顯示按鈕，超過第一句時間自動隱藏。
+
+4. **Demucs 音訊管線**
+   - 支援 `2 stems / 4 stems`，預設改為 `4 stems`。
+   - 保留輸出 `vocals.wav`（`<song>.vocals.wav`）。
+   - 混音策略固定為 `pseudo-spatial`：
+     - vocals 置中
+     - 不對 vocals 加 EQ
+     - backing track 才套用輕量偽空間（delay/early reflections/reverb）
+   - 另輸出 `<song>.instrumental.m4a` 供伴奏切換。
+
+5. **Admin 下載流程強化**
+   - 支援單曲與 playlist 連結（含 playlist 預覽/勾選 modal）。
+   - 任務進度回報（逐首、重試次數、成功/失敗統計）。
+   - 下載失敗自動重試（可設定重試次數）。
+
+6. **歌詞與索引（最小可行基礎）**
+   - 新增曲庫索引 CSV：`library_index.csv`。
+   - 新增 ktv-lrc 範本生成與 lrclib 嘗試抓詞（作為字幕/前奏跳過基礎資料）。
 
 ---
 
-## 1) 安裝
+## 安裝
 
 ```bash
 pip install -r requirements.txt
 ```
 
-> PyTorch / torchaudio：
-> - CPU：可直接安裝 requirements。
-> - CUDA：請依官方頁面安裝對應 CUDA wheel（版本策略：`torch, torchaudio >=2.4,<2.7`）。
+> CUDA 請依 PyTorch 官方安裝對應 wheel，`KTV_DEVICE=auto` 會優先 CUDA，不可用時 fallback CPU。
 
-以 RTX 5060 8GB Laptop，CUDA Version 13.2 為例
-```bash
-pip install --pre torch torchaudio --index-url https://download.pytorch.org/whl/nightly/cu132
-```
 ---
 
-## 2) 啟動
+## 啟動
 
 ```bash
 python main.py
 ```
 
-啟動前會先檢查 Demucs 權重；若本機沒有對應模型快取，系統會自動下載後再啟動服務。
+啟動前會檢查並下載 Demucs 權重（若尚未快取）。
 
-啟動後可使用：
-- `/player` 播放端
-- `/remote` 遙控端
-- `/admin` 後台（下載/分離/混音選項）
-- `/combo` 一體機
-
-### 歌詞強制對齊（可選）
-
-`karaoke_faster_whisper.py` 的 WhisperX 強制對齊會在獨立 Python
-環境執行，避免與 Demucs 的 Torch 版本衝突。主環境不要安裝 WhisperX：
-
-```powershell
-python -m venv .venv-whisperx
-.\.venv-whisperx\Scripts\pip install -r requirements-whisperx.txt
-python karaoke_faster_whisper.py vocals.wav --lyrics lyric.txt `
-  --alignment-python .\.venv-whisperx\Scripts\python.exe
-```
-
-若未指定 `--alignment-python`，程式會自動尋找 `.venv-whisperx` 或
-`venv-whisperx`；也可以使用 `--no-forced-alignment` 暫時停用強制對齊。
+可用頁面：
+- `/player`
+- `/remote`
+- `/queue`
+- `/admin`
+- `/combo`
 
 ---
 
-## 3) 設定（環境變數）
+## 主要環境變數
 
-### 分離核心
-- `KTV_DEMUCS_MODEL`：預設 `htdemucs_ft`
-- `KTV_SEPARATOR_STEMS`：`2`（預設）或 `4`
-- `KTV_DEVICE`：`auto`（預設，優先 CUDA）、`cuda`、`cpu`
+- `KTV_SEPARATOR_STEMS=4|2`（預設 `4`）
+- `KTV_DEVICE=auto|cuda|cpu`
+- `KTV_DEMUCS_MODEL=htdemucs_ft`
+- `KTV_MIX_MODE=pseudo-spatial`（固定策略）
+- `KTV_INTRO_SKIP_LEAD_SECONDS=5`
+- `KTV_DOWNLOAD_RETRY_COUNT=2`
+- `KTV_LIBRARY_INDEX_PATH`（預設 `ktv_songs/library_index.csv`）
 
-### 混音策略
-- `KTV_MIX_MODE`：`pseudo-spatial`（預設）、`stereo-balance`、`legacy`
-
-`pseudo-spatial` 可調參數（保守預設）：
+Pseudo-spatial 參數：
 - `KTV_PSEUDO_DELAY_MS`
 - `KTV_PSEUDO_REFLECTION_GAIN`
-- `KTV_PSEUDO_ORIGINAL_GAIN`
-- `KTV_PSEUDO_ACCOMPANIMENT_GAIN`
-- `KTV_PSEUDO_LEFT_ORIGINAL`
-- `KTV_PSEUDO_LEFT_ACCOMPANIMENT`
-- `KTV_PSEUDO_RIGHT_ORIGINAL`
-- `KTV_PSEUDO_RIGHT_ACCOMPANIMENT`
-
-`stereo-balance` 可調參數：
-- `KTV_BALANCE_LEFT_ORIGINAL`
-- `KTV_BALANCE_RIGHT_ORIGINAL`
-
-### 路徑與伺服器
-- `KTV_SONGS_DIR`
-- `KTV_TEMP_DIR`
-- `KTV_TEMPLATES_DIR`
-- `KTV_FFMPEG_DIR`
-- `KTV_HOST`
-- `KTV_PORT`
+- `KTV_PSEUDO_REVERB_ROOM`
+- `KTV_PSEUDO_REVERB_DAMPING`
+- `KTV_PSEUDO_BACKING_GAIN`
 
 ---
 
-## 4) 分離與輸出相容性
+## 驗收建議（分階段）
 
-### 流程相容
-仍維持原本流程：
-1. 下載影片
-2. Demucs 分離
-3. FFmpeg 混音
-4. 輸出 mp4 與 m4a 到曲庫
+1. **播放同步 + Queue + 前奏跳過**
+   - 開三個裝置：`/player`、`/remote`、`/queue`
+   - 從 remote 點歌，測試 pause/seek/cut 是否同步
+   - 測試 skip intro 按鈕是否在第一句後消失
 
-### 輸出路徑/命名
-- 最終輸出仍是 `ktv_songs/<歌名>.mp4` 與 `ktv_songs/<歌名>.m4a`
-- 若重名仍會自動加上 job id 後綴
+2. **Demucs / 混音**
+   - 分別跑 `2 stems` 與 `4 stems`
+   - 確認輸出 `.mp4 + .instrumental.m4a + .vocals.wav`
+   - 切換 original/instrumental 檢查平滑度
 
-### stems 相容層
-- `2 stems`：使用 `vocals.wav + no_vocals.wav`
-- `4 stems`：自動將 `drums+bass+other` 混成 `accompaniment.wav` 後續沿用既有流程
-
----
-
-## 5) 混音模式說明
-
-- `legacy`：舊行為（L: 原曲、R: 伴奏）                                              - **預計移除**
-- `stereo-balance`：左右都保留兩者，只調整權重，聽感較溫和                            - **預計移除**
-- `pseudo-spatial`（新預設）：小延遲 + 輕 EQ + 少量 early reflection + 保守聲像混合
-
----
-
-## 6) 驗收步驟（手動）
-
-### A. 2 stems（預設）
-1. 到 `/admin` 貼 YouTube 連結
-2. 選 `2 stems`
-3. 開始製作，確認成功輸出
-
-### B. 4 stems
-1. 到 `/admin` 選 `4 stems`
-2. 其他設定不變
-3. 確認可成功輸出
-
-### C. 三種混音策略
-在 `/admin` 依序選 `legacy` / `stereo-balance` / `pseudo-spatial`，分別產出歌曲並聆聽差異。
-
-### D. CUDA / CPU 切換
-- `KTV_DEVICE=auto`：有 GPU 時用 CUDA，否則自動 fallback CPU
-- `KTV_DEVICE=cuda`：若 CUDA 不可用，日誌顯示警告並 fallback CPU
-- `KTV_DEVICE=cpu`：固定 CPU
-
----
-
-## 7) Flask 架構調整
-
-- `main.py`：啟動 GUI 與 server thread
-- `openktv_ai/config.py`：設定集中管理
-- `openktv_ai/web.py`：app factory、Blueprint routes、SocketIO handlers
-- `openktv_ai/processing.py`：下載/分離/混音核心流程
-
----
-
-## 8) TO DO LIST
-- 可以輸入 YT playlist 連結並選取多個曲目，而不是一首一首歌慢慢下載
-- 去抓同步或整篇的完整歌詞，搭配語音辨識AI模型，製作出類似 KTV 以秒為單位的歌詞字幕
-- 改善串流模式
-
-既有端點路徑維持不變，不需修改前端連結。
+3. **歌詞資料與索引**
+   - 處理歌曲後確認 `library_index.csv` 更新
+   - 檢查 `*.ktv.lrc` 是否建立

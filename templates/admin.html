@@ -2,135 +2,206 @@
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KTV 系統管理後台</title>
+    <title>KTV Admin</title>
     <style>
-        body { background: #f4f4f9; color: #333; font-family: sans-serif; padding: 20px; max-width: 700px; margin: auto; }
-        .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
-        h3 { margin-top: 0; color: #333; }
-        input, select { width: 100%; padding: 10px; margin-bottom: 12px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px; }
-        button { padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; color: white; width: 100%; margin-bottom: 10px; }
-
-        .btn-dl { background: #FF9800; }
-        .btn-update { background: #607D8B; }
-        .btn-dl:disabled, .btn-update:disabled { background: #ccc; cursor: not-allowed; }
-        textarea { width: 100%; height: 220px; background: #222; color: #0f0; padding: 10px; box-sizing: border-box; font-family: monospace; border-radius: 5px; resize: none; }
-
-        .nav-bar { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
-        .nav-btn { flex: 1; text-align: center; padding: 12px 10px; text-decoration: none; border-radius: 8px; font-weight: bold; color: white; font-size: 14px; min-width: 100px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s;}
-        .nav-btn:active { transform: scale(0.95); }
-        .nav-remote { background: #E91E63; }
-        .nav-console { background: #9C27B0; }
-        .nav-player { background: #2196F3; }
-
-        .tips { margin: 0; padding-left: 18px; color: #444; font-size: 14px; }
-        .tips li { margin-bottom: 5px; }
+        body { background: #f4f4f9; color: #333; font-family: sans-serif; padding: 20px; max-width: 820px; margin: auto; }
+        .card { background: white; padding: 18px; border-radius: 10px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        input, select, button, textarea { width: 100%; box-sizing: border-box; margin-top: 8px; }
+        input, select { border: 1px solid #ccc; border-radius: 6px; padding: 9px; }
+        button { border: 0; border-radius: 6px; padding: 10px; color: #fff; font-weight: 700; cursor: pointer; }
+        .primary { background: #f57c00; }
+        .secondary { background: #546e7a; }
+        textarea { border-radius: 6px; background: #111; color: #00e676; min-height: 180px; padding: 10px; }
+        .links { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        .links a { text-decoration: none; text-align: center; background: #455a64; color: #fff; padding: 9px; border-radius: 6px; }
+        .modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.45); }
+        .modal .inner { width: min(760px, 95vw); max-height: 80vh; overflow: auto; background: #fff; border-radius: 10px; padding: 14px; }
+        .playlist-item { display: flex; gap: 10px; margin-bottom: 8px; padding: 8px; border: 1px solid #ddd; border-radius: 8px; }
+        .muted { color: #777; font-size: 13px; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 </head>
 <body>
-
-    <div class="nav-bar">
-        <a href="/remote" class="nav-btn nav-remote">📱 遙控器</a>
-        <a href="/combo" class="nav-btn nav-combo">🖥️ 雙合一控制台</a>
-        <a href="/player" class="nav-btn nav-player">📺 播放端</a>
+    <div class="links">
+        <a href="/player">播放端</a>
+        <a href="/remote">遙控端</a>
+        <a href="/queue">Queue 管理</a>
     </div>
 
     <div class="card">
-        <h3>📥 新增 KTV 歌曲</h3>
-        <label>1. YouTube 網址:</label>
-        <input type="text" id="yt_url" placeholder="https://www.youtube.com/watch?v=...">
-        <label>2. 設定歌名 (必填):</label>
-        <input type="text" id="yt_title" placeholder="例如：告五人 - 披星戴月的想你">
+        <h3>新增歌曲 / Playlist</h3>
+        <label>YouTube 連結（單曲或 playlist）</label>
+        <input id="yt_url" placeholder="https://www.youtube.com/watch?v=... 或 ...&list=...">
 
-        <label>3. Demucs stems:</label>
+        <label>自訂標題（單曲時可填）</label>
+        <input id="yt_title" placeholder="歌手 - 歌名">
+
+        <label>Demucs stems</label>
         <select id="stems_mode">
-            <option value="2">2 stems（vocals + accompaniment）</option>
-            <option value="4">4 stems（vocals/drums/bass/other）</option>
+            <option value="4">4 stems（預設）</option>
+            <option value="2">2 stems</option>
         </select>
 
-        <label>4. 混音策略:</label>
-        <select id="mix_mode">
-            <option value="pseudo-spatial">pseudo-spatial（預設，較自然）</option>
-            <option value="stereo-balance">stereo-balance（溫和左右平衡）</option>
-            <option value="legacy">legacy（舊版硬切）</option>
-        </select>
-
-        <label>5. 運算裝置:</label>
+        <label>Device</label>
         <select id="device_mode">
-            <option value="auto">auto（優先 CUDA，不可用自動改 CPU）</option>
-            <option value="cuda">cuda（指定 CUDA，不可用自動改 CPU）</option>
-            <option value="cpu">cpu（僅使用 CPU）</option>
+            <option value="auto">auto (CUDA→CPU fallback)</option>
+            <option value="cuda">cuda</option>
+            <option value="cpu">cpu</option>
         </select>
 
-        <button id="btn_dl" class="btn-dl" onclick="startDownload()">開始製作 (Demucs)</button>
+        <button id="btnPreview" class="secondary" onclick="previewPlaylist()">預覽 Playlist 曲目</button>
+        <button id="btnStart" class="primary" onclick="startDownload()">開始處理</button>
+        <p class="muted">混音固定 pseudo-spatial；lyrics 會嘗試建立 ktv-lrc 範本並套用可用的 lrclib 內容。</p>
     </div>
 
     <div class="card">
-        <h3>🎛️ 混音策略說明</h3>
-        <ul class="tips">
-            <li><b>legacy</b>：保持舊版「L:原曲 / R:伴奏」硬切相容行為。</li>
-            <li><b>stereo-balance</b>：左右聲道都保留原曲與伴奏，只是權重不同。</li>
-            <li><b>pseudo-spatial</b>：加入保守延遲、輕量 EQ 與反射感，聽感更自然。</li>
-        </ul>
+        <h3>任務進度</h3>
+        <div id="progress">尚未開始</div>
     </div>
 
     <div class="card">
-        <h3>⚙️ 系統維護</h3>
-        <button id="btn_update" class="btn-update" onclick="updateYtDlp()">🔄 手動更新 yt-dlp 核心</button>
-    </div>
-
-    <div class="card">
-        <h3>📝 系統日誌</h3>
+        <h3>系統日誌</h3>
         <textarea id="log" readonly></textarea>
+        <button class="secondary" onclick="socket.emit('update_ytdlp')" style="margin-top:8px;">更新 yt-dlp</button>
+    </div>
+
+    <div id="playlistModal" class="modal">
+        <div class="inner">
+            <h3>Playlist 選歌</h3>
+            <div id="playlistItems"></div>
+            <button class="primary" onclick="confirmPlaylistSelection()">使用勾選曲目</button>
+            <button class="secondary" onclick="closeModal('playlistModal')">取消</button>
+        </div>
+    </div>
+
+    <div id="lyricsModal" class="modal">
+        <div class="inner">
+            <h3>歌詞資訊確認</h3>
+            <label>歌曲名稱</label>
+            <input id="lyricSongName">
+            <label>歌手</label>
+            <input id="lyricSinger">
+            <button class="primary" onclick="confirmSingleWithLyrics()">確認並開始</button>
+            <button class="secondary" onclick="closeModal('lyricsModal')">取消</button>
+        </div>
     </div>
 
     <script>
-        const socket = io();
+        const socket = io({ query: { role: 'admin' } });
         const logArea = document.getElementById('log');
-        const btnDl = document.getElementById('btn_dl');
-        const btnUpdate = document.getElementById('btn_update');
+        let playlistSelection = [];
+        let pendingSingle = null;
 
-        socket.on('admin_log', (data) => {
-            logArea.value += data.msg + "\n";
-            logArea.scrollTop = logArea.scrollHeight;
-        });
+        function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+        function openModal(id) { document.getElementById(id).style.display = 'flex'; }
 
-        socket.on('task_status', (data) => {
-            if(data.status === 'idle') {
-                btnDl.disabled = false;
-                btnDl.innerText = "開始製作 (Demucs)";
-                btnUpdate.disabled = false;
-                document.getElementById('yt_url').value = '';
-                document.getElementById('yt_title').value = '';
-            } else if (data.status === 'busy') {
-                btnDl.disabled = true;
-                btnDl.innerText = "製作中...請稍候";
-                btnUpdate.disabled = true;
+        function isPlaylistUrl(url) {
+            try {
+                const parsed = new URL(url);
+                return parsed.searchParams.has('list') || parsed.pathname.includes('/playlist');
+            } catch (_) {
+                return false;
             }
-        });
+        }
 
-        function startDownload() {
+        async function previewPlaylist() {
             const url = document.getElementById('yt_url').value.trim();
-            const title = document.getElementById('yt_title').value.trim();
-            if(!url || !title) {
-                alert("網址與歌名皆為必填！");
+            if (!url || !isPlaylistUrl(url)) {
+                alert('請先輸入 playlist 連結');
                 return;
             }
+            const resp = await fetch(`/api/playlist_preview?url=${encodeURIComponent(url)}`);
+            const data = await resp.json();
+            if (!data.ok) {
+                alert(data.error || '讀取失敗');
+                return;
+            }
+            const items = document.getElementById('playlistItems');
+            items.innerHTML = '';
+            data.entries.forEach((entry, idx) => {
+                const row = document.createElement('div');
+                row.className = 'playlist-item';
+                row.innerHTML = `<input type="checkbox" id="pl_${idx}" checked>
+                                 <label for="pl_${idx}" style="flex:1;">${entry.title}</label>`;
+                row.dataset.payload = JSON.stringify(entry);
+                items.appendChild(row);
+            });
+            openModal('playlistModal');
+        }
+
+        function confirmPlaylistSelection() {
+            playlistSelection = [];
+            document.querySelectorAll('#playlistItems .playlist-item').forEach((row, idx) => {
+                const checked = row.querySelector('input').checked;
+                if (checked) playlistSelection.push(JSON.parse(row.dataset.payload));
+            });
+            closeModal('playlistModal');
+            startDownload(true);
+        }
+
+        function splitArtistTitle(text) {
+            if (!text) return { singer: '', song: '' };
+            const part = text.split(' - ');
+            if (part.length > 1) return { singer: part[0].trim(), song: part.slice(1).join(' - ').trim() };
+            return { singer: '', song: text.trim() };
+        }
+
+        function startDownload(fromPlaylistSelection = false) {
+            const url = document.getElementById('yt_url').value.trim();
+            const title = document.getElementById('yt_title').value.trim();
+            if (!url) { alert('請輸入連結'); return; }
+
+            if (!fromPlaylistSelection && !isPlaylistUrl(url)) {
+                pendingSingle = { url, title };
+                const info = splitArtistTitle(title);
+                document.getElementById('lyricSongName').value = info.song;
+                document.getElementById('lyricSinger').value = info.singer;
+                openModal('lyricsModal');
+                return;
+            }
+
+            emitStart(url, title, fromPlaylistSelection ? playlistSelection : null);
+        }
+
+        function confirmSingleWithLyrics() {
+            if (!pendingSingle) return;
+            const singer = document.getElementById('lyricSinger').value.trim();
+            const song = document.getElementById('lyricSongName').value.trim();
+            const mergedTitle = singer ? `${singer} - ${song}` : song;
+            closeModal('lyricsModal');
+            emitStart(pendingSingle.url, mergedTitle || pendingSingle.title, null);
+            pendingSingle = null;
+        }
+
+        function emitStart(url, title, playlistEntries) {
             socket.emit('start_download', {
                 url,
                 title,
                 stems: document.getElementById('stems_mode').value,
-                mix_mode: document.getElementById('mix_mode').value,
                 device: document.getElementById('device_mode').value,
+                playlist_entries: playlistEntries,
             });
         }
 
-        function updateYtDlp() {
-            if(confirm("確定要更新 yt-dlp 嗎？這需要幾秒鐘的時間。")) {
-                btnUpdate.disabled = true;
-                socket.emit('update_ytdlp');
+        socket.on('admin_log', ({ msg }) => {
+            logArea.value += `${msg}\n`;
+            logArea.scrollTop = logArea.scrollHeight;
+        });
+
+        socket.on('task_status', ({ status }) => {
+            const disabled = status === 'busy';
+            document.getElementById('btnStart').disabled = disabled;
+            document.getElementById('btnPreview').disabled = disabled;
+        });
+
+        socket.on('task_progress', (data) => {
+            const area = document.getElementById('progress');
+            if (data.phase === 'done') {
+                area.innerText = `完成：成功 ${data.success}/${data.total}，失敗 ${data.failed.length}`;
+                return;
             }
-        }
+            area.innerText = `處理中 ${data.current}/${data.total}：${data.title}（第 ${data.attempt} 次）`;
+        });
     </script>
 </body>
 </html>

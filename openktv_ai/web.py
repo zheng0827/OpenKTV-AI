@@ -6,13 +6,18 @@ import socket
 import subprocess
 import threading
 import time
+from pathlib import Path
 from typing import Callable
+from urllib.parse import parse_qs, urlparse
 
-from flask import Blueprint, Flask, current_app, render_template, send_from_directory
+from flask import Blueprint, Flask, current_app, render_template, request, send_from_directory
 from flask_socketio import SocketIO, emit
 
 from .config import AppSettings, load_settings
+from .library import fetch_lrclib_lyrics, find_intro_skip_seconds, update_library_index, write_ktv_lrc_template
 from .processing import KTVProcessor
+
+CONTROL_ROLES = {"remote", "queue", "admin", "combo"}
 
 
 def get_local_ip() -> str:
@@ -26,6 +31,50 @@ def get_local_ip() -> str:
         return "127.0.0.1"
 
 
+def _is_playlist_url(url: str) -> bool:
+    if not url:
+        return False
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query)
+    return "list" in query or "/playlist" in parsed.path
+
+
+def _extract_title_artist(raw_title: str) -> tuple[str, str]:
+    value = (raw_title or "").strip()
+    if " - " in value:
+        artist, title = value.split(" - ", 1)
+        return title.strip(), artist.strip()
+    return value, ""
+
+
+def _playlist_entries(url: str, settings: AppSettings) -> list[dict]:
+    command = [
+        str(settings.yt_dlp_path) if settings.yt_dlp_path.exists() else "yt-dlp",
+        "--flat-playlist",
+        "--dump-single-json",
+        "--no-warnings",
+        url,
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "讀取 playlist 失敗")
+
+    payload = json.loads(result.stdout)
+    entries = []
+    for item in payload.get("entries", []) or []:
+        video_id = item.get("id")
+        if not video_id:
+            continue
+        entries.append(
+            {
+                "id": video_id,
+                "title": (item.get("title") or video_id).strip(),
+                "url": f"https://www.youtube.com/watch?v={video_id}",
+            }
+        )
+    return entries
+
+
 def _create_blueprint() -> Blueprint:
     bp = Blueprint("web", __name__)
 
@@ -36,6 +85,10 @@ def _create_blueprint() -> Blueprint:
     @bp.route("/remote")
     def page_remote():
         return render_template("remote.html")
+
+    @bp.route("/queue")
+    def page_queue():
+        return render_template("queue.html")
 
     @bp.route("/admin")
     def page_admin():
@@ -57,8 +110,24 @@ def _create_blueprint() -> Blueprint:
     @bp.route("/api/list")
     def get_song_list():
         settings: AppSettings = current_app.config["APP_SETTINGS"]
-        songs = [file_name for file_name in os.listdir(settings.songs_dir) if file_name.lower().endswith(".mp4")]
-        return json.dumps(songs)
+        songs = [
+            file_name
+            for file_name in os.listdir(settings.songs_dir)
+            if file_name.lower().endswith(".mp4")
+        ]
+        return json.dumps(sorted(songs))
+
+    @bp.route("/api/playlist_preview")
+    def playlist_preview():
+        settings: AppSettings = current_app.config["APP_SETTINGS"]
+        url = request.args.get("url", "").strip()
+        if not _is_playlist_url(url):
+            return json.dumps({"ok": False, "error": "不是 playlist 連結"}), 400
+        try:
+            entries = _playlist_entries(url, settings)
+            return json.dumps({"ok": True, "entries": entries})
+        except Exception as error:
+            return json.dumps({"ok": False, "error": str(error)}), 500
 
     return bp
 
@@ -66,10 +135,7 @@ def _create_blueprint() -> Blueprint:
 def create_app(settings: AppSettings | None = None) -> tuple[Flask, SocketIO, AppSettings]:
     app_settings = settings or load_settings()
     app = Flask(__name__, template_folder=str(app_settings.templates_dir))
-    app.config.from_mapping(
-        SECRET_KEY=app_settings.secret_key,
-        APP_SETTINGS=app_settings,
-    )
+    app.config.from_mapping(SECRET_KEY=app_settings.secret_key, APP_SETTINGS=app_settings)
     app.register_blueprint(_create_blueprint())
 
     socketio = SocketIO(app, cors_allowed_origins="*")
@@ -79,13 +145,19 @@ def create_app(settings: AppSettings | None = None) -> tuple[Flask, SocketIO, Ap
 def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: Callable[[str], None]):
     state = {
         "is_processing": False,
+        "client_roles": {},
         "playlist_queue": [],
+        "played_queue": [],
+        "next_queue_id": 1,
         "current_song": None,
         "is_playing": False,
         "position": 0.0,
         "started_at": None,
         "audio_mode": "original",
         "effects": {"volume": 1.0, "pitch": 0},
+        "intro_skip_to": None,
+        "intro_skip_hide_after": None,
+        "intro_skip_used": False,
     }
 
     def current_position() -> float:
@@ -93,32 +165,85 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
             return state["position"] + max(0.0, time.time() - state["started_at"])
         return state["position"]
 
-    def playback_payload() -> dict:
-        filename = state["current_song"]
+    def role_for_sid(sid: str) -> str:
+        return state["client_roles"].get(sid, "player")
+
+    def can_control() -> bool:
+        return role_for_sid(request.sid) in CONTROL_ROLES
+
+    def update_intro_skip(song_filename: str | None):
+        if not song_filename:
+            state["intro_skip_to"] = None
+            state["intro_skip_hide_after"] = None
+            state["intro_skip_used"] = False
+            return
+        skip_to, hide_after = find_intro_skip_seconds(
+            settings.songs_dir,
+            song_filename,
+            lead_seconds=settings.intro_skip_lead_seconds,
+        )
+        state["intro_skip_to"] = skip_to
+        state["intro_skip_hide_after"] = hide_after
+        state["intro_skip_used"] = False
+
+    def queue_payload() -> list[dict]:
+        items = []
+        for item in state["playlist_queue"]:
+            current = state["current_song"] and item["queue_id"] == state["current_song"]["queue_id"]
+            item_state = "playing" if current else "queued"
+            items.append({
+                "queue_id": item["queue_id"],
+                "filename": item["filename"],
+                "title": item["title"],
+                "state": item_state,
+            })
+
+        for item in state["played_queue"][-30:]:
+            items.append(
+                {
+                    "queue_id": item["queue_id"],
+                    "filename": item["filename"],
+                    "title": item["title"],
+                    "state": "sung",
+                }
+            )
+        return items
+
+    def playback_snapshot() -> dict:
+        current = state["current_song"]
+        filename = current["filename"] if current else None
         instrumental_filename = None
         if filename:
-            candidate = f"{os.path.splitext(filename)[0]}.instrumental.m4a"
+            candidate = f"{Path(filename).stem}.instrumental.m4a"
             if (settings.songs_dir / candidate).is_file():
                 instrumental_filename = candidate
         return {
             "filename": filename,
-            "title": filename or "",
+            "title": (current["title"] if current else ""),
             "instrumental_filename": instrumental_filename,
             "is_playing": state["is_playing"],
             "position": current_position(),
             "audio_mode": state["audio_mode"],
             "effects": state["effects"],
+            "server_time": time.time(),
+            "intro_skip_to": state["intro_skip_to"],
+            "intro_skip_hide_after": state["intro_skip_hide_after"],
+            "intro_skip_used": state["intro_skip_used"],
+            "queue": queue_payload(),
         }
 
-    def broadcast_playback_state():
-        socketio.emit("playback_state", playback_payload())
+    def emit_all_state():
+        payload = playback_snapshot()
+        socketio.emit("playback_snapshot", payload)
+        socketio.emit("playback_state", payload)
+        socketio.emit("update_queue", [item["filename"] for item in state["playlist_queue"]])
+        socketio.emit("update_queue_state", queue_payload())
 
     def playback_sync_loop():
-        """Continuously correct clock drift between independent browser players."""
         while True:
-            socketio.sleep(2)
-            if state["current_song"] and state["is_playing"]:
-                broadcast_playback_state()
+            socketio.sleep(1)
+            if state["current_song"]:
+                emit_all_state()
 
     socketio.start_background_task(playback_sync_loop)
 
@@ -126,95 +251,256 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
         log_cb(message)
         socketio.emit("admin_log", {"msg": message})
 
-    def enqueue_song(filename: str):
-        state["playlist_queue"].append(filename)
-        socketio.emit("update_queue", state["playlist_queue"])
-        if len(state["playlist_queue"]) == 1:
-            state.update(current_song=filename, is_playing=True, position=0.0, started_at=time.time())
-            broadcast_playback_state()
+    def enqueue_song(filename: str, title: str | None = None, insert_next: bool = False) -> dict:
+        entry = {
+            "queue_id": state["next_queue_id"],
+            "filename": filename,
+            "title": title or filename,
+        }
+        state["next_queue_id"] += 1
+
+        if insert_next and state["current_song"] and state["playlist_queue"]:
+            state["playlist_queue"].insert(1, entry)
+        else:
+            state["playlist_queue"].append(entry)
+
+        if state["current_song"] is None and state["playlist_queue"]:
+            start_current_song(state["playlist_queue"][0])
+        emit_all_state()
+        return entry
+
+    def start_current_song(entry: dict):
+        state["current_song"] = entry
+        state["is_playing"] = True
+        state["position"] = 0.0
+        state["started_at"] = time.time()
+        update_intro_skip(entry["filename"])
+
+    def advance_song():
+        if state["playlist_queue"]:
+            finished = state["playlist_queue"].pop(0)
+            state["played_queue"].append(finished)
+        if state["playlist_queue"]:
+            start_current_song(state["playlist_queue"][0])
+        else:
+            state["current_song"] = None
+            state["is_playing"] = False
+            state["position"] = 0.0
+            state["started_at"] = None
+            update_intro_skip(None)
+
+    def apply_seek(position: float):
+        state["position"] = max(0.0, float(position))
+        state["started_at"] = time.time() if state["is_playing"] else None
 
     @socketio.on("connect")
     def handle_connect():
-        # A player opened after the song has started receives the same song,
-        # position, audio mode, and effects as every already-connected player.
-        emit("playback_state", playback_payload())
-        emit("update_queue", state["playlist_queue"])
+        role = request.args.get("role", "player").lower().strip()
+        state["client_roles"][request.sid] = role if role in (CONTROL_ROLES | {"player"}) else "player"
+        emit("playback_snapshot", playback_snapshot())
+        emit("playback_state", playback_snapshot())
+        emit("update_queue_state", queue_payload())
         emit("apply_effect", state["effects"])
+
+    @socketio.on("disconnect")
+    def handle_disconnect():
+        state["client_roles"].pop(request.sid, None)
 
     @socketio.on("add_to_queue")
     def handle_add_queue(data):
-        filename = data["filename"]
-        enqueue_song(filename)
+        if not can_control():
+            return
+        enqueue_song(data["filename"], data.get("title"))
+
+    @socketio.on("queue_insert_next")
+    def handle_insert_next(data):
+        if not can_control():
+            return
+        enqueue_song(data["filename"], data.get("title"), insert_next=True)
+
+    @socketio.on("queue_remove")
+    def handle_queue_remove(data):
+        if not can_control():
+            return
+        queue_id = int(data.get("queue_id", -1))
+        removed_current = state["current_song"] and state["current_song"]["queue_id"] == queue_id
+        state["playlist_queue"] = [item for item in state["playlist_queue"] if item["queue_id"] != queue_id]
+        if removed_current:
+            if state["playlist_queue"]:
+                start_current_song(state["playlist_queue"][0])
+            else:
+                state["current_song"] = None
+                state["is_playing"] = False
+                state["position"] = 0.0
+                state["started_at"] = None
+                update_intro_skip(None)
+        emit_all_state()
 
     @socketio.on("request_play")
     def handle_request_play(data):
-        filename = data["filename"]
-        enqueue_song(filename)
+        if not can_control():
+            return
+        enqueue_song(data["filename"], data.get("title"), insert_next=True)
 
     @socketio.on("song_ended")
     def handle_song_ended(data=None):
-        # Every open player can report an ending. Only the player that ended
-        # the server's current song may advance the shared queue.
-        if isinstance(data, dict) and data.get("filename") != state["current_song"]:
+        if not state["current_song"]:
             return
-        if state["playlist_queue"]:
-            state["playlist_queue"].pop(0)
-            socketio.emit("update_queue", state["playlist_queue"])
-            if state["playlist_queue"]:
-                next_song = state["playlist_queue"][0]
-                state.update(current_song=next_song, is_playing=True, position=0.0, started_at=time.time())
-                broadcast_playback_state()
-            else:
-                state.update(current_song=None, is_playing=False, position=0.0, started_at=None)
-                broadcast_playback_state()
+        if isinstance(data, dict) and data.get("filename") != state["current_song"]["filename"]:
+            return
+        advance_song()
+        emit_all_state()
 
     @socketio.on("control")
     def handle_control(action):
+        if not can_control():
+            return
         if action == "cut":
-            handle_song_ended()
+            advance_song()
         elif action == "pause" and state["current_song"]:
             state["position"] = current_position()
             state["is_playing"] = not state["is_playing"]
             state["started_at"] = time.time() if state["is_playing"] else None
-            broadcast_playback_state()
+        elif action == "play" and state["current_song"]:
+            state["is_playing"] = True
+            state["started_at"] = time.time()
         elif action == "stop":
-            state.update(is_playing=False, position=0.0, started_at=None)
-            broadcast_playback_state()
+            state["is_playing"] = False
+            state["position"] = 0.0
+            state["started_at"] = None
+        emit_all_state()
+
+    @socketio.on("seek")
+    def handle_seek(data):
+        if not can_control() or not state["current_song"]:
+            return
+        apply_seek(float(data.get("position", 0.0)))
+        emit_all_state()
+
+    @socketio.on("skip_intro")
+    def handle_skip_intro():
+        if not can_control() or not state["current_song"]:
+            return
+        skip_to = state["intro_skip_to"]
+        hide_after = state["intro_skip_hide_after"]
+        if skip_to is None or hide_after is None:
+            return
+        if current_position() >= hide_after:
+            return
+        apply_seek(skip_to)
+        state["intro_skip_used"] = True
+        emit_all_state()
 
     @socketio.on("control_effect")
     def handle_effect(data):
+        if not can_control():
+            return
         state["effects"].update({key: value for key, value in data.items() if key in {"volume", "pitch"}})
         socketio.emit("apply_effect", state["effects"])
+        emit_all_state()
 
     @socketio.on("change_track")
     def handle_track(mode):
+        if not can_control():
+            return
         if mode in {"original", "instrumental"}:
             state["audio_mode"] = mode
             socketio.emit("set_audio", mode)
+            emit_all_state()
 
     @socketio.on("start_download")
     def handle_start_download(data):
         if state["is_processing"]:
             broadcast_log("⚠️ 系統正在處理其他歌曲，請稍候。")
             return
+        if not can_control():
+            return
 
-        url = data.get("url")
-        title = data.get("title")
+        url = (data.get("url") or "").strip()
+        manual_title = (data.get("title") or "").strip()
         options = {
             "stems": data.get("stems"),
-            "mix_mode": data.get("mix_mode"),
+            "mix_mode": "pseudo-spatial",
             "device": data.get("device"),
         }
+
+        try:
+            if _is_playlist_url(url):
+                selected_entries = data.get("playlist_entries") or _playlist_entries(url, settings)
+                tasks = [
+                    {
+                        "url": item.get("url") or f"https://www.youtube.com/watch?v={item.get('id')}",
+                        "title": item.get("title") or item.get("id") or manual_title,
+                    }
+                    for item in selected_entries
+                ]
+            else:
+                tasks = [{"url": url, "title": manual_title}]
+        except Exception as error:
+            broadcast_log(f"❌ playlist 讀取失敗: {error}")
+            return
 
         def run_process():
             state["is_processing"] = True
             socketio.emit("task_status", {"status": "busy"})
-
             processor = KTVProcessor(settings=settings, log_cb=broadcast_log)
-            success = processor.process_song(url, title, options=options)
-            if success:
+            total = len(tasks)
+            succeeded = 0
+            failed_items = []
+
+            for index, task in enumerate(tasks, start=1):
+                title = task["title"]
+                song_name, singer = _extract_title_artist(title)
+                socketio.emit(
+                    "task_progress",
+                    {
+                        "phase": "processing",
+                        "current": index,
+                        "total": total,
+                        "title": title,
+                        "attempt": 1,
+                    },
+                )
+
+                success = False
+                for attempt in range(settings.download_retry_count + 1):
+                    socketio.emit(
+                        "task_progress",
+                        {
+                            "phase": "processing",
+                            "current": index,
+                            "total": total,
+                            "title": title,
+                            "attempt": attempt + 1,
+                        },
+                    )
+                    success = processor.process_song(task["url"], title, options=options)
+                    if success:
+                        break
+                    time.sleep(0.8)
+
+                if success:
+                    succeeded += 1
+                    lrc_path = settings.songs_dir / f"{Path(title).stem}.ktv.lrc"
+                    if not lrc_path.exists():
+                        lyrics = fetch_lrclib_lyrics(song_name, singer)
+                        write_ktv_lrc_template(lrc_path, song_name or title, singer, lyrics)
+                else:
+                    failed_items.append(title)
+
+            update_library_index(settings.songs_dir, settings.library_index_path)
+            if succeeded:
                 socketio.emit("refresh_list")
 
+            socketio.emit(
+                "task_progress",
+                {
+                    "phase": "done",
+                    "total": total,
+                    "success": succeeded,
+                    "failed": failed_items,
+                },
+            )
             state["is_processing"] = False
             socketio.emit("task_status", {"status": "idle"})
 
@@ -223,6 +509,9 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
 
     @socketio.on("update_ytdlp")
     def handle_update_ytdlp():
+        if not can_control():
+            return
+
         def run_update():
             socketio.emit("task_status", {"status": "busy"})
             broadcast_log("開始更新 yt-dlp 核心...")

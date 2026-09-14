@@ -3,13 +3,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from openktv_ai.config import AppSettings, load_settings
+from openktv_ai.config import AppSettings
+from openktv_ai.library import find_intro_skip_seconds, parse_first_lyric_time
 from openktv_ai.processing import (
     build_demucs_command,
     build_mix_filter,
     demucs_weights_ready,
     ensure_demucs_weights,
-    _export_instrumental_track,
     resolve_device,
 )
 
@@ -28,27 +28,17 @@ class ProcessingTests(unittest.TestCase):
             secret_key='ktv_secret',
             demucs_cache_dir=Path('/tmp/app/model_cache/demucs'),
             demucs_model='htdemucs_ft',
-            separator_stems=2,
+            separator_stems=4,
             device_preference='auto',
             mix_mode='pseudo-spatial',
-            stereo_balance_left_original=0.65,
-            stereo_balance_right_original=0.35,
             pseudo_delay_ms=12,
             pseudo_reflection_gain=0.12,
-            pseudo_original_gain=1.0,
-            pseudo_accompaniment_gain=0.95,
-            pseudo_left_original=0.72,
-            pseudo_left_accompaniment=0.28,
-            pseudo_right_original=0.28,
-            pseudo_right_accompaniment=0.72,
-        )
-
-    @patch('openktv_ai.config.load_dotenv')
-    def test_load_settings_reads_project_dotenv_without_overriding_system_values(self, mock_load_dotenv):
-        load_settings(Path('/tmp/app'))
-        mock_load_dotenv.assert_called_once_with(
-            dotenv_path=Path('/tmp/app/.env'),
-            override=False,
+            pseudo_reverb_room=0.45,
+            pseudo_reverb_damping=0.35,
+            pseudo_backing_gain=0.9,
+            intro_skip_lead_seconds=5.0,
+            download_retry_count=2,
+            library_index_path=Path('/tmp/app/ktv_songs/library_index.csv'),
         )
 
     def test_build_demucs_command_two_stems(self):
@@ -60,34 +50,11 @@ class ProcessingTests(unittest.TestCase):
         command = build_demucs_command(Path('/tmp/in.mp4'), Path('/tmp/out'), 'htdemucs_ft', 4, 'cuda')
         self.assertNotIn('--two-stems', command)
 
-    @patch('openktv_ai.processing._run_command')
-    def test_export_instrumental_track_creates_aac_sidecar(self, mock_run_command):
-        _export_instrumental_track(
-            Path('/tmp/accompaniment.wav'),
-            Path('/tmp/song.instrumental.m4a'),
-            'pseudo-spatial',
-            self.settings,
-        )
-        command = mock_run_command.call_args.args[0]
-        self.assertEqual(command[0], 'ffmpeg')
-        self.assertIn('aac', command)
-        self.assertIn('-filter_complex', command)
-        self.assertTrue(any('equalizer=f=180:t=q:w=0.8:g=-1.2' in value for value in command))
-        self.assertIn('[mastered_acc]', command)
-        self.assertEqual(Path(command[-1]), Path('/tmp/song.instrumental.m4a'))
-
-    def test_build_mix_filter_modes(self):
-        legacy = build_mix_filter('legacy', self.settings)
-        balance = build_mix_filter('stereo-balance', self.settings)
-        pseudo = build_mix_filter('pseudo-spatial', self.settings)
-        self.assertIn('join=inputs=2', legacy)
-        self.assertIn('pan=stereo', balance)
-        self.assertIn('adelay=', pseudo)
-        self.assertIn('[1:a]anull[vocals]', pseudo)
-        self.assertIn('[vocals][acc]amix=inputs=2:normalize=0,volume=0.5[a]', pseudo)
-        self.assertIn('highpass=f=55', pseudo)
-        self.assertIn('equalizer=f=180:t=q:w=0.8:g=-1.2', pseudo)
-        self.assertIn('[acc_dry][acc_er]amix=inputs=2:normalize=0,highpass=f=55', pseudo)
+    def test_build_mix_filter_pseudo_only(self):
+        pseudo = build_mix_filter('legacy', self.settings)
+        self.assertIn('vocal_mono', pseudo)
+        self.assertIn('aecho=', pseudo)
+        self.assertNotIn('equalizer=', pseudo)
 
     @patch('openktv_ai.processing._is_cuda_available', return_value=True)
     def test_resolve_device_prefers_cuda_when_auto(self, _mock_available):
@@ -113,6 +80,21 @@ class ProcessingTests(unittest.TestCase):
         with patch.dict('sys.modules', {'demucs': fake_demucs, 'demucs.pretrained': fake_pretrained}):
             ensure_demucs_weights('htdemucs_ft', log_cb=lambda *_args, **_kwargs: None)
         fake_get_model.assert_called_once_with('htdemucs_ft')
+
+
+class LibraryTests(unittest.TestCase):
+    def test_parse_first_lyric_time(self):
+        path = Path('/tmp/test-first-line.lrc')
+        path.write_text('%12.340 18.520 只是我回憶的音樂盒\n', encoding='utf-8')
+        self.assertEqual(parse_first_lyric_time(path), 12.34)
+
+    def test_find_intro_skip_seconds(self):
+        songs_dir = Path('/tmp/ktv-test-songs')
+        songs_dir.mkdir(parents=True, exist_ok=True)
+        (songs_dir / 'abc.ktv.lrc').write_text('%15.000 20.000 lyric\n', encoding='utf-8')
+        skip_to, hide_after = find_intro_skip_seconds(songs_dir, 'abc.mp4', 5.0)
+        self.assertEqual(skip_to, 10.0)
+        self.assertEqual(hide_after, 15.0)
 
 
 if __name__ == '__main__':

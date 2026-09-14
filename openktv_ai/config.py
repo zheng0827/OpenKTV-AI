@@ -3,7 +3,11 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except Exception:  # pragma: no cover - fallback for minimal runtime
+    def load_dotenv(*_args, **_kwargs):
+        return False
 
 
 def _to_float(value: str, default: float) -> float:
@@ -36,16 +40,14 @@ class AppSettings:
     separator_stems: int
     device_preference: str
     mix_mode: str
-    stereo_balance_left_original: float
-    stereo_balance_right_original: float
     pseudo_delay_ms: int
     pseudo_reflection_gain: float
-    pseudo_original_gain: float
-    pseudo_accompaniment_gain: float
-    pseudo_left_original: float
-    pseudo_left_accompaniment: float
-    pseudo_right_original: float
-    pseudo_right_accompaniment: float
+    pseudo_reverb_room: float
+    pseudo_reverb_damping: float
+    pseudo_backing_gain: float
+    intro_skip_lead_seconds: float
+    download_retry_count: int
+    library_index_path: Path
 
 
 class Config:
@@ -72,7 +74,7 @@ def load_settings(base_dir: Path | None = None) -> AppSettings:
     # variables still take precedence for production deployments.
     load_dotenv(dotenv_path=root / ".env", override=False)
 
-    stems = os.getenv("KTV_SEPARATOR_STEMS", "2").strip()
+    stems = os.getenv("KTV_SEPARATOR_STEMS", "4").strip()
     separator_stems = 4 if stems == "4" else 2
 
     return AppSettings(
@@ -90,14 +92,12 @@ def load_settings(base_dir: Path | None = None) -> AppSettings:
         separator_stems=separator_stems,
         device_preference=os.getenv("KTV_DEVICE", "auto").strip().lower(),
         mix_mode=os.getenv("KTV_MIX_MODE", "pseudo-spatial").strip().lower(),
-        stereo_balance_left_original=_to_float(os.getenv("KTV_BALANCE_LEFT_ORIGINAL"), 0.65),
-        stereo_balance_right_original=_to_float(os.getenv("KTV_BALANCE_RIGHT_ORIGINAL"), 0.35),
         pseudo_delay_ms=_to_int(os.getenv("KTV_PSEUDO_DELAY_MS"), 12),
         pseudo_reflection_gain=_to_float(os.getenv("KTV_PSEUDO_REFLECTION_GAIN"), 0.12),
-        pseudo_original_gain=_to_float(os.getenv("KTV_PSEUDO_ORIGINAL_GAIN"), 1.0),
-        pseudo_accompaniment_gain=_to_float(os.getenv("KTV_PSEUDO_ACCOMPANIMENT_GAIN"), 0.95),
-        pseudo_left_original=_to_float(os.getenv("KTV_PSEUDO_LEFT_ORIGINAL"), 0.72),
-        pseudo_left_accompaniment=_to_float(os.getenv("KTV_PSEUDO_LEFT_ACCOMPANIMENT"), 0.28),
-        pseudo_right_original=_to_float(os.getenv("KTV_PSEUDO_RIGHT_ORIGINAL"), 0.28),
-        pseudo_right_accompaniment=_to_float(os.getenv("KTV_PSEUDO_RIGHT_ACCOMPANIMENT"), 0.72),
+        pseudo_reverb_room=_to_float(os.getenv("KTV_PSEUDO_REVERB_ROOM"), 0.45),
+        pseudo_reverb_damping=_to_float(os.getenv("KTV_PSEUDO_REVERB_DAMPING"), 0.35),
+        pseudo_backing_gain=_to_float(os.getenv("KTV_PSEUDO_BACKING_GAIN"), 0.9),
+        intro_skip_lead_seconds=_to_float(os.getenv("KTV_INTRO_SKIP_LEAD_SECONDS"), 5.0),
+        download_retry_count=_to_int(os.getenv("KTV_DOWNLOAD_RETRY_COUNT"), 2),
+        library_index_path=Path(os.getenv("KTV_LIBRARY_INDEX_PATH", root / "ktv_songs" / "library_index.csv")),
     )

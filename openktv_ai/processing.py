@@ -180,35 +180,14 @@ def build_demucs_command(
     return command
 
 
-def build_mix_filter(mode: str, settings: AppSettings) -> str:
-    selected = (mode or "pseudo-spatial").lower()
-    if selected == "legacy":
-        return (
-            "[0:a]pan=mono|c0=0.5*FL+0.5*FR[L];"
-            "[2:a]pan=mono|c0=0.5*FL+0.5*FR[R];"
-            "[L][R]join=inputs=2:channel_layout=stereo[a]"
-        )
-
-    if selected == "stereo-balance":
-        l_orig = settings.stereo_balance_left_original
-        r_orig = settings.stereo_balance_right_original
-        l_acc = 1.0 - l_orig
-        r_acc = 1.0 - r_orig
-        return (
-            "[0:a]pan=mono|c0=0.5*FL+0.5*FR[orig];"
-            "[2:a]pan=mono|c0=0.5*FL+0.5*FR[acc];"
-            "[orig][acc]amerge=inputs=2[base];"
-            f"[base]pan=stereo|c0={l_orig}*c0+{l_acc}*c1|c1={r_orig}*c0+{r_acc}*c1[a]"
-        )
-
+def build_mix_filter(_mode: str, settings: AppSettings) -> str:
     return (
-        # Preserve the separated vocal track exactly as Demucs produced it.
-        # Spatial processing is applied only to accompaniment.
-        "[1:a]anull[vocals];"
+        # Preserve separated vocals as-is and keep them centered.
+        "[1:a]pan=mono|c0=0.5*FL+0.5*FR[vocal_mono];"
+        "[vocal_mono]pan=stereo|c0=c0|c1=c0[vocals];"
+        # Spatial processing is applied only to accompaniment/backing track.
         + build_pseudo_accompaniment_filter("[2:a]", settings, "acc")
-        # Fixed headroom avoids a limiter changing the vocal when it is mixed
-        # with accompaniment. The companion track receives the same gain.
-        + "[vocals][acc]amix=inputs=2:normalize=0,volume=0.5[a]"
+        + "[vocals][acc]amix=inputs=2:normalize=0[a]"
     )
 
 
@@ -220,12 +199,10 @@ def build_pseudo_accompaniment_filter(input_stream: str, settings: AppSettings, 
         f"{input_stream}aformat=channel_layouts=stereo,asplit=2[acc_dry][acc_ref];"
         f"[acc_ref]adelay={delay_left}|{delay_right},"
         f"volume={settings.pseudo_reflection_gain}[acc_er];"
-        "[acc_dry][acc_er]amix=inputs=2:normalize=0,"
-        "highpass=f=55,"
-        "equalizer=f=180:t=q:w=0.8:g=-1.2,"
-        "equalizer=f=3200:t=q:w=1.0:g=0.7,"
-        f"volume={settings.pseudo_accompaniment_gain},"
-        f"alimiter=limit=0.95[{output_label}];"
+        f"[acc_dry][acc_er]amix=inputs=2:normalize=0,volume={settings.pseudo_backing_gain},"
+        f"aecho=0.6:0.4:{max(40, delay_right * 3)}:{settings.pseudo_reverb_room},"
+        f"aecho=0.6:0.3:{max(70, delay_right * 5)}:{settings.pseudo_reverb_damping}"
+        f"[{output_label}];"
     )
 
 
@@ -284,16 +261,15 @@ def _export_instrumental_track(
 ) -> None:
     """Create the browser-playable companion track used by the player UI."""
     command = ["ffmpeg", "-y", "-i", str(accompaniment)]
-    if (mix_mode or "").lower() == "pseudo-spatial":
-        processed_filter = build_pseudo_accompaniment_filter("[0:a]", settings, "processed_acc")
-        command.extend(
-            [
-                "-filter_complex",
-                processed_filter + "[processed_acc]volume=0.5[mastered_acc]",
-                "-map",
-                "[mastered_acc]",
-            ]
-        )
+    processed_filter = build_pseudo_accompaniment_filter("[0:a]", settings, "processed_acc")
+    command.extend(
+        [
+            "-filter_complex",
+            processed_filter,
+            "-map",
+            "[processed_acc]",
+        ]
+    )
     command.extend(["-c:a", "aac", "-b:a", "192k", str(output_path)])
     _run_command(command)
 
@@ -335,8 +311,7 @@ class KTVProcessor:
         return vocals, accompaniment
 
     def _mix_audio(self, temp_input: Path, vocals: Path, accompaniment: Path, temp_output: Path, mix_mode: str) -> None:
-        selected_mode = mix_mode if mix_mode in {"legacy", "stereo-balance", "pseudo-spatial"} else self.settings.mix_mode
-        filter_complex = build_mix_filter(selected_mode, self.settings)
+        filter_complex = build_mix_filter(mix_mode, self.settings)
         cmd = [
             "ffmpeg",
             "-y",
@@ -358,7 +333,7 @@ class KTVProcessor:
             "aac",
             str(temp_output),
         ]
-        self.log(f"步驟 3/4: 混音策略 {selected_mode}...")
+        self.log("步驟 3/4: 混音策略 pseudo-spatial...")
         _run_command(cmd)
 
     def process_song(self, url: str, manual_title: str, options: dict | None = None) -> bool:
@@ -379,6 +354,7 @@ class KTVProcessor:
             temp_input = job_temp_dir / "input.mp4"
             temp_output = job_temp_dir / "output.mp4"
             temp_instrumental = job_temp_dir / "instrumental.m4a"
+            temp_vocals = job_temp_dir / "vocals.wav"
 
             self.log("步驟 1/4: 下載影片...")
             cmd_dl = [
@@ -397,6 +373,7 @@ class KTVProcessor:
 
             self.log("步驟 2/4: AI 分離 (Demucs)...")
             vocals, accompaniment = self._separate_audio(temp_input, job_temp_dir, stems, mix_mode, device_pref)
+            shutil.copyfile(vocals, temp_vocals)
 
             self._mix_audio(temp_input, vocals, accompaniment, temp_output, mix_mode)
             _export_instrumental_track(accompaniment, temp_instrumental, mix_mode, self.settings)
@@ -406,9 +383,11 @@ class KTVProcessor:
             if final.exists():
                 final = self.settings.songs_dir / f"{safe_title}_{job_id}.mp4"
             final_instrumental = final.with_name(f"{final.stem}.instrumental.m4a")
+            final_vocals = final.with_name(f"{final.stem}.vocals.wav")
 
             shutil.move(str(temp_output), str(final))
             shutil.move(str(temp_instrumental), str(final_instrumental))
+            shutil.move(str(temp_vocals), str(final_vocals))
             self.log("✅ 製作完成！已自動同步至歌單。")
             return True
 
