@@ -299,6 +299,53 @@ def _estimate_prefix_start(anchor_start: float, line_count: int) -> float:
     return max(0.0, anchor_start - lead_seconds)
 
 
+def _is_low_quality_transcript_segment(text: str, start: float, end: float) -> bool:
+    tokens = tokenize(text)
+    if not tokens:
+        return True
+    duration = max(0.0, end - start)
+    if duration >= 25.0 and len(tokens) <= 5:
+        return True
+    if duration >= 45.0 and len(tokens) <= 12:
+        return True
+
+    unique_ratio = len(set(tokens)) / len(tokens)
+    if len(tokens) >= 12 and unique_ratio < 0.3:
+        return True
+
+    max_repeat = 1
+    repeat = 1
+    previous = tokens[0]
+    for token in tokens[1:]:
+        if token == previous:
+            repeat += 1
+            max_repeat = max(max_repeat, repeat)
+        else:
+            previous = token
+            repeat = 1
+    return max_repeat >= 8
+
+
+def _segment_is_usable_for_fallback(segment: dict[str, Any]) -> bool:
+    text = clean_text(str(segment.get("text", "")))
+    start = segment.get("start")
+    end = segment.get("end")
+    if not text or start is None or end is None:
+        return False
+    start = float(start)
+    end = float(end)
+    if end <= start:
+        return False
+    return not _is_low_quality_transcript_segment(text, start, end)
+
+
+def _transcript_is_usable_for_fallback(segments: list[dict[str, Any]]) -> bool:
+    if not segments:
+        return False
+    usable = sum(1 for segment in segments if _segment_is_usable_for_fallback(segment))
+    return usable >= 3 and usable / len(segments) >= 0.6
+
+
 def interpolate_words(text: str, start: float, end: float) -> list[dict[str, Any]]:
     pieces = tokenize(text)
     if not pieces:
@@ -370,17 +417,11 @@ def _align_lyrics_with_match_count(lyrics_lines: list[str], segments: list[dict[
 def build_word_level_lines_from_segments(segments: list[dict[str, Any]]) -> list[LyricLine]:
     lines: list[LyricLine] = []
     for segment in segments:
+        if not _segment_is_usable_for_fallback(segment):
+            continue
         text = clean_text(str(segment.get("text", "")))
-        if not text:
-            continue
-        start = segment.get("start")
-        end = segment.get("end")
-        if start is None or end is None:
-            continue
-        start = float(start)
-        end = float(end)
-        if end <= start:
-            continue
+        start = float(segment["start"])
+        end = float(segment["end"])
         words = []
         for word in segment.get("words", []):
             token = clean_text(str(word.get("text", word.get("word", ""))))
@@ -394,11 +435,19 @@ def build_word_level_lines_from_segments(segments: list[dict[str, Any]]) -> list
     return lines
 
 
-def should_fallback_to_transcript_sync(lyrics_lines: list[str], matched_lines: int) -> bool:
+def should_fallback_to_transcript_sync(
+    lyrics_lines: list[str],
+    matched_lines: int,
+    segments: list[dict[str, Any]] | None = None,
+) -> bool:
     if not lyrics_lines:
         return False
     ratio = matched_lines / len(lyrics_lines)
-    return ratio < MIN_LYRIC_MATCH_RATIO and len(lyrics_lines) >= 3
+    if ratio >= MIN_LYRIC_MATCH_RATIO or len(lyrics_lines) < 3:
+        return False
+    if segments is None:
+        return True
+    return _transcript_is_usable_for_fallback(segments)
 
 
 def detect_dialogue(aligned_lines: list[LyricLine], segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -494,8 +543,10 @@ def run_lyrics_alignment_pipeline(
         alignment_python=alignment_python,
     )
     aligned_lines, matched_lines = _align_lyrics_with_match_count(lyrics_lines, aligned_segments)
-    if should_fallback_to_transcript_sync(lyrics_lines, matched_lines):
-        aligned_lines = build_word_level_lines_from_segments(aligned_segments)
+    if should_fallback_to_transcript_sync(lyrics_lines, matched_lines, aligned_segments):
+        fallback_lines = build_word_level_lines_from_segments(aligned_segments)
+        if fallback_lines:
+            aligned_lines = fallback_lines
     dialogue = detect_dialogue(aligned_lines, aligned_segments)
     refill_dialogue_to_backing(vocals_wav, backing_wav, dialogue, output_refilled_backing_wav)
 
