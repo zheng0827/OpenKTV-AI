@@ -46,6 +46,7 @@ class AppSettings:
     pseudo_reverb_damping: float
     pseudo_backing_gain: float
     whisper_model: str
+    asr_backend: str
     whisper_compute_type: str
     whisper_language: str
     alignment_python: str
@@ -102,6 +103,7 @@ def load_settings(base_dir: Path | None = None) -> AppSettings:
         pseudo_reverb_damping=_to_float(os.getenv("KTV_PSEUDO_REVERB_DAMPING"), 0.35),
         pseudo_backing_gain=_to_float(os.getenv("KTV_PSEUDO_BACKING_GAIN"), 0.9),
         whisper_model=os.getenv("KTV_WHISPER_MODEL", "large-v3"),
+        asr_backend=os.getenv("KTV_ASR_BACKEND", "auto").strip().lower(),
         whisper_compute_type=os.getenv("KTV_WHISPER_COMPUTE_TYPE", "auto"),
         whisper_language=os.getenv("KTV_WHISPER_LANGUAGE", "zh"),
         alignment_python=os.getenv("KTV_ALIGNMENT_PYTHON", ""),

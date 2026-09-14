@@ -7,12 +7,13 @@ import tempfile
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 LRC_INLINE_TIMESTAMP_RE = re.compile(r"\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\]")
 SYMBOL_NOISE_LINE_RE = re.compile(r"^[^0-9A-Za-z\u3400-\u9fff]+$")
 MIN_MATCH_SCORE = 0.72
 MIN_LYRIC_MATCH_RATIO = 0.35
+_OPENCC = None
 
 
 @dataclass
@@ -29,13 +30,60 @@ def clean_text(text: str) -> str:
     return value
 
 
-def traditional(text: str) -> str:
+def _opencc_convert(text: str) -> str:
+    global _OPENCC
     try:
         from opencc import OpenCC  # pylint: disable=import-outside-toplevel
 
-        return OpenCC("s2twp").convert(text)
+        if _OPENCC is None:
+            _OPENCC = OpenCC("s2twp")
+        return _OPENCC.convert(text)
     except Exception:
         return text
+
+
+def _is_han(ch: str) -> bool:
+    return "\u3400" <= ch <= "\u9fff"
+
+
+def _has_mixed_non_chinese(text: str) -> bool:
+    return bool(re.search(r"[A-Za-z\u3040-\u30ff\uac00-\ud7af]", text))
+
+
+def _looks_chinese_line(text: str) -> bool:
+    return any(_is_han(ch) for ch in text) and not _has_mixed_non_chinese(text)
+
+
+def _convert_simplified_chinese_only(text: str) -> str:
+    converted = _opencc_convert(text)
+    if converted == text:
+        return text
+    if len(converted) != len(text):
+        return converted
+    out = []
+    for source, target in zip(text, converted):
+        if source == target:
+            out.append(source)
+        elif _is_han(source) and _is_han(target):
+            out.append(target)
+        else:
+            out.append(source)
+    return "".join(out)
+
+
+def build_text_transform(language: str) -> tuple[Callable[[str], str], bool]:
+    lang = (language or "").lower()
+    enable = lang.startswith("zh") or lang in {"cmn", "yue", "wuu"}
+
+    def transform(text: str) -> str:
+        value = clean_text(text)
+        if not enable or not value:
+            return value
+        if not _looks_chinese_line(value):
+            return value
+        return _convert_simplified_chinese_only(value)
+
+    return transform, enable
 
 
 def tokenize(text: str) -> list[str]:
@@ -60,7 +108,7 @@ def tokenize(text: str) -> list[str]:
 
 
 def normalize_match(text: str) -> str:
-    value = traditional(text).lower()
+    value = _convert_simplified_chinese_only(clean_text(text)).lower()
     value = re.sub(r"\s+", "", value)
     value = re.sub(r"[^\w\u3400-\u9fff]", "", value)
     return value
@@ -104,7 +152,38 @@ def transcribe_segments(
     device: str,
     compute_type: str,
     language: str | None,
+    lyrics_prompt: str | None = None,
+    asr_backend: str = "auto",
 ) -> tuple[list[dict[str, Any]], str]:
+    backend = (asr_backend or "auto").strip().lower()
+    if backend in {"auto", "whisperx"}:
+        try:
+            import whisperx  # pylint: disable=import-outside-toplevel
+
+            model = whisperx.load_model(model_name, device=device, compute_type=compute_type, language=language)
+            result = model.transcribe(str(vocals_wav), batch_size=8, language=language, initial_prompt=lyrics_prompt)
+            out = []
+            for seg in result.get("segments", []):
+                seg_start = seg.get("start")
+                seg_end = seg.get("end")
+                if seg_start is None or seg_end is None:
+                    continue
+                words = []
+                for word in seg.get("words", []) or []:
+                    word_start = word.get("start")
+                    word_end = word.get("end")
+                    token = clean_text(str(word.get("word", word.get("text", ""))))
+                    if word_start is None or word_end is None or not token:
+                        continue
+                    words.append({"text": token, "start": float(word_start), "end": float(word_end)})
+                out.append({"start": float(seg_start), "end": float(seg_end), "text": clean_text(str(seg.get("text", ""))), "words": words})
+            if out:
+                detected = str(result.get("language") or language or "zh")
+                return out, detected
+        except Exception:
+            if backend == "whisperx":
+                raise
+
     from faster_whisper import WhisperModel  # pylint: disable=import-outside-toplevel
 
     model = WhisperModel(model_name, device=device, compute_type=compute_type)
@@ -116,6 +195,7 @@ def transcribe_segments(
         beam_size=5,
         temperature=0.0,
         condition_on_previous_text=True,
+        initial_prompt=lyrics_prompt or None,
     )
 
     out = []
@@ -275,7 +355,7 @@ def _build_line(text: str, start: float, end: float) -> LyricLine:
     return LyricLine(
         start=float(start),
         end=float(safe_end),
-        text=traditional(text),
+        text=clean_text(text),
         words=interpolate_words(text, float(start), float(safe_end)),
     )
 
@@ -393,7 +473,7 @@ def _align_lyrics_with_match_count(lyrics_lines: list[str], segments: list[dict[
             matched_words = [{"text": token, "start": word["start"], "end": word["end"]} for token, word in zip(tokens, words)]
         else:
             matched_words = interpolate_words(lyric, segment["start"], segment["end"])
-        out.append(LyricLine(start=float(segment["start"]), end=float(segment["end"]), text=traditional(lyric), words=matched_words))
+        out.append(LyricLine(start=float(segment["start"]), end=float(segment["end"]), text=clean_text(lyric), words=matched_words))
         search_idx = idx + 1
         previous_end = float(segment["end"])
         has_anchor = True
@@ -414,7 +494,82 @@ def _align_lyrics_with_match_count(lyrics_lines: list[str], segments: list[dict[
     return out, matched_count
 
 
-def build_word_level_lines_from_segments(segments: list[dict[str, Any]]) -> list[LyricLine]:
+def align_gt_lyrics_strict(
+    lyrics_lines: list[str],
+    segments: list[dict[str, Any]],
+    text_transform,
+) -> tuple[list[LyricLine], int, list[dict[str, Any]]]:
+    out: list[LyricLine] = []
+    filtered_dialogue: list[dict[str, Any]] = []
+    search_idx = 0
+    matched_count = 0
+    cursor = 0.0
+
+    for lyric in lyrics_lines:
+        idx, score = find_segment(lyric, segments, search_idx)
+        if idx is None:
+            filtered_dialogue.append(
+                {
+                    "source": "lrclib",
+                    "reason": "not_found",
+                    "text": text_transform(lyric),
+                    "start": cursor,
+                    "end": cursor + 0.001,
+                }
+            )
+            continue
+
+        segment = segments[idx]
+        seg_start = float(segment["start"])
+        seg_end = float(segment["end"])
+        if idx < search_idx:
+            filtered_dialogue.append(
+                {
+                    "source": "lrclib",
+                    "reason": "out_of_order",
+                    "text": text_transform(lyric),
+                    "start": seg_start,
+                    "end": seg_end,
+                }
+            )
+            continue
+
+        if not _is_reliable_match(lyric, segment.get("text", ""), score):
+            filtered_dialogue.append(
+                {
+                    "source": "lrclib",
+                    "reason": "low_similarity",
+                    "text": text_transform(lyric),
+                    "start": seg_start,
+                    "end": seg_end,
+                    "score": round(float(score), 4),
+                }
+            )
+            cursor = max(cursor, seg_end)
+            continue
+
+        words = segment.get("words", [])
+        tokens = tokenize(lyric)
+        if len(tokens) == len(words) and tokens:
+            matched_words = [{"text": text_transform(token), "start": word["start"], "end": word["end"]} for token, word in zip(tokens, words)]
+        else:
+            matched_words = interpolate_words(text_transform(lyric), seg_start, seg_end)
+        out.append(
+            LyricLine(
+                start=seg_start,
+                end=seg_end,
+                text=text_transform(lyric),
+                words=matched_words,
+            )
+        )
+        search_idx = idx + 1
+        matched_count += 1
+        cursor = max(cursor, seg_end)
+    return out, matched_count, filtered_dialogue
+
+
+def build_word_level_lines_from_segments(segments: list[dict[str, Any]], text_transform=None) -> list[LyricLine]:
+    text_transform = text_transform or clean_text
     lines: list[LyricLine] = []
     for segment in segments:
         if not _segment_is_usable_for_fallback(segment):
@@ -431,7 +586,8 @@ def build_word_level_lines_from_segments(segments: list[dict[str, Any]]) -> list
                 words.append({"text": token, "start": float(token_start), "end": float(token_end)})
         if not words:
             words = interpolate_words(text, start, end)
-        lines.append(LyricLine(start=start, end=end, text=traditional(text), words=words))
+        mapped_words = [{**word, "text": text_transform(str(word.get("text", "")))} for word in words]
+        lines.append(LyricLine(start=start, end=end, text=text_transform(text), words=mapped_words))
     return lines
 
 
@@ -450,7 +606,8 @@ def should_fallback_to_transcript_sync(
     return _transcript_is_usable_for_fallback(segments)
 
 
-def detect_dialogue(aligned_lines: list[LyricLine], segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def detect_dialogue(aligned_lines: list[LyricLine], segments: list[dict[str, Any]], text_transform=None) -> list[dict[str, Any]]:
+    text_transform = text_transform or clean_text
     windows = [(line.start, line.end) for line in aligned_lines]
     dialogue = []
     for segment in segments:
@@ -459,7 +616,7 @@ def detect_dialogue(aligned_lines: list[LyricLine], segments: list[dict[str, Any
         overlap = any(max(start, ls) < min(end, le) for ls, le in windows)
         if overlap:
             continue
-        text = traditional(clean_text(segment.get("text", "")))
+        text = text_transform(clean_text(segment.get("text", "")))
         if text:
             dialogue.append({"start": start, "end": end, "text": text})
     return dialogue
@@ -494,15 +651,15 @@ def refill_dialogue_to_backing(vocals_wav: Path, backing_wav: Path, dialogue: li
 def write_ktv_lrc(output: Path, song_name: str, singer: str, duration_seconds: float, aligned_lines: list[LyricLine], dialogue: list[dict[str, Any]]) -> None:
     with output.open("w", encoding="utf-8", newline="\n") as file:
         file.write("@format ktv-lrc\n@version 1\n\n@id 000000\n\n")
-        file.write(f"@song_name {traditional(song_name)}, zh-tw\n")
-        file.write(f"@singer {traditional(singer or 'Unknown')}, zh-tw\n")
+        file.write(f"@song_name {clean_text(song_name)}, zh-tw\n")
+        file.write(f"@singer {clean_text(singer or 'Unknown')}, zh-tw\n")
         file.write(f"@duration {int(max(0, duration_seconds))}\n\n")
         file.write("@lyrics zh-tw\n@lyric_synced word\n\n@lyric zh-tw\n")
 
         for line in aligned_lines:
             file.write(f"%{line.start:.3f} {line.end:.3f} {line.text}\n")
             for word in line.words:
-                file.write(f"${word['start']:.3f} {word['end']:.3f} {traditional(word['text'])}\n")
+                file.write(f"${word['start']:.3f} {word['end']:.3f} {clean_text(str(word['text']))}\n")
             file.write("\n")
 
         file.write("@dialogue\n")
@@ -523,6 +680,8 @@ def run_lyrics_alignment_pipeline(
     whisper_compute_type: str,
     whisper_language: str | None,
     alignment_python: str | None,
+    output_dialogue_audit_json: Path | None = None,
+    asr_backend: str = "auto",
 ) -> tuple[list[LyricLine], list[dict[str, Any]]]:
     lyrics_lines = parse_lyrics_text(lyrics_text)
     if not lyrics_lines:
@@ -534,7 +693,10 @@ def run_lyrics_alignment_pipeline(
         device=whisper_device,
         compute_type=whisper_compute_type,
         language=whisper_language,
+        lyrics_prompt="\n".join(lyrics_lines),
+        asr_backend=asr_backend,
     )
+    text_transform, _chinese_detected = build_text_transform(detected_language or whisper_language or "")
     aligned_segments = apply_forced_alignment(
         wav_path=vocals_wav,
         base_segments=segments,
@@ -542,14 +704,39 @@ def run_lyrics_alignment_pipeline(
         device=whisper_device,
         alignment_python=alignment_python,
     )
-    aligned_lines, matched_lines = _align_lyrics_with_match_count(lyrics_lines, aligned_segments)
+    aligned_lines, matched_lines, filtered_lyrics_dialogue = align_gt_lyrics_strict(lyrics_lines, aligned_segments, text_transform)
     if should_fallback_to_transcript_sync(lyrics_lines, matched_lines, aligned_segments):
-        fallback_lines = build_word_level_lines_from_segments(aligned_segments)
+        fallback_lines = build_word_level_lines_from_segments(aligned_segments, text_transform=text_transform)
         if fallback_lines:
             aligned_lines = fallback_lines
-    dialogue = detect_dialogue(aligned_lines, aligned_segments)
+            filtered_lyrics_dialogue = []
+    dialogue = detect_dialogue(aligned_lines, aligned_segments, text_transform=text_transform)
+    dialogue.extend(
+        item
+        for item in filtered_lyrics_dialogue
+        if not any(
+            item.get("text") == existing.get("text")
+            and abs(float(item.get("start", -1.0)) - float(existing.get("start", -2.0))) < 0.05
+            for existing in dialogue
+        )
+    )
+    dialogue.sort(key=lambda item: (float(item.get("start", 0.0)), float(item.get("end", 0.0))))
     refill_dialogue_to_backing(vocals_wav, backing_wav, dialogue, output_refilled_backing_wav)
+    if output_dialogue_audit_json is not None:
+        output_dialogue_audit_json.write_text(
+            json.dumps(
+                {
+                    "detected_language": detected_language,
+                    "chinese_conversion_enabled": _chinese_detected,
+                    "filtered_lyrics_dialogue": filtered_lyrics_dialogue,
+                    "dialogue_total": dialogue,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
 
     longest_end = max([line.end for line in aligned_lines], default=0.0)
-    write_ktv_lrc(output_lrc, song_name, singer, longest_end, aligned_lines, dialogue)
+    write_ktv_lrc(output_lrc, text_transform(song_name), text_transform(singer), longest_end, aligned_lines, dialogue)
     return aligned_lines, dialogue

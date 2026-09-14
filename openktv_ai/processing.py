@@ -427,6 +427,7 @@ class KTVProcessor:
             temp_vocals = job_temp_dir / "vocals.wav"
             temp_lrc = job_temp_dir / "lyrics.lrc"
             temp_backing_refilled = job_temp_dir / "accompaniment_refilled.wav"
+            temp_dialogue_audit = job_temp_dir / "dialogue_audit.json"
 
             self.log("步驟 1/4: 下載影片...")
             cmd_dl = [
@@ -464,6 +465,8 @@ class KTVProcessor:
                 whisper_compute_type=self.settings.whisper_compute_type,
                 whisper_language=self.settings.whisper_language or None,
                 alignment_python=self.settings.alignment_python or None,
+                output_dialogue_audit_json=temp_dialogue_audit,
+                asr_backend=self.settings.asr_backend,
             )
 
 
@@ -477,13 +480,16 @@ class KTVProcessor:
             final_instrumental = final.with_name(f"{final.stem}.instrumental.m4a")
             final_vocals = final.with_name(f"{final.stem}.vocals.wav")
             final_lrc = final.with_name(f"{final.stem}.lrc")
-            final_backing_refilled  = final.with_name(f"{final.stem}.backing_refilled.lrc")
+            final_backing_refilled  = final.with_name(f"{final.stem}.backing_refilled.wav")
+            final_dialogue_audit = final.with_name(f"{final.stem}.dialogue_audit.json")
 
             shutil.move(str(temp_output), str(final))
             shutil.move(str(temp_backing_refilled), str(final_backing_refilled))
             shutil.move(str(temp_instrumental), str(final_instrumental))
             shutil.move(str(temp_vocals), str(final_vocals))
             shutil.move(str(temp_lrc), str(final_lrc))
+            if temp_dialogue_audit.exists():
+                shutil.move(str(temp_dialogue_audit), str(final_dialogue_audit))
             self.log("✅ 製作完成！已自動同步至歌單。")
             return True
 

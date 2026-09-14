@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import subprocess
 import threading
@@ -51,11 +52,51 @@ def _validate_youtube_url(url: str) -> str:
 
 
 def _extract_title_artist(raw_title: str) -> tuple[str, str]:
-    value = (raw_title or "").strip()
-    if " - " in value:
-        artist, title = value.split(" - ", 1)
-        return title.strip(), artist.strip()
-    return value, ""
+    parsed = _parse_title_model(raw_title)
+    return parsed["song"], parsed["singer"]
+
+
+def _normalize_yt_title(raw_title: str) -> str:
+    text = (raw_title or "").strip()
+    noise_patterns = [
+        r"\[[^\]]*(official|lyrics|mv|music\s*video|karaoke|中字|歌詞)[^\]]*\]",
+        r"\([^\)]*(official|lyrics|mv|music\s*video|karaoke|中字|歌詞)[^\)]*\)",
+    ]
+    for pattern in noise_patterns:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text).strip(" -|｜_")
+    return text
+
+
+def _parse_title_model(raw_title: str, uploader: str = "") -> dict[str, str]:
+    normalized = _normalize_yt_title(raw_title)
+    separators = [" - ", " – ", " — ", " | ", " ｜ ", " / "]
+    for separator in separators:
+        if separator in normalized:
+            left, right = [part.strip() for part in normalized.split(separator, 1)]
+            if left and right:
+                return {"title": normalized, "song": right, "singer": left}
+
+    if uploader.strip():
+        return {"title": normalized or raw_title.strip(), "song": normalized or raw_title.strip(), "singer": uploader.strip()}
+    return {"title": normalized or raw_title.strip(), "song": normalized or raw_title.strip(), "singer": ""}
+
+
+def _extract_youtube_title(url: str) -> dict[str, str]:
+    safe_url = _validate_youtube_url(url)
+    try:
+        from yt_dlp import YoutubeDL  # pylint: disable=import-outside-toplevel
+    except Exception as error:
+        raise RuntimeError(f"無法載入 yt-dlp 模組: {error}") from error
+
+    with YoutubeDL({"quiet": True, "skip_download": True, "extract_flat": True}) as ydl:
+        payload = ydl.extract_info(safe_url, download=False)
+    title = (payload or {}).get("title") or ""
+    uploader = (payload or {}).get("uploader") or ""
+    parsed = _parse_title_model(title, uploader=uploader)
+    parsed["raw_title"] = title
+    parsed["uploader"] = uploader
+    return parsed
 
 
 def _playlist_entries(url: str, settings: AppSettings) -> list[dict]:
@@ -136,6 +177,17 @@ def _create_blueprint() -> Blueprint:
             return json.dumps({"ok": True, "entries": entries})
         except Exception as error:
             return json.dumps({"ok": False, "error": "playlist preview failed"}), 500
+
+    @bp.route("/api/resolve_yt_title")
+    def resolve_yt_title():
+        url = request.args.get("url", "").strip()
+        if not url:
+            return json.dumps({"ok": False, "error": "缺少連結"}), 400
+        try:
+            data = _extract_youtube_title(url)
+            return json.dumps({"ok": True, **data})
+        except Exception:
+            return json.dumps({"ok": False, "error": "無法解析 YouTube 標題"}), 500
 
     return bp
 
