@@ -5,3 +5,4 @@ ktv_songs/
 temp_processing/
 ffmpeg/
 model_cache/
+*.exe

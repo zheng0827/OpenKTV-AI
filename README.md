@@ -35,6 +35,21 @@ python main.py
 - `/admin` 後台（下載/分離/混音選項）
 - `/combo` 一體機
 
+### 歌詞強制對齊（可選）
+
+`karaoke_faster_whisper.py` 的 WhisperX 強制對齊會在獨立 Python
+環境執行，避免與 Demucs 的 Torch 版本衝突。主環境不要安裝 WhisperX：
+
+```powershell
+python -m venv .venv-whisperx
+.\.venv-whisperx\Scripts\pip install -r requirements-whisperx.txt
+python karaoke_faster_whisper.py vocals.wav --lyrics lyric.txt `
+  --alignment-python .\.venv-whisperx\Scripts\python.exe
+```
+
+若未指定 `--alignment-python`，程式會自動尋找 `.venv-whisperx` 或
+`venv-whisperx`；也可以使用 `--no-forced-alignment` 暫時停用強制對齊。
+
 ---
 
 ## 3) 設定（環境變數）
