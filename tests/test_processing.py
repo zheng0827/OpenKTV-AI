@@ -37,6 +37,7 @@ class ProcessingTests(unittest.TestCase):
             pseudo_reverb_damping=0.35,
             pseudo_backing_gain=0.9,
             whisper_model='large-v3',
+            asr_backend='auto',
             whisper_compute_type='auto',
             whisper_language='zh',
             alignment_python='',
@@ -91,6 +92,10 @@ class LibraryTests(unittest.TestCase):
     def test_sanitize_lrclib_lyrics_filters_noise(self):
         raw = "[00:01.20]☆☆☆\n[00:03.20] 第一行歌詞 \n[00:05.20]第二行歌詞\n***\n"
         self.assertEqual(sanitize_lrclib_lyrics(raw), "第一行歌詞\n第二行歌詞")
+
+    def test_sanitize_lrclib_lyrics_filters_unicode_noise(self):
+        raw = "\ufeff[00:01.20]发光\u200b\n\u0007\u0008[00:03.20]第\u2060二行！！！\n"
+        self.assertEqual(sanitize_lrclib_lyrics(raw), "发光\n第二行！！")
 
     def test_parse_first_lyric_time(self):
         path = Path('/tmp/test-first-line.lrc')

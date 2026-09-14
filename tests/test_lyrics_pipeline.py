@@ -3,6 +3,8 @@ import unittest
 from openktv_ai.lyrics_pipeline.aligner import (
     LyricLine,
     align_lyrics,
+    align_gt_lyrics_strict,
+    build_text_transform,
     build_word_level_lines_from_segments,
     detect_dialogue,
     parse_lyrics_text,
@@ -95,6 +97,25 @@ class LyricsPipelineTests(unittest.TestCase):
         lines = build_word_level_lines_from_segments(segments)
         self.assertEqual(len(lines), 1)
         self.assertEqual(lines[0].text, "你好")
+
+    def test_align_gt_lyrics_strict_routes_unreliable_lines_to_dialogue(self):
+        transform, _ = build_text_transform("zh")
+        lines = ["第一句", "第二句", "錯誤句"]
+        segments = [
+            {"start": 1.0, "end": 2.0, "text": "第一句", "words": []},
+            {"start": 3.0, "end": 4.0, "text": "第二句", "words": []},
+        ]
+        aligned, matched, filtered = align_gt_lyrics_strict(lines, segments, transform)
+        self.assertEqual(matched, 2)
+        self.assertEqual([line.text for line in aligned], ["第一句", "第二句"])
+        self.assertEqual(filtered[0]["reason"], "not_found")
+
+    def test_build_text_transform_only_converts_chinese_lines(self):
+        transform, enabled = build_text_transform("zh")
+        self.assertTrue(enabled)
+        self.assertEqual(transform("发光"), "發光")
+        self.assertEqual(transform("hello world"), "hello world")
+        self.assertEqual(transform("東京ラブストーリー"), "東京ラブストーリー")
 
 
 if __name__ == '__main__':

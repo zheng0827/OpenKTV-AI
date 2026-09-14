@@ -41,11 +41,6 @@
     </div>
 
     <div class="panel">
-        <div>⏱ 播放位置 <span id="seekText">0.0s</span></div>
-        <input type="range" id="seek" min="0" max="900" step="0.1" value="0" oninput="previewSeek(this.value)" onchange="commitSeek(this.value)">
-    </div>
-
-    <div class="panel">
         <div>🔎 點歌</div>
         <input id="search" type="text" placeholder="搜尋歌曲" oninput="renderSongs()">
     </div>
@@ -62,8 +57,6 @@
         function cmd(action) { socket.emit('control', action); }
         function track(mode) { socket.emit('change_track', mode); }
         function skipIntro() { socket.emit('skip_intro'); }
-        function previewSeek(value) { document.getElementById('seekText').innerText = `${Number(value).toFixed(1)}s`; }
-        function commitSeek(value) { socket.emit('seek', { position: Number(value) }); }
 
         function setVolume() {
             const vol = Number(document.getElementById('vol').value);
@@ -97,8 +90,6 @@
         socket.on('playback_snapshot', (snapshot) => {
             const current = Number(snapshot.position || 0);
             latestPosition = current;
-            document.getElementById('seek').value = current;
-            document.getElementById('seekText').innerText = `${current.toFixed(1)}s`;
             const hideAt = Number(snapshot.intro_skip_hide_after);
             const canShow = Number.isFinite(hideAt) && Number.isFinite(Number(snapshot.intro_skip_to)) && current < hideAt && !snapshot.intro_skip_used;
             skipEl.style.display = canShow ? 'block' : 'none';

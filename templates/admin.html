@@ -35,6 +35,7 @@
 
         <label>自訂標題（單曲時可填）</label>
         <input id="yt_title" placeholder="歌手 - 歌名">
+        <button class="secondary" onclick="resolveTitleFromYoutube()">從 YouTube 標題自動解析歌手/歌名</button>
 
         <label>Demucs stems</label>
         <select id="stems_mode">
@@ -210,3 +211,17 @@
     </script>
 </body>
 </html>
+        async function resolveTitleFromYoutube() {
+            const url = document.getElementById('yt_url').value.trim();
+            if (!url) { alert('請先輸入 YouTube 連結'); return; }
+            const resp = await fetch(`/api/resolve_yt_title?url=${encodeURIComponent(url)}`);
+            const data = await resp.json();
+            if (!data.ok) {
+                alert(data.error || '解析失敗');
+                return;
+            }
+            const mergedTitle = data.singer ? `${data.singer} - ${data.song}` : data.song;
+            document.getElementById('yt_title').value = mergedTitle;
+            document.getElementById('lyricSongName').value = data.song || '';
+            document.getElementById('lyricSinger').value = data.singer || '';
+        }

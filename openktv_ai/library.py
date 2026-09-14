@@ -4,6 +4,7 @@ import csv
 import json
 import re
 import time
+import unicodedata
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -11,6 +12,7 @@ from pathlib import Path
 TIMESTAMP_RE = re.compile(r"\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]|^[%$&](\d+(?:\.\d+)?)")
 LRC_INLINE_TIMESTAMP_RE = re.compile(r"\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\]")
 SYMBOL_NOISE_LINE_RE = re.compile(r"^[^0-9A-Za-z\u3400-\u9fff]+$")
+REPEATED_SYMBOL_RE = re.compile(r"([^\w\s\u3400-\u9fff])\1{3,}")
 
 
 def parse_first_lyric_time(lrc_path: Path) -> float | None:
@@ -87,10 +89,13 @@ def fetch_lrclib_lyrics(song_name: str, singer: str) -> str | None:
     if not isinstance(payload, list) or not payload:
         return None
 
-    item = payload[0] if isinstance(payload[0], dict) else None
-    if not item:
-        return None
-    return sanitize_lrclib_lyrics(item.get("syncedLyrics") or item.get("plainLyrics"))
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        cleaned = sanitize_lrclib_lyrics(item.get("plainLyrics"))
+        if cleaned:
+            return cleaned
+    return None
 
 
 def sanitize_lrclib_lyrics(lyrics: str | None) -> str | None:
@@ -99,10 +104,11 @@ def sanitize_lrclib_lyrics(lyrics: str | None) -> str | None:
 
     cleaned_lines: list[str] = []
     for raw_line in lyrics.splitlines():
-        line = raw_line.replace("\ufeff", "").replace("\u200b", "").strip()
+        line = _strip_weird_unicode(raw_line).strip()
         if not line:
             continue
         line = LRC_INLINE_TIMESTAMP_RE.sub("", line).strip()
+        line = REPEATED_SYMBOL_RE.sub(r"\1\1", line).strip()
         if not line or SYMBOL_NOISE_LINE_RE.fullmatch(line):
             continue
         cleaned_lines.append(line)
@@ -110,6 +116,21 @@ def sanitize_lrclib_lyrics(lyrics: str | None) -> str | None:
     if not cleaned_lines:
         return None
     return "\n".join(cleaned_lines)
+
+
+def _strip_weird_unicode(text: str) -> str:
+    allowed = []
+    for char in text:
+        category = unicodedata.category(char)
+        if char in {"\n", "\r", "\t"}:
+            allowed.append(char)
+            continue
+        if category in {"Cc", "Cf", "Cs", "Co", "Cn"}:
+            continue
+        if char in {"\u200b", "\u200c", "\u200d", "\u2060", "\ufeff"}:
+            continue
+        allowed.append(char)
+    return "".join(allowed)
 
 
 def write_ktv_lrc_template(output_path: Path, song_name: str, singer: str, lyrics: str | None) -> None:

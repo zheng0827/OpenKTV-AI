@@ -16,6 +16,7 @@
         .add { background: #00897b; }
         .next { background: #1976d2; }
         .remove { background: #c62828; }
+        .control { background: #546e7a; }
         input { width: 100%; box-sizing: border-box; background: #333; border: 1px solid #555; color: #fff; border-radius: 8px; padding: 10px; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
@@ -28,6 +29,12 @@
 
     <div class="panel">
         <h3>目前與後續佇列</h3>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-bottom:8px;">
+            <button class="control" onclick="socket.emit('control','pause')">⏯ 暫停/播放</button>
+            <button class="control" onclick="socket.emit('control','cut')">⏭ 切歌</button>
+            <button class="control" onclick="socket.emit('change_track','original')">🎤 原唱</button>
+            <button class="control" onclick="socket.emit('change_track','instrumental')">🎧 伴奏</button>
+        </div>
         <button class="next" id="skipIntroBtn" style="display:none;margin-bottom:8px;" onclick="socket.emit('skip_intro')">⏩ 跳過前奏</button>
         <ul id="queue" class="queue"></ul>
     </div>
@@ -66,7 +73,8 @@
                 queueEl.innerHTML = '<li><span class="name">(目前無歌曲)</span></li>';
                 return;
             }
-            items.forEach(item => {
+            const ordered = [...items.filter(x => x.state === 'playing'), ...items.filter(x => x.state === 'queued'), ...items.filter(x => x.state === 'sung')];
+            ordered.forEach(item => {
                 const li = document.createElement('li');
                 if (item.state === 'sung') li.classList.add('sung');
                 const titlePrefix = item.state === 'playing' ? '🎤 目前播放' : item.state === 'sung' ? '✅ 已唱' : '⏭ 待播';
