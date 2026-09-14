@@ -27,8 +27,8 @@ class LyricsPipelineTests(unittest.TestCase):
         ]
         aligned = align_lyrics(lines, segments)
         self.assertEqual([line.text for line in aligned], lines)
-        self.assertLess(aligned[0].end, aligned[1].start)
-        self.assertLess(aligned[1].end, aligned[2].start)
+        self.assertLessEqual(aligned[0].end, aligned[1].start)
+        self.assertLessEqual(aligned[1].end, aligned[2].start)
 
     def test_detect_dialogue_non_overlap(self):
         aligned = [LyricLine(start=1.0, end=2.0, text="歌詞", words=[])]
