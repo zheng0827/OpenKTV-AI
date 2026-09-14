@@ -39,6 +39,17 @@ def _is_playlist_url(url: str) -> bool:
     return "list" in query or "/playlist" in parsed.path
 
 
+def _validate_youtube_url(url: str) -> str:
+    parsed = urlparse((url or "").strip())
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("只允許 http/https 連結")
+    host = (parsed.netloc or "").lower()
+    allowed_hosts = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "www.youtu.be"}
+    if host not in allowed_hosts:
+        raise ValueError("僅支援 YouTube 連結")
+    return url.strip()
+
+
 def _extract_title_artist(raw_title: str) -> tuple[str, str]:
     value = (raw_title or "").strip()
     if " - " in value:
@@ -48,12 +59,14 @@ def _extract_title_artist(raw_title: str) -> tuple[str, str]:
 
 
 def _playlist_entries(url: str, settings: AppSettings) -> list[dict]:
+    safe_url = _validate_youtube_url(url)
     command = [
         str(settings.yt_dlp_path) if settings.yt_dlp_path.exists() else "yt-dlp",
         "--flat-playlist",
         "--dump-single-json",
         "--no-warnings",
-        url,
+        "--",
+        safe_url,
     ]
     result = subprocess.run(command, capture_output=True, text=True, check=False)
     if result.returncode != 0:
@@ -127,7 +140,7 @@ def _create_blueprint() -> Blueprint:
             entries = _playlist_entries(url, settings)
             return json.dumps({"ok": True, "entries": entries})
         except Exception as error:
-            return json.dumps({"ok": False, "error": str(error)}), 500
+            return json.dumps({"ok": False, "error": "playlist preview failed"}), 500
 
     return bp
 
@@ -417,6 +430,11 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
             return
 
         url = (data.get("url") or "").strip()
+        try:
+            url = _validate_youtube_url(url)
+        except Exception as error:
+            broadcast_log(f"❌ 無效連結: {error}")
+            return
         manual_title = (data.get("title") or "").strip()
         options = {
             "stems": data.get("stems"),
