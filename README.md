@@ -36,8 +36,9 @@
 6. **歌詞與索引**
    - 新增 `openktv_ai/lyrics_pipeline/` 專責處理：
      - faster-whisper 句級定位
-     - 強制對齊 word-level（whisperx，可走獨立 python）
+     - 強制對齊 word-level（whisperx，可走獨立 python，支援自動偵測 `.venv-whisperx`）
      - 對白偵測與回填 backing track
+     - 當外部歌詞與人聲匹配率過低時，自動 fallback 為 WhisperX 轉寫歌詞，避免錯誤回填人聲到伴奏
    - 產生 `ktv-lrc` 格式 `.lrc`，供播放器字幕特效使用。
    - 曲庫索引 CSV：`library_index.csv`。
 

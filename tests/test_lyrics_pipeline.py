@@ -1,6 +1,13 @@
 import unittest
 
-from openktv_ai.lyrics_pipeline.aligner import LyricLine, align_lyrics, detect_dialogue, parse_lyrics_text
+from openktv_ai.lyrics_pipeline.aligner import (
+    LyricLine,
+    align_lyrics,
+    build_word_level_lines_from_segments,
+    detect_dialogue,
+    parse_lyrics_text,
+    should_fallback_to_transcript_sync,
+)
 
 
 class LyricsPipelineTests(unittest.TestCase):
@@ -48,6 +55,28 @@ class LyricsPipelineTests(unittest.TestCase):
         dialogue = detect_dialogue(aligned, segments)
         self.assertEqual(len(dialogue), 1)
         self.assertEqual(dialogue[0]["text"], "旁白")
+
+    def test_build_word_level_lines_from_segments_uses_segment_words(self):
+        segments = [
+            {
+                "start": 0.5,
+                "end": 1.5,
+                "text": "你好",
+                "words": [
+                    {"text": "你", "start": 0.5, "end": 1.0},
+                    {"text": "好", "start": 1.0, "end": 1.5},
+                ],
+            }
+        ]
+        lines = build_word_level_lines_from_segments(segments)
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0].text, "你好")
+        self.assertEqual(len(lines[0].words), 2)
+
+    def test_should_fallback_to_transcript_sync_when_match_ratio_low(self):
+        lyrics_lines = ["一", "二", "三", "四"]
+        self.assertTrue(should_fallback_to_transcript_sync(lyrics_lines, matched_lines=1))
+        self.assertFalse(should_fallback_to_transcript_sync(lyrics_lines, matched_lines=3))
 
 
 if __name__ == '__main__':

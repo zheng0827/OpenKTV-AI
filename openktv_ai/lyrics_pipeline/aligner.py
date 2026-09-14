@@ -12,6 +12,7 @@ from typing import Any
 LRC_INLINE_TIMESTAMP_RE = re.compile(r"\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\]")
 SYMBOL_NOISE_LINE_RE = re.compile(r"^[^0-9A-Za-z\u3400-\u9fff]+$")
 MIN_MATCH_SCORE = 0.72
+MIN_LYRIC_MATCH_RATIO = 0.35
 
 
 @dataclass
@@ -128,10 +129,38 @@ def transcribe_segments(
     return out, getattr(info, "language", language or "zh")
 
 
+def resolve_alignment_python(path: str | None) -> str | None:
+    if path:
+        candidate = Path(path).expanduser()
+        if candidate.exists():
+            return str(candidate.resolve())
+        return path
+
+    candidates = [
+        Path(".venv-whisperx") / "Scripts" / "python.exe",
+        Path("venv-whisperx") / "Scripts" / "python.exe",
+        Path(".venv-whisperx") / "bin" / "python",
+        Path("venv-whisperx") / "bin" / "python",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate.resolve())
+    return None
+
+
 def _merge_alignment(base_segments: list[dict[str, Any]], aligned_segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     merged = []
-    for base, aligned in zip(base_segments, aligned_segments):
+    aligned_index = 0
+    for base in base_segments:
         updated = dict(base)
+        if not clean_text(str(base.get("text", ""))):
+            merged.append(updated)
+            continue
+        if aligned_index >= len(aligned_segments):
+            merged.append(updated)
+            continue
+        aligned = aligned_segments[aligned_index]
+        aligned_index += 1
         aligned_words = []
         for item in aligned.get("chars", []):
             text = clean_text(item.get("char", item.get("text", "")))
@@ -161,12 +190,39 @@ def apply_forced_alignment(
     device: str,
     alignment_python: str | None = None,
 ) -> list[dict[str, Any]]:
+    if not base_segments:
+        return base_segments
+
     payload = {
         "wav": str(wav_path),
         "segments": base_segments,
         "language": language,
         "device": "cpu" if device == "cpu" else "cuda",
     }
+    alignment_python = resolve_alignment_python(alignment_python)
+
+    if alignment_python:
+        with tempfile.TemporaryDirectory() as tmp:
+            input_json = Path(tmp) / "align-input.json"
+            output_json = Path(tmp) / "align-output.json"
+            input_json.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+            command = [
+                alignment_python,
+                "-m",
+                "openktv_ai.lyrics_pipeline.alignment_worker",
+                "--alignment-input",
+                str(input_json),
+                "--alignment-output",
+                str(output_json),
+            ]
+            completed = subprocess.run(command, check=False, capture_output=True, text=True)
+            if completed.returncode == 0 and output_json.exists():
+                try:
+                    aligned_segments = json.loads(output_json.read_text(encoding="utf-8"))
+                    return _merge_alignment(base_segments, aligned_segments)
+                except Exception:
+                    pass
 
     try:
         import whisperx  # pylint: disable=import-outside-toplevel
@@ -182,33 +238,7 @@ def apply_forced_alignment(
         )
         return _merge_alignment(base_segments, aligned.get("segments", []))
     except Exception:
-        pass
-
-    if not alignment_python:
         return base_segments
-
-    with tempfile.TemporaryDirectory() as tmp:
-        input_json = Path(tmp) / "align-input.json"
-        output_json = Path(tmp) / "align-output.json"
-        input_json.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-
-        command = [
-            alignment_python,
-            "-m",
-            "openktv_ai.lyrics_pipeline.alignment_worker",
-            "--alignment-input",
-            str(input_json),
-            "--alignment-output",
-            str(output_json),
-        ]
-        subprocess.run(command, check=False, capture_output=True, text=True)
-        if not output_json.exists():
-            return base_segments
-        try:
-            aligned_segments = json.loads(output_json.read_text(encoding="utf-8"))
-        except Exception:
-            return base_segments
-        return _merge_alignment(base_segments, aligned_segments)
 
 
 def find_segment(lyric_line: str, segments: list[dict[str, Any]], start_index: int) -> tuple[int | None, float]:
@@ -280,11 +310,17 @@ def interpolate_words(text: str, start: float, end: float) -> list[dict[str, Any
 
 
 def align_lyrics(lyrics_lines: list[str], segments: list[dict[str, Any]]) -> list[LyricLine]:
+    aligned_lines, _ = _align_lyrics_with_match_count(lyrics_lines, segments)
+    return aligned_lines
+
+
+def _align_lyrics_with_match_count(lyrics_lines: list[str], segments: list[dict[str, Any]]) -> tuple[list[LyricLine], int]:
     out: list[LyricLine] = []
     search_idx = 0
     pending_lines: list[str] = []
     previous_end: float | None = None
     has_anchor = False
+    matched_count = 0
     for lyric in lyrics_lines:
         idx, score = find_segment(lyric, segments, search_idx)
         if idx is None:
@@ -311,6 +347,7 @@ def align_lyrics(lyrics_lines: list[str], segments: list[dict[str, Any]]) -> lis
         search_idx = idx + 1
         previous_end = float(segment["end"])
         has_anchor = True
+        matched_count += 1
 
     if pending_lines:
         if has_anchor and previous_end is not None:
@@ -324,7 +361,41 @@ def align_lyrics(lyrics_lines: list[str], segments: list[dict[str, Any]]) -> lis
             tail_start = 0.0
             tail_end = max(1.0, len(pending_lines))
         _append_interpolated_lines(out, pending_lines, tail_start, tail_end)
-    return out
+    return out, matched_count
+
+
+def build_word_level_lines_from_segments(segments: list[dict[str, Any]]) -> list[LyricLine]:
+    lines: list[LyricLine] = []
+    for segment in segments:
+        text = clean_text(str(segment.get("text", "")))
+        if not text:
+            continue
+        start = segment.get("start")
+        end = segment.get("end")
+        if start is None or end is None:
+            continue
+        start = float(start)
+        end = float(end)
+        if end <= start:
+            continue
+        words = []
+        for word in segment.get("words", []):
+            token = clean_text(str(word.get("text", word.get("word", ""))))
+            token_start = word.get("start")
+            token_end = word.get("end")
+            if token and token_start is not None and token_end is not None and float(token_end) >= float(token_start):
+                words.append({"text": token, "start": float(token_start), "end": float(token_end)})
+        if not words:
+            words = interpolate_words(text, start, end)
+        lines.append(LyricLine(start=start, end=end, text=traditional(text), words=words))
+    return lines
+
+
+def should_fallback_to_transcript_sync(lyrics_lines: list[str], matched_lines: int) -> bool:
+    if not lyrics_lines:
+        return False
+    ratio = matched_lines / len(lyrics_lines)
+    return ratio < MIN_LYRIC_MATCH_RATIO and len(lyrics_lines) >= 3
 
 
 def detect_dialogue(aligned_lines: list[LyricLine], segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -419,7 +490,9 @@ def run_lyrics_alignment_pipeline(
         device=whisper_device,
         alignment_python=alignment_python,
     )
-    aligned_lines = align_lyrics(lyrics_lines, aligned_segments)
+    aligned_lines, matched_lines = _align_lyrics_with_match_count(lyrics_lines, aligned_segments)
+    if should_fallback_to_transcript_sync(lyrics_lines, matched_lines):
+        aligned_lines = build_word_level_lines_from_segments(aligned_segments)
     dialogue = detect_dialogue(aligned_lines, aligned_segments)
     refill_dialogue_to_backing(vocals_wav, backing_wav, dialogue, output_refilled_backing_wav)
 
