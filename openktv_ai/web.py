@@ -60,19 +60,13 @@ def _extract_title_artist(raw_title: str) -> tuple[str, str]:
 
 def _playlist_entries(url: str, settings: AppSettings) -> list[dict]:
     safe_url = _validate_youtube_url(url)
-    command = [
-        str(settings.yt_dlp_path) if settings.yt_dlp_path.exists() else "yt-dlp",
-        "--flat-playlist",
-        "--dump-single-json",
-        "--no-warnings",
-        "--",
-        safe_url,
-    ]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "讀取 playlist 失敗")
+    try:
+        from yt_dlp import YoutubeDL  # pylint: disable=import-outside-toplevel
+    except Exception as error:
+        raise RuntimeError(f"無法載入 yt-dlp 模組: {error}") from error
 
-    payload = json.loads(result.stdout)
+    with YoutubeDL({"quiet": True, "extract_flat": True, "skip_download": True}) as ydl:
+        payload = ydl.extract_info(safe_url, download=False)
     entries = []
     for item in payload.get("entries", []) or []:
         video_id = item.get("id")
