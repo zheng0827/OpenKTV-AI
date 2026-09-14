@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KTV Queue</title>
+    <style>
+        body { margin: 0; padding: 14px; font-family: sans-serif; background: #121212; color: #eee; }
+        .nav a { color: #fff; text-decoration: none; margin-right: 8px; background: #37474F; padding: 8px 12px; border-radius: 8px; display: inline-block; }
+        .row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; align-items: center; background: #1e1e1e; margin: 6px 0; border-radius: 8px; padding: 8px; }
+        .muted { color: #777; }
+        button { border: 0; border-radius: 6px; padding: 6px 10px; color: #fff; }
+        .next { background: #00897B; } .play { background: #1E88E5; } .del { background: #E53935; }
+        .song-btn { background: #6A1B9A; }
+        #search { width: 100%; margin: 12px 0; box-sizing: border-box; padding: 10px; border-radius: 8px; border: 1px solid #333; background: #222; color: #fff; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+</head>
+<body>
+<div class="nav">
+    <a href="/remote">📱 Remote</a>
+    <a href="/player">📺 Player</a>
+    <a href="/combo">🖥 Combo</a>
+</div>
+
+<h3>目前播放</h3>
+<div id="current">(無)</div>
+
+<h3>待播清單</h3>
+<div id="queue"></div>
+
+<h3>已點播/已唱</h3>
+<div id="history"></div>
+
+<hr style="border-color:#333;">
+<h3>曲庫點播</h3>
+<input id="search" placeholder="搜尋歌曲" oninput="renderLibrary()" />
+<div id="library"></div>
+
+<script>
+const socket = io();
+let library = [];
+
+socket.on('connect', () => {
+  socket.emit('register_client', { role: 'queue' });
+  socket.emit('request_state');
+});
+
+function esc(s){ return (s || '').replace('.mp4',''); }
+
+function renderState(s) {
+  document.getElementById('current').innerText = s.current_song ? esc(s.current_song) : '(無)';
+
+  const q = document.getElementById('queue');
+  q.innerHTML = '';
+  if (!s.queue.length) q.innerHTML = '<div class="muted">(待播清單為空)</div>';
+  s.queue.forEach((song, idx) => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `
+      <div>${esc(song)}</div>
+      <button class="play">立即播</button>
+      <button class="next">插播下一首</button>
+      <button class="del">刪除</button>
+    `;
+    row.querySelector('.play').onclick = () => socket.emit('queue_play_now', { filename: song });
+    row.querySelector('.next').onclick = () => socket.emit('queue_insert_next', { filename: song });
+    row.querySelector('.del').onclick = () => socket.emit('queue_remove', { index: idx });
+    q.appendChild(row);
+  });
+
+  const h = document.getElementById('history');
+  h.innerHTML = '';
+  if (!s.history.length) h.innerHTML = '<div class="muted">(尚無已唱歌曲)</div>';
+  s.history.slice().reverse().forEach(song => {
+    const row = document.createElement('div');
+    row.className = 'row muted';
+    row.style.gridTemplateColumns = '1fr';
+    row.innerHTML = `<div>${esc(song)}</div>`;
+    h.appendChild(row);
+  });
+}
+
+function renderLibrary() {
+  const key = document.getElementById('search').value.toLowerCase();
+  const el = document.getElementById('library');
+  el.innerHTML = '';
+  library.filter(s => s.toLowerCase().includes(key)).forEach(song => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.style.gridTemplateColumns = '1fr auto auto';
+    row.innerHTML = `<div>${esc(song)}</div><button class="song-btn">點播</button><button class="next">插播</button>`;
+    row.querySelector('.song-btn').onclick = () => socket.emit('add_to_queue', { filename: song });
+    row.querySelector('.next').onclick = () => socket.emit('queue_insert_next', { filename: song });
+    el.appendChild(row);
+  });
+}
+
+function loadLibrary(){
+  fetch('/api/list').then(r=>r.json()).then(data=>{ library = data; renderLibrary(); });
+}
+
+socket.on('playback_snapshot', renderState);
+socket.on('refresh_list', loadLibrary);
+loadLibrary();
+</script>
+</body>
+</html>

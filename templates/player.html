@@ -1,112 +1,166 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>KTV 播放螢幕</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>KTV Player</title>
     <style>
-        body { background: #000; margin: 0; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; color: #fff; font-family: Arial; }
-        video { width: 100%; height: 100%; object-fit: contain; }
-        #overlay { position: absolute; top: 20px; left: 20px; font-size: 24px; text-shadow: 2px 2px 4px #000; z-index: 10; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px;}
-        #waiting { font-size: 50px; color: #555; cursor: pointer; }
+        body { margin: 0; background: #000; color: #fff; font-family: Arial, sans-serif; height: 100vh; overflow: hidden; }
+        #root { position: relative; width: 100vw; height: 100vh; }
+        video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+        #topbar { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; justify-content: space-between; align-items: center; z-index: 20; }
+        #status { background: rgba(0,0,0,0.5); padding: 8px 12px; border-radius: 6px; font-size: 14px; }
+        .btn { border: 1px solid #fff; background: rgba(0,0,0,0.4); color: #fff; border-radius: 6px; padding: 8px 12px; cursor: pointer; margin-left: 8px; }
+        #lyrics { position: absolute; left: 0; right: 0; bottom: 0; height: 28vh; padding: 16px; background: linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,0.75) 30%, rgba(0,0,0,0.9) 100%); z-index: 10; pointer-events: none; }
+        #countdown { text-align: center; font-size: 30px; color: #ffd54f; min-height: 38px; font-weight: bold; }
+        #line1, #line2 { font-size: 32px; line-height: 1.4; text-shadow: 0 2px 4px #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        #line1 { text-align: left; }
+        #line2 { text-align: right; margin-top: 8px; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 </head>
 <body>
-    <div id="overlay">等待連線...</div>
-    <div id="waiting" onclick="initAudioContext()">📺 KTV 準備就緒 (點我啟動音效)</div>
-    <video id="vid" playsinline crossorigin="anonymous"></video>
+<div id="root">
+    <video id="vid" playsinline crossorigin="anonymous" disablePictureInPicture controlslist="nodownload noplaybackrate noremoteplayback"></video>
+    <div id="topbar">
+        <div id="status">連線中...</div>
+        <div>
+            <button id="skipIntro" class="btn" style="display:none;">⏩ 跳過前奏</button>
+            <button id="fsBtn" class="btn">⛶ 全螢幕</button>
+        </div>
+    </div>
+    <div id="lyrics">
+        <div id="countdown"></div>
+        <div id="line1">　</div>
+        <div id="line2">　</div>
+    </div>
+</div>
 
-    <script>
-        const socket = io();
-        const video = document.getElementById('vid');
-        const overlay = document.getElementById('overlay');
-        const waiting = document.getElementById('waiting');
-        
-        let audioCtx, source, splitter, gainL, gainR, merger;
-        let isAudioSetup = false;
-        let currentMode = 'stereo';
+<script>
+const socket = io();
+const video = document.getElementById('vid');
+const statusEl = document.getElementById('status');
+const skipBtn = document.getElementById('skipIntro');
+const fsBtn = document.getElementById('fsBtn');
 
-        function initAudioContext() {
-            if(!audioCtx) {
-                const AudioContext = window.AudioContext || window.webkitAudioContext;
-                audioCtx = new AudioContext();
-            }
-            if(audioCtx.state === 'suspended') {
-                audioCtx.resume();
-            }
-            waiting.innerText = "🔊 音效引擎已啟動，等待點歌...";
-            waiting.style.color = "#4CAF50";
-        }
+let internalSeek = false;
+let authoritative = { status: 'stopped', position: 0, intro_skip_at: null, current_song: null };
+let audioReady = false;
 
-        function setupAudio() {
-            if(isAudioSetup) return;
-            if(!audioCtx) initAudioContext();
+function nowPos(snapshot) {
+    if (!snapshot) return 0;
+    let p = snapshot.position || 0;
+    if (snapshot.status === 'playing' && snapshot.server_time) {
+        p += Math.max(0, Date.now() / 1000 - snapshot.server_time);
+    }
+    return p;
+}
 
-            source = audioCtx.createMediaElementSource(video);
-            splitter = audioCtx.createChannelSplitter(2);
-            merger = audioCtx.createChannelMerger(2);
-            gainL = audioCtx.createGain();
-            gainR = audioCtx.createGain();
+function tryEnableAudio() {
+    if (audioReady) return;
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (Ctx) {
+        const ctx = new Ctx();
+        if (ctx.state === 'suspended') ctx.resume();
+    }
+    audioReady = true;
+}
 
-            source.connect(splitter);
-            splitter.connect(gainL, 0); 
-            gainL.connect(merger, 0, 0); 
-            gainL.connect(merger, 0, 1); 
-            splitter.connect(gainR, 1);
-            gainR.connect(merger, 0, 0); 
-            gainR.connect(merger, 0, 1); 
-            merger.connect(audioCtx.destination);
-            
-            isAudioSetup = true;
-            setAudioMode(currentMode);
-        }
+document.addEventListener('click', tryEnableAudio, { once: true });
+document.addEventListener('touchstart', tryEnableAudio, { once: true });
 
-        socket.on('connect', () => { overlay.innerText = "✅ 已連線主機"; });
+function applySnapshot(snapshot) {
+    authoritative = snapshot;
+    const target = nowPos(snapshot);
+    const drift = Math.abs((video.currentTime || 0) - target);
 
-        socket.on('play_video', (data) => {
-            waiting.style.display = 'none';
-            overlay.innerText = "正在播放: " + data.title;
-            video.src = "/songs/" + encodeURIComponent(data.filename) + "?t=" + new Date().getTime();
-            video.play().then(() => {
-                if(!isAudioSetup) setupAudio();
-                setAudioMode('original'); 
-            }).catch(e => {
-                overlay.innerText = "⚠️ 請點擊畫面開始播放";
-            });
-        });
+    if (snapshot.current_song) {
+        statusEl.innerText = `播放中: ${snapshot.current_song.replace('.mp4','')} (${snapshot.status})`;
+    } else {
+        statusEl.innerText = '待機中';
+    }
 
-        socket.on('command', (cmd) => {
-            if (cmd === 'pause') video.paused ? video.play() : video.pause();
-            if (cmd === 'stop') {
-                video.pause();
-                video.src = "";
-                waiting.style.display = 'block';
-                overlay.innerText = "⏹ 已停止";
-            }
-        });
+    if (snapshot.intro_skip_at !== null && snapshot.intro_skip_at !== undefined && target < snapshot.intro_skip_at) {
+        skipBtn.style.display = 'inline-block';
+    } else {
+        skipBtn.style.display = 'none';
+    }
 
-        socket.on('set_audio', (mode) => {
-            currentMode = mode;
-            setAudioMode(mode);
-        });
+    if (snapshot.status === 'playing' && video.paused && video.src) {
+        video.play().catch(() => {});
+    }
+    if (snapshot.status === 'paused' && !video.paused) {
+        video.pause();
+    }
+    if (drift > 0.45 && video.src) {
+        internalSeek = true;
+        video.currentTime = target;
+        setTimeout(() => { internalSeek = false; }, 80);
+    }
+}
 
-        function setAudioMode(mode) {
-            if(!isAudioSetup || !gainL || !gainR) return;
-            const now = audioCtx.currentTime;
-            if (mode === 'original') { 
-                gainL.gain.setTargetAtTime(1, now, 0.1);
-                gainR.gain.setTargetAtTime(0, now, 0.1);
-                overlay.innerText = "🎤 目前模式：原唱";
-            } else if (mode === 'instrumental') { 
-                gainL.gain.setTargetAtTime(0, now, 0.1);
-                gainR.gain.setTargetAtTime(1, now, 0.1);
-                overlay.innerText = "🚫 目前模式：伴奏";
-            } else { 
-                gainL.gain.setTargetAtTime(1, now, 0.1);
-                gainR.gain.setTargetAtTime(1, now, 0.1);
-                overlay.innerText = "🎵 目前模式：立體聲";
-            }
-        }
-        document.body.addEventListener('click', initAudioContext);
-    </script>
+socket.on('connect', () => {
+    statusEl.innerText = '已連線，等待同步';
+    socket.emit('register_client', { role: 'player' });
+    socket.emit('request_state');
+});
+
+socket.on('play_video', (data) => {
+    const newSrc = '/songs/' + encodeURIComponent(data.filename) + '?t=' + Date.now();
+    if (!video.src.includes(encodeURIComponent(data.filename))) {
+        video.src = newSrc;
+    }
+    const seekTo = Number(data.start_at || 0);
+    internalSeek = true;
+    video.currentTime = seekTo;
+    setTimeout(() => { internalSeek = false; }, 80);
+    video.play().catch(() => {
+        statusEl.innerText = '請點擊頁面啟用音訊';
+    });
+});
+
+socket.on('stop_video', () => {
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+    statusEl.innerText = '已停止';
+    skipBtn.style.display = 'none';
+});
+
+socket.on('command', (cmd) => {
+    if (!cmd || !cmd.action) return;
+    if (cmd.action === 'pause_toggle') {
+        if (video.paused) video.play().catch(() => {}); else video.pause();
+    }
+    if (cmd.action === 'seek') {
+        internalSeek = true;
+        video.currentTime = Number(cmd.position || 0);
+        setTimeout(() => { internalSeek = false; }, 80);
+    }
+});
+
+socket.on('playback_snapshot', applySnapshot);
+
+video.onended = () => {
+    socket.emit('song_ended', {});
+};
+
+video.addEventListener('seeking', () => {
+    if (internalSeek) return;
+    internalSeek = true;
+    video.currentTime = nowPos(authoritative);
+    setTimeout(() => { internalSeek = false; }, 80);
+});
+
+skipBtn.onclick = () => socket.emit('skip_intro');
+
+fsBtn.onclick = () => {
+    const el = document.documentElement;
+    if (!document.fullscreenElement) {
+        (el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen).call(el);
+    } else {
+        (document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen).call(document);
+    }
+};
+</script>
 </body>
 </html>

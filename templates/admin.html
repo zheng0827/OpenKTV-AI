@@ -2,97 +2,158 @@
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KTV 系統管理後台</title>
+    <title>KTV 系統管理</title>
     <style>
-        body { background: #f4f4f9; color: #333; font-family: sans-serif; padding: 20px; max-width: 600px; margin: auto; }
-        .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
-        h3 { margin-top: 0; color: #333; }
-        input { width: 100%; padding: 10px; margin-bottom: 15px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px; }
-        button { padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; color: white; width: 100%; margin-bottom: 10px; }
-        
-        .btn-dl { background: #FF9800; }
-        .btn-update { background: #607D8B; }
-        .btn-dl:disabled, .btn-update:disabled { background: #ccc; cursor: not-allowed; }
-        textarea { width: 100%; height: 200px; background: #222; color: #0f0; padding: 10px; box-sizing: border-box; font-family: monospace; border-radius: 5px; resize: none; }
-        
-        /* 導航列樣式 */
-        .nav-bar { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
-        .nav-btn { flex: 1; text-align: center; padding: 12px 10px; text-decoration: none; border-radius: 8px; font-weight: bold; color: white; font-size: 14px; min-width: 100px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s;}
-        .nav-btn:active { transform: scale(0.95); }
-        .nav-remote { background: #E91E63; }
-        .nav-console { background: #9C27B0; }
-        .nav-player { background: #2196F3; }
+        body { background: #f4f4f9; color: #333; font-family: sans-serif; padding: 20px; max-width: 860px; margin: auto; }
+        .card { background: white; padding: 16px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); margin-bottom: 16px; }
+        input, select, textarea { width: 100%; box-sizing: border-box; padding: 10px; margin: 6px 0 12px; border-radius: 6px; border: 1px solid #ccc; }
+        button { border: 0; border-radius: 6px; padding: 10px 14px; color: #fff; font-weight: bold; cursor: pointer; }
+        .primary { background: #FF9800; }
+        .secondary { background: #607D8B; }
+        textarea { height: 220px; background: #222; color: #0f0; font-family: monospace; }
+        .nav a { text-decoration: none; color: #fff; background: #455A64; padding: 8px 10px; border-radius: 8px; margin-right: 6px; }
+
+        .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center; z-index: 100; }
+        .modal .box { width: min(900px, 95vw); max-height: 88vh; overflow: auto; background: #fff; border-radius: 10px; padding: 16px; }
+        .row { display: grid; grid-template-columns: 24px 1fr; gap: 8px; padding: 6px 0; border-bottom: 1px solid #eee; }
+        .row:last-child { border-bottom: 0; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 </head>
 <body>
-    
-    <div class="nav-bar">
-        <a href="/remote" class="nav-btn nav-remote">📱 遙控器</a>
-        <a href="/combo" class="nav-btn nav-combo">🖥️ 雙合一控制台</a>
-        <a href="/player" class="nav-btn nav-player">📺 播放端</a>
+    <div class="nav" style="margin-bottom:12px;">
+        <a href="/remote">📱 遙控器</a>
+        <a href="/queue">📋 Queue</a>
+        <a href="/player">📺 播放端</a>
     </div>
 
     <div class="card">
-        <h3>📥 新增 KTV 歌曲</h3>
-        <label>1. YouTube 網址:</label>
-        <input type="text" id="yt_url" placeholder="https://www.youtube.com/watch?v=...">
-        <label>2. 設定歌名 (必填):</label>
-        <input type="text" id="yt_title" placeholder="例如：告五人 - 披星戴月的想你">
-        <button id="btn_dl" class="btn-dl" onclick="startDownload()">開始製作 (L:原唱 / R:伴奏)</button>
+        <h3>新增歌曲（單曲 / 播放清單）</h3>
+        <label>YouTube URL</label>
+        <input id="yt_url" placeholder="https://www.youtube.com/watch?v=... 或 playlist 連結" />
+
+        <label>Demucs stems</label>
+        <select id="stems">
+            <option value="4" selected>4 stems (default)</option>
+            <option value="2">2 stems</option>
+        </select>
+
+        <button class="primary" onclick="analyzeInput()">分析連結</button>
     </div>
 
     <div class="card">
-        <h3>⚙️ 系統維護</h3>
-        <button id="btn_update" class="btn-update" onclick="updateYtDlp()">🔄 手動更新 yt-dlp 核心</button>
+        <h3>系統維護</h3>
+        <button class="secondary" onclick="updateYtDlp()">更新 yt-dlp</button>
     </div>
 
     <div class="card">
-        <h3>📝 系統日誌</h3>
+        <h3>系統日誌</h3>
         <textarea id="log" readonly></textarea>
     </div>
 
-    <script>
-        const socket = io();
-        const logArea = document.getElementById('log');
-        const btnDl = document.getElementById('btn_dl');
-        const btnUpdate = document.getElementById('btn_update');
+    <div id="playlistModal" class="modal">
+        <div class="box">
+            <h3>選擇要下載的 Playlist 曲目</h3>
+            <div id="playlistBody"></div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
+                <button style="background:#757575;" onclick="closePlaylistModal()">取消</button>
+                <button class="primary" onclick="startPlaylistDownload()">開始下載</button>
+            </div>
+        </div>
+    </div>
 
-        socket.on('admin_log', (data) => {
-            logArea.value += data.msg + "\n";
-            logArea.scrollTop = logArea.scrollHeight; // 自動捲動到最底
+    <div id="lyricModal" class="modal">
+        <div class="box">
+            <h3>確認歌詞（LRCLIB plain lyrics）</h3>
+            <div id="singleMeta" style="margin-bottom:8px;color:#666;"></div>
+            <label>歌名</label>
+            <input id="singleTitle" />
+            <label>歌手</label>
+            <input id="singleArtist" />
+            <label>歌詞 (plain)</label>
+            <textarea id="singleLyrics" style="height:180px;background:#f8f8f8;color:#222;"></textarea>
+            <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
+                <button style="background:#757575;" onclick="closeLyricModal()">取消</button>
+                <button class="primary" onclick="startSingleDownload()">開始製作</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+const socket = io();
+const logArea = document.getElementById('log');
+let pendingPlaylist = [];
+let pendingSingle = null;
+
+socket.on('connect', () => socket.emit('register_client', { role: 'admin' }));
+socket.on('admin_log', d => { logArea.value += d.msg + '\n'; logArea.scrollTop = logArea.scrollHeight; });
+socket.on('task_progress', d => { logArea.value += `[${d.current}/${d.total}] ${d.title} (attempt ${d.attempt})\n`; logArea.scrollTop = logArea.scrollHeight; });
+socket.on('task_status', d => { logArea.value += `status: ${d.status} ${d.message || ''}\n`; logArea.scrollTop = logArea.scrollHeight; });
+
+function analyzeInput() {
+    const url = document.getElementById('yt_url').value.trim();
+    if (!url) return alert('請輸入 URL');
+    socket.emit('analyze_input', { url });
+}
+
+socket.on('analyze_result', (res) => {
+    if (!res.ok) return alert(res.error || '分析失敗');
+    if (res.mode === 'playlist') {
+        pendingPlaylist = res.entries || [];
+        const body = document.getElementById('playlistBody');
+        body.innerHTML = '';
+        pendingPlaylist.forEach((e, i) => {
+            const row = document.createElement('div');
+            row.className = 'row';
+            row.innerHTML = `<input type="checkbox" id="pl_${i}" checked><label for="pl_${i}">${e.title}</label>`;
+            body.appendChild(row);
         });
+        document.getElementById('playlistModal').style.display = 'flex';
+    } else {
+        pendingSingle = res.item;
+        document.getElementById('singleMeta').innerText = `來源: ${res.item.url}`;
+        document.getElementById('singleTitle').value = res.item.title || '';
+        document.getElementById('singleArtist').value = res.item.artist || '';
+        document.getElementById('singleLyrics').value = res.item.lyrics_plain || '';
+        document.getElementById('lyricModal').style.display = 'flex';
+    }
+});
 
-        socket.on('task_status', (data) => {
-            if(data.status === 'idle') {
-                btnDl.disabled = false;
-                btnDl.innerText = "開始製作 (L:原唱 / R:伴奏)";
-                btnUpdate.disabled = false;
-                document.getElementById('yt_url').value = '';
-                document.getElementById('yt_title').value = '';
-            } else if (data.status === 'busy') {
-                btnDl.disabled = true;
-                btnDl.innerText = "製作中...請稍候";
-                btnUpdate.disabled = true;
-            }
-        });
+function closePlaylistModal(){ document.getElementById('playlistModal').style.display = 'none'; }
+function closeLyricModal(){ document.getElementById('lyricModal').style.display = 'none'; }
 
-        function startDownload() {
-            const url = document.getElementById('yt_url').value.trim();
-            const title = document.getElementById('yt_title').value.trim();
-            if(!url || !title) {
-                alert("網址與歌名皆為必填！");
-                return;
-            }
-            socket.emit('start_download', {url: url, title: title});
-        }
+function startPlaylistDownload() {
+    const selected = pendingPlaylist.filter((_, i) => document.getElementById(`pl_${i}`).checked);
+    if (!selected.length) return alert('請至少選一首');
+    socket.emit('start_download', {
+        mode: 'playlist',
+        stems: Number(document.getElementById('stems').value || 4),
+        entries: selected,
+    });
+    closePlaylistModal();
+}
 
-        function updateYtDlp() {
-            if(confirm("確定要更新 yt-dlp 嗎？這需要幾秒鐘的時間。")) {
-                btnUpdate.disabled = true;
-                socket.emit('update_ytdlp');
-            }
-        }
-    </script>
+function startSingleDownload() {
+    const title = document.getElementById('singleTitle').value.trim();
+    const artist = document.getElementById('singleArtist').value.trim();
+    const plain = document.getElementById('singleLyrics').value;
+    socket.emit('start_download', {
+        mode: 'single',
+        stems: Number(document.getElementById('stems').value || 4),
+        url: pendingSingle.url,
+        title,
+        lyrics: {
+            plain,
+            synced: pendingSingle.lyrics_synced || '',
+            song: title,
+            artist,
+            album: pendingSingle.album || '',
+        },
+    });
+    closeLyricModal();
+}
+
+function updateYtDlp() { socket.emit('update_ytdlp'); }
+</script>
 </body>
 </html>

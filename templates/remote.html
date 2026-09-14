@@ -4,131 +4,90 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>KTV 遙控器</title>
     <style>
-        body { background: #1a1a1a; color: white; font-family: sans-serif; padding: 10px; margin: 0; }
-        .btn { width: 100%; padding: 15px; margin: 5px 0; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; color: white; cursor: pointer; }
-        .play { background: #009688; }
-        .pause { background: #2196F3; }
-        .stop { background: #F44336; }
-        .vocal { background: #FF9800; color: black; }
-        .inst { background: #FFC107; color: black; }
-        .admin-link { background: #607D8B; color: white; text-align: center; display: block; padding: 10px; text-decoration: none; border-radius: 5px; margin-bottom: 10px; }
-        input[type=text] { width: 100%; padding: 10px; margin-bottom: 10px; box-sizing: border-box; background: #333; border: 1px solid #555; color: white; border-radius: 5px;}
-        input[type=range] { width: 100%; margin: 10px 0; }
-        li { background: #333; padding: 10px; margin-bottom: 5px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center; }
-        ul { list-style: none; padding: 0; }
-        .song-btn { background: #009688; border: none; padding: 5px 15px; border-radius: 20px; color: white; }
+        body { background: #1a1a1a; color: #fff; font-family: sans-serif; margin: 0; padding: 12px; }
+        .btn { width: 100%; padding: 14px; margin: 6px 0; border: 0; border-radius: 8px; font-size: 16px; font-weight: bold; color: #fff; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .pause { background: #2196F3; } .stop { background: #F44336; }
+        .vocal { background: #FF9800; color: #111; } .inst { background: #FFC107; color: #111; }
+        .nav { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+        .nav a { text-align: center; background: #546E7A; color: #fff; text-decoration: none; padding: 10px; border-radius: 8px; font-size: 14px; }
+        .search { width: 100%; padding: 10px; background: #333; color: #fff; border: 1px solid #555; border-radius: 6px; margin: 10px 0; box-sizing: border-box; }
+        ul { list-style: none; padding: 0; margin: 0; }
+        li { background: #2c2c2c; margin: 6px 0; padding: 10px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; }
+        .song-btn { background: #009688; color: #fff; border: 0; border-radius: 16px; padding: 6px 14px; }
+        #state { color: #9E9E9E; font-size: 13px; margin-bottom: 8px; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 </head>
 <body>
-    <div style="text-align:center; margin-bottom:10px;">
-        <h3 style="margin:0;">📱 KTV 遙控器</h3>
-        <small style="color:#aaa;">已連線至主機</small>
+    <div class="nav">
+        <a href="/queue">📋 Queue</a>
+        <a href="/player">📺 Player</a>
+        <a href="/admin">⚙️ Admin</a>
     </div>
+    <div id="state">連線中...</div>
 
-    <a href="/admin" class="admin-link">⚙️ 進入後台 (下載新歌/管理系統)</a>
-
-    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:5px;">
+    <div class="grid">
         <button class="btn pause" onclick="cmd('pause')">⏯ 暫停/繼續</button>
-        <button class="btn stop" onclick="cmd('stop')">⏹ 切歌</button>
+        <button class="btn stop" onclick="cmd('cut')">⏹ 切下一首</button>
         <button class="btn vocal" onclick="track('original')">🎤 原唱</button>
         <button class="btn inst" onclick="track('instrumental')">🚫 伴奏</button>
     </div>
 
-    <div style="background: #2a2a2a; padding: 15px; border-radius: 8px; margin-top: 10px; margin-bottom: 10px;">
-        <div style="display: flex; justify-content: space-between; margin-bottom: 5px; color: #ccc; font-size: 14px;">
-            <span>🔊 音量控制</span><span id="vol-val">100%</span>
-        </div>
-        <input type="range" id="vol" min="0" max="2" step="0.1" value="1" oninput="updateEffect()">
-    </div>
+    <button id="skipBtn" class="btn" style="background:#8E24AA;display:none;" onclick="socket.emit('skip_intro')">⏩ 跳過前奏</button>
 
-    <div style="background: #2a2a2a; padding: 15px; border-radius: 8px; margin-bottom: 10px;">
-        <div style="display: flex; justify-content: space-between; margin-bottom: 10px; color: #ccc; font-size: 14px;">
-            <span>🎵 升降 KEY</span><span id="key-val">原 KEY (0)</span>
-        </div>
-        <div style="display: flex; gap: 8px;">
-            <button class="btn" style="background:#555; flex:1; padding: 12px; margin: 0;" onclick="changeKey(-1)">🔻 降</button>
-            <button class="btn" style="background:#777; flex:1; padding: 12px; margin: 0;" onclick="changeKey(0)">0 (原)</button>
-            <button class="btn" style="background:#555; flex:1; padding: 12px; margin: 0;" onclick="changeKey(1)">🔺 升</button>
-        </div>
-    </div>
-
-    <hr style="border-color: #333;">
-    
-    <input type="text" id="search" placeholder="🔍 搜尋歌曲..." oninput="filter()">
+    <input class="search" id="search" placeholder="🔍 搜尋歌曲..." oninput="renderList()" />
     <ul id="list"></ul>
 
-    <script>
-        const socket = io();
-        let allSongs = [];
-        let currentKey = 0;
+<script>
+const socket = io();
+let songs = [];
+let snapshot = null;
 
-        // --- 歌單與基本控制 ---
-        socket.on('update_list', (songs) => {
-            allSongs = songs;
-            filter();
-        });
+socket.on('connect', () => {
+    socket.emit('register_client', { role: 'remote' });
+    socket.emit('request_state');
+});
 
-        function filter() {
-            const key = document.getElementById('search').value.toLowerCase();
-            const list = document.getElementById('list');
-            list.innerHTML = "";
-            
-            allSongs.filter(s => s.toLowerCase().includes(key)).forEach(s => {
-                list.innerHTML += `
-                    <li>
-                        <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:60%;">${s}</span>
-                        <button class="song-btn" onclick="play('${s}')">播歌</button>
-                    </li>`;
-            });
-        }
+function cmd(action) { socket.emit('control', action); }
+function track(mode) { socket.emit('change_track', mode); }
 
-        function play(filename) { socket.emit('request_play', {filename: filename}); }
-        function cmd(action) { socket.emit('control', action); }
-        function track(mode) { socket.emit('change_track', mode); }
+function addSong(filename) {
+    socket.emit('add_to_queue', { filename });
+}
 
-        function loadList() {
-            fetch('/api/list').then(r => r.json()).then(data => {
-                allSongs = data;
-                filter();
-            });
-        }
-        
-        loadList();
-        // 監聽後台更新完畢事件，自動重整歌單
-        socket.on('refresh_list', loadList);
+function loadSongs() {
+    fetch('/api/list').then(r => r.json()).then(data => {
+        songs = data;
+        renderList();
+    });
+}
 
-        // --- 音效與升降 KEY 控制 ---
-        function updateEffect() {
-            const vol = parseFloat(document.getElementById('vol').value);
-            socket.emit('control_effect', { volume: vol });
-        }
+function renderList() {
+    const key = document.getElementById('search').value.toLowerCase();
+    const ul = document.getElementById('list');
+    ul.innerHTML = '';
+    songs.filter(s => s.toLowerCase().includes(key)).forEach(s => {
+        const li = document.createElement('li');
+        li.innerHTML = `<span style="max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${s.replace('.mp4','')}</span><button class="song-btn">點播</button>`;
+        li.querySelector('button').onclick = () => addSong(s);
+        ul.appendChild(li);
+    });
+}
 
-        function changeKey(step) {
-            if (step === 0) {
-                currentKey = 0;
-            } else {
-                currentKey += step;
-            }
-            
-            // 限制最多升降 12 個半音 (一個八度)
-            if(currentKey > 12) currentKey = 12;
-            if(currentKey < -12) currentKey = -12;
-            
-            socket.emit('control_effect', { pitch: currentKey });
-        }
+socket.on('playback_snapshot', (s) => {
+    snapshot = s;
+    const cur = s.current_song ? s.current_song.replace('.mp4','') : '(無)';
+    document.getElementById('state').innerText = `狀態: ${s.status} | 目前: ${cur} | 待播: ${s.queue.length}`;
 
-        // 接收伺服器廣播，同步更新介面狀態 (若有其他手機也在操作)
-        socket.on('apply_effect', (data) => {
-            if (data.pitch !== undefined) {
-                currentKey = data.pitch;
-                document.getElementById('key-val').innerText = currentKey === 0 ? "原 KEY (0)" : (currentKey > 0 ? "+" + currentKey : currentKey);
-            }
-            if (data.volume !== undefined) {
-                document.getElementById('vol').value = data.volume;
-                document.getElementById('vol-val').innerText = Math.round(data.volume * 100) + "%";
-            }
-        });
-    </script>
+    let pos = Number(s.position || 0);
+    if (s.status === 'playing' && s.server_time) pos += Math.max(0, Date.now()/1000 - s.server_time);
+    const canSkip = s.intro_skip_at !== null && s.intro_skip_at !== undefined && pos < s.intro_skip_at;
+    document.getElementById('skipBtn').style.display = canSkip ? 'block' : 'none';
+});
+
+socket.on('refresh_list', loadSongs);
+loadSongs();
+</script>
 </body>
 </html>
