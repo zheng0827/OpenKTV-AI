@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from openktv_ai.config import AppSettings
-from openktv_ai.library import find_intro_skip_seconds, parse_first_lyric_time
+from openktv_ai.library import find_intro_skip_seconds, parse_first_lyric_time, sanitize_lrclib_lyrics
 from openktv_ai.processing import (
     build_demucs_command,
     build_mix_filter,
@@ -56,9 +56,10 @@ class ProcessingTests(unittest.TestCase):
 
     def test_build_mix_filter_pseudo_only(self):
         pseudo = build_mix_filter('legacy', self.settings)
-        self.assertIn('vocal_mono', pseudo)
-        self.assertIn('aecho=', pseudo)
-        self.assertNotIn('equalizer=', pseudo)
+        self.assertIn('[1:a]anull[vocals];', pseudo)
+        self.assertIn('equalizer=', pseudo)
+        self.assertIn('alimiter=limit=0.95', pseudo)
+        self.assertNotIn('aecho=', pseudo)
 
     @patch('openktv_ai.processing._is_cuda_available', return_value=True)
     def test_resolve_device_prefers_cuda_when_auto(self, _mock_available):
@@ -87,6 +88,10 @@ class ProcessingTests(unittest.TestCase):
 
 
 class LibraryTests(unittest.TestCase):
+    def test_sanitize_lrclib_lyrics_filters_noise(self):
+        raw = "[00:01.20]☆☆☆\n[00:03.20] 第一行歌詞 \n[00:05.20]第二行歌詞\n***\n"
+        self.assertEqual(sanitize_lrclib_lyrics(raw), "第一行歌詞\n第二行歌詞")
+
     def test_parse_first_lyric_time(self):
         path = Path('/tmp/test-first-line.lrc')
         path.write_text('%12.340 18.520 只是我回憶的音樂盒\n', encoding='utf-8')
