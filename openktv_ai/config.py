@@ -45,6 +45,10 @@ class AppSettings:
     pseudo_reverb_room: float
     pseudo_reverb_damping: float
     pseudo_backing_gain: float
+    whisper_model: str
+    whisper_compute_type: str
+    whisper_language: str
+    alignment_python: str
     intro_skip_lead_seconds: float
     download_retry_count: int
     library_index_path: Path
@@ -97,6 +101,10 @@ def load_settings(base_dir: Path | None = None) -> AppSettings:
         pseudo_reverb_room=_to_float(os.getenv("KTV_PSEUDO_REVERB_ROOM"), 0.45),
         pseudo_reverb_damping=_to_float(os.getenv("KTV_PSEUDO_REVERB_DAMPING"), 0.35),
         pseudo_backing_gain=_to_float(os.getenv("KTV_PSEUDO_BACKING_GAIN"), 0.9),
+        whisper_model=os.getenv("KTV_WHISPER_MODEL", "large-v3"),
+        whisper_compute_type=os.getenv("KTV_WHISPER_COMPUTE_TYPE", "auto"),
+        whisper_language=os.getenv("KTV_WHISPER_LANGUAGE", "zh"),
+        alignment_python=os.getenv("KTV_ALIGNMENT_PYTHON", ""),
         intro_skip_lead_seconds=_to_float(os.getenv("KTV_INTRO_SKIP_LEAD_SECONDS"), 5.0),
         download_retry_count=_to_int(os.getenv("KTV_DOWNLOAD_RETRY_COUNT"), 2),
         library_index_path=Path(os.getenv("KTV_LIBRARY_INDEX_PATH", root / "ktv_songs" / "library_index.csv")),

@@ -2,174 +2,274 @@
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>KTV 播放螢幕</title>
+    <title>KTV Player</title>
     <style>
-        body { margin: 0; background: #000; color: #fff; font-family: Arial, sans-serif; overflow: hidden; }
-        #viewport { position: relative; width: 100vw; height: 100vh; display: flex; justify-content: center; align-items: center; }
-        video { width: 100%; height: 100%; object-fit: contain; background: #000; }
-        #overlay { position: absolute; left: 16px; top: 16px; background: rgba(0,0,0,0.55); padding: 10px 14px; border-radius: 8px; font-size: 18px; }
-        #full-btn { position: absolute; right: 16px; top: 16px; border: 1px solid #fff; background: rgba(0,0,0,0.35); color: #fff; padding: 8px 12px; border-radius: 6px; }
-        #skip-intro { position: absolute; right: 16px; bottom: 128px; border: 0; border-radius: 999px; background: #2e7d32; color: #fff; padding: 12px 18px; display: none; }
-        #waiting { position: absolute; text-align: center; color: #bbb; font-size: 24px; }
-        #subtitle-panel { position: absolute; left: 6%; right: 6%; bottom: 18px; min-height: 84px; padding: 10px 14px; background: rgba(0,0,0,0.38); border-radius: 10px; }
-        #subtitle-top { text-align: left; font-size: 28px; line-height: 1.3; }
-        #subtitle-bottom { text-align: right; font-size: 28px; line-height: 1.3; color: #cfd8dc; }
-        .countdown { letter-spacing: 2px; color: #64b5f6; font-weight: 700; }
+        body { margin:0; background:#000; color:#fff; font-family:Arial,sans-serif; overflow:hidden; }
+        #root { position:relative; width:100vw; height:100vh; }
+        video { width:100%; height:100%; object-fit:contain; background:#000; }
+        #overlay { position:absolute; left:16px; top:16px; background:rgba(0,0,0,.55); border-radius:8px; padding:8px 12px; font-size:18px; z-index:5; }
+        #full-btn { position:absolute; right:16px; top:16px; z-index:6; border:1px solid #fff; border-radius:8px; padding:8px 12px; background:rgba(0,0,0,.4); color:#fff; }
+        #skip-intro { position:absolute; right:16px; bottom:144px; z-index:6; border:0; border-radius:999px; padding:12px 16px; color:#fff; background:#2e7d32; display:none; }
+        #waiting { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#aaa; font-size:26px; z-index:4; }
+        #subtitle-panel { position:absolute; left:6%; right:6%; bottom:20px; z-index:6; pointer-events:none; }
+        .line { font-size:38px; font-weight:700; line-height:1.35; text-shadow:0 2px 8px rgba(0,0,0,.75); white-space:pre-wrap; }
+        #line-top { text-align:left; margin-bottom:8px; }
+        #line-bottom { text-align:right; color:#f5f5f5; }
+        .word { color:#fff; transition:color .1s linear; }
+        .word.active { color:#1e88e5; }
+        .countdown { color:#64b5f6; letter-spacing:3px; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 </head>
 <body>
-    <div id="viewport">
-        <div id="overlay">等待伺服器同步...</div>
-        <button id="full-btn" onclick="toggleFullscreen()">⛶ 全螢幕</button>
-        <button id="skip-intro" disabled>前奏可略過（請用遙控器操作）</button>
-        <div id="waiting">📺 等待點歌中</div>
+<div id="root">
+    <video id="video" playsinline crossorigin="anonymous"></video>
+    <audio id="instrumental" preload="auto" crossorigin="anonymous"></audio>
+    <div id="overlay">等待同步...</div>
+    <button id="full-btn" onclick="toggleFullscreen()">⛶ 全螢幕</button>
+    <button id="skip-intro" disabled>前奏可跳過（請用遙控器）</button>
+    <div id="waiting">📺 等待點歌</div>
 
-        <video id="video" playsinline crossorigin="anonymous"></video>
-        <audio id="instrumental" preload="auto" crossorigin="anonymous"></audio>
-
-        <div id="subtitle-panel">
-            <div id="subtitle-top"><span class="countdown">●●●</span></div>
-            <div id="subtitle-bottom"></div>
-        </div>
+    <div id="subtitle-panel">
+        <div id="line-top" class="line"></div>
+        <div id="line-bottom" class="line"></div>
     </div>
+</div>
 
-    <script>
-        const socket = io({ query: { role: 'player' } });
-        const video = document.getElementById('video');
-        const instrumental = document.getElementById('instrumental');
-        const overlay = document.getElementById('overlay');
-        const waiting = document.getElementById('waiting');
-        const skipButton = document.getElementById('skip-intro');
+<script>
+const socket = io({ query: { role: 'player' } });
+const video = document.getElementById('video');
+const instrumental = document.getElementById('instrumental');
+const overlay = document.getElementById('overlay');
+const waiting = document.getElementById('waiting');
+const skipIntroButton = document.getElementById('skip-intro');
+const lineTop = document.getElementById('line-top');
+const lineBottom = document.getElementById('line-bottom');
 
-        let audioCtx, videoSource, instrumentalSource, originalGain, backingGain, masterGain;
-        let audioReady = false;
-        let instrumentalAvailable = false;
-        let activeMode = 'original';
+let audioCtx, videoSource, instSource, originalGain, instGain, masterGain;
+let audioReady = false;
+let activeMode = 'original';
+let instrumentalAvailable = false;
+let lyricLines = [];
+let lineA = null;
+let lineB = null;
+let countdownAnchors = [];
 
-        function initAudio() {
-            if (!audioCtx) {
-                const AudioContext = window.AudioContext || window.webkitAudioContext;
-                audioCtx = new AudioContext();
-            }
-            if (audioCtx.state === 'suspended') audioCtx.resume();
-            if (audioReady) return;
+function initAudio() {
+    if (!audioCtx) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AudioContext();
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    if (audioReady) return;
 
-            videoSource = audioCtx.createMediaElementSource(video);
-            instrumentalSource = audioCtx.createMediaElementSource(instrumental);
-            originalGain = audioCtx.createGain();
-            backingGain = audioCtx.createGain();
-            masterGain = audioCtx.createGain();
+    videoSource = audioCtx.createMediaElementSource(video);
+    instSource = audioCtx.createMediaElementSource(instrumental);
+    originalGain = audioCtx.createGain();
+    instGain = audioCtx.createGain();
+    masterGain = audioCtx.createGain();
 
-            videoSource.connect(originalGain).connect(masterGain);
-            instrumentalSource.connect(backingGain).connect(masterGain);
-            masterGain.connect(audioCtx.destination);
-            audioReady = true;
+    videoSource.connect(originalGain).connect(masterGain);
+    instSource.connect(instGain).connect(masterGain);
+    masterGain.connect(audioCtx.destination);
+    audioReady = true;
+}
+
+function toggleFullscreen() {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+    else document.exitFullscreen?.();
+}
+
+function syncElement(media, target) {
+    const drift = target - media.currentTime;
+    if (Math.abs(drift) > 0.3) {
+        media.currentTime = target;
+        media.playbackRate = 1;
+    } else {
+        media.playbackRate = 1 + Math.max(-0.05, Math.min(0.05, drift * 0.15));
+    }
+}
+
+function updateMode(mode) {
+    if (!audioReady) return;
+    const now = audioCtx.currentTime;
+    if (mode === 'instrumental') {
+        originalGain.gain.setTargetAtTime(0.25, now, 0.08);
+        instGain.gain.setTargetAtTime(1.0, now, 0.08);
+        if (instrumentalAvailable && !video.paused) instrumental.play().catch(() => {});
+        overlay.innerText = '🚫 伴奏模式';
+    } else {
+        originalGain.gain.setTargetAtTime(1.0, now, 0.08);
+        instGain.gain.setTargetAtTime(0, now, 0.08);
+        overlay.innerText = '🎤 原唱模式';
+    }
+}
+
+function updateIntroButton(snapshot) {
+    const hideAfter = Number(snapshot.intro_skip_hide_after);
+    const skipTo = Number(snapshot.intro_skip_to);
+    const current = Number(snapshot.position || 0);
+    const show = Number.isFinite(skipTo) && Number.isFinite(hideAfter) && current < hideAfter && !snapshot.intro_skip_used;
+    skipIntroButton.style.display = show ? 'block' : 'none';
+    if (show) skipIntroButton.textContent = `前奏可跳至 ${skipTo.toFixed(1)}s（請用遙控器）`;
+}
+
+function parseKtvLrc(text) {
+    const lines = [];
+    let current = null;
+    for (const raw of text.split(/\r?\n/)) {
+        const line = raw.trim();
+        if (!line || line.startsWith('@')) continue;
+        if (line.startsWith('%')) {
+            const m = line.match(/^%(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(.+)$/);
+            if (!m) continue;
+            current = { start:Number(m[1]), end:Number(m[2]), text:m[3], words:[] };
+            lines.push(current);
+        } else if (line.startsWith('$') && current) {
+            const m = line.match(/^\$(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(.+)$/);
+            if (!m) continue;
+            current.words.push({ start:Number(m[1]), end:Number(m[2]), text:m[3] });
         }
+    }
+    return lines;
+}
 
-        function toggleFullscreen() {
-            const root = document.documentElement;
-            if (!document.fullscreenElement) root.requestFullscreen?.();
-            else document.exitFullscreen?.();
+function buildCountdownAnchors(lines) {
+    const anchors = [];
+    let lastAnchor = -999;
+    for (let i = 0; i < lines.length; i++) {
+        const start = lines[i].start;
+        if (i === 0 || start - lastAnchor >= 20) {
+            anchors.push(start);
+            lastAnchor = start;
         }
+    }
+    return anchors;
+}
 
-        function syncMediaElement(media, targetPosition) {
-            const drift = targetPosition - media.currentTime;
-            if (Math.abs(drift) > 0.3) {
-                media.currentTime = targetPosition;
-                media.playbackRate = 1;
-                return;
-            }
-            media.playbackRate = 1 + Math.max(-0.05, Math.min(0.05, drift * 0.15));
+async function loadLyricsForSong(filename) {
+    lyricLines = [];
+    lineA = null;
+    lineB = null;
+    countdownAnchors = [];
+    try {
+        const lrcName = filename.replace(/\.mp4$/i, '.lrc');
+        const resp = await fetch(`/songs/${encodeURIComponent(lrcName)}`);
+        if (!resp.ok) throw new Error('missing lrc');
+        const text = await resp.text();
+        lyricLines = parseKtvLrc(text);
+        countdownAnchors = buildCountdownAnchors(lyricLines);
+    } catch (_) {
+        lyricLines = [];
+        countdownAnchors = [];
+    }
+}
+
+function countdownText(now) {
+    for (const anchor of countdownAnchors) {
+        const remain = anchor - now;
+        if (remain <= 3 && remain > 0) {
+            const dots = Math.ceil(remain);
+            return `<span class="countdown">${'●'.repeat(Math.max(1, Math.min(3, dots)))}</span>`;
         }
+    }
+    return '';
+}
 
-        function updateMode(mode) {
-            if (!audioReady) return;
-            const now = audioCtx.currentTime;
-            if (mode === 'instrumental') {
-                originalGain.gain.setTargetAtTime(0.25, now, 0.08);
-                backingGain.gain.setTargetAtTime(1.0, now, 0.08);
-                if (instrumentalAvailable && !video.paused) instrumental.play().catch(() => {});
-                overlay.innerText = '🚫 伴奏模式';
-            } else {
-                originalGain.gain.setTargetAtTime(1.0, now, 0.08);
-                backingGain.gain.setTargetAtTime(0.0, now, 0.08);
-                overlay.innerText = '🎤 原唱模式';
-            }
+function renderLine(line, now) {
+    if (!line) return '';
+    if (!line.words || !line.words.length) return `<span class="word active">${line.text}</span>`;
+    return line.words.map(w => `<span class="word ${now >= w.end ? 'active' : ''}">${w.text}</span>`).join('');
+}
+
+function updateLyrics(now) {
+    if (!lyricLines.length) {
+        lineTop.innerHTML = countdownText(now);
+        lineBottom.innerHTML = '';
+        return;
+    }
+
+    lineA = null;
+    lineB = null;
+    for (let i = 0; i < lyricLines.length; i++) {
+        const line = lyricLines[i];
+        if (now >= line.start && now <= line.end + 0.2) {
+            lineA = line;
+            lineB = lyricLines[i + 1] || null;
+            break;
         }
-
-        function updateIntroButton(snapshot) {
-            const hideAfter = Number(snapshot.intro_skip_hide_after);
-            const skipTo = Number(snapshot.intro_skip_to);
-            const current = Number(snapshot.position || 0);
-            const canShow = Number.isFinite(skipTo) && Number.isFinite(hideAfter) && current < hideAfter && !snapshot.intro_skip_used;
-            skipButton.style.display = canShow ? 'block' : 'none';
-            if (canShow) {
-                skipButton.textContent = `前奏可跳至 ${skipTo.toFixed(1)}s（請用遙控器）`;
-            }
+        if (now < line.start) {
+            lineA = line;
+            lineB = lyricLines[i + 1] || null;
+            break;
         }
+    }
+    if (!lineA) {
+        lineA = lyricLines[lyricLines.length - 1] || null;
+        lineB = null;
+    }
 
-        function handleSnapshot(snapshot) {
-            initAudio();
-            activeMode = snapshot.audio_mode || 'original';
+    const topCountdown = countdownText(now);
+    lineTop.innerHTML = `${topCountdown}${renderLine(lineA, now)}`;
+    lineBottom.innerHTML = renderLine(lineB, now);
+}
 
-            if (!snapshot.filename) {
-                waiting.style.display = 'block';
-                video.pause();
-                instrumental.pause();
-                return;
-            }
+function handleSnapshot(snapshot) {
+    initAudio();
+    activeMode = snapshot.audio_mode || 'original';
 
-            const currentFile = video.dataset.filename;
-            const isNewSong = currentFile !== snapshot.filename;
-            if (isNewSong) {
-                video.dataset.filename = snapshot.filename;
-                video.src = `/songs/${encodeURIComponent(snapshot.filename)}`;
-                instrumentalAvailable = Boolean(snapshot.instrumental_filename);
-                instrumental.src = instrumentalAvailable ? `/songs/${encodeURIComponent(snapshot.instrumental_filename)}` : '';
-            }
+    if (!snapshot.filename) {
+        waiting.style.display = 'flex';
+        video.pause();
+        instrumental.pause();
+        lineTop.innerHTML = '';
+        lineBottom.innerHTML = '';
+        return;
+    }
 
-            waiting.style.display = 'none';
-            const target = Math.max(0, Number(snapshot.position) || 0);
+    const isNewSong = video.dataset.filename !== snapshot.filename;
+    if (isNewSong) {
+        video.dataset.filename = snapshot.filename;
+        video.src = `/songs/${encodeURIComponent(snapshot.filename)}`;
+        instrumentalAvailable = Boolean(snapshot.instrumental_filename);
+        instrumental.src = instrumentalAvailable ? `/songs/${encodeURIComponent(snapshot.instrumental_filename)}` : '';
+        loadLyricsForSong(snapshot.filename);
+    }
 
-            const syncAction = () => {
-                syncMediaElement(video, target);
-                if (instrumentalAvailable) syncMediaElement(instrumental, target);
-                updateMode(activeMode);
-
-                if (snapshot.effects && masterGain) {
-                    if (snapshot.effects.volume !== undefined) {
-                        masterGain.gain.setTargetAtTime(Number(snapshot.effects.volume), audioCtx.currentTime, 0.08);
-                    }
-                }
-
-                if (snapshot.is_playing) {
-                    video.play().catch(() => {});
-                    if (instrumentalAvailable && activeMode === 'instrumental') instrumental.play().catch(() => {});
-                } else {
-                    video.pause();
-                    instrumental.pause();
-                }
-            };
-
-            if (isNewSong) video.onloadedmetadata = syncAction;
-            else syncAction();
-
-            updateIntroButton(snapshot);
+    waiting.style.display = 'none';
+    const target = Math.max(0, Number(snapshot.position) || 0);
+    const sync = () => {
+        syncElement(video, target);
+        if (instrumentalAvailable) syncElement(instrumental, target);
+        updateMode(activeMode);
+        if (snapshot.effects && snapshot.effects.volume !== undefined && masterGain) {
+            masterGain.gain.setTargetAtTime(Number(snapshot.effects.volume), audioCtx.currentTime, 0.08);
         }
+        if (snapshot.is_playing) {
+            video.play().catch(() => {});
+            if (instrumentalAvailable && activeMode === 'instrumental') instrumental.play().catch(() => {});
+        } else {
+            video.pause();
+            instrumental.pause();
+        }
+        updateLyrics(target);
+    };
 
-        socket.on('connect', () => {
-            overlay.innerText = '✅ 已連線，等待同步';
-        });
+    if (isNewSong) video.onloadedmetadata = sync;
+    else sync();
+    updateIntroButton(snapshot);
+}
 
-        socket.on('playback_snapshot', handleSnapshot);
-        socket.on('playback_state', handleSnapshot);
+socket.on('connect', () => { overlay.innerText = '✅ 已連線'; });
+socket.on('playback_snapshot', handleSnapshot);
+socket.on('playback_state', handleSnapshot);
 
-        video.onended = () => {
-            socket.emit('song_ended', { filename: video.dataset.filename });
-        };
+setInterval(() => {
+    if (!video.paused) updateLyrics(video.currentTime);
+}, 80);
 
-        document.addEventListener('click', () => initAudio(), { once: true });
-    </script>
+video.onended = () => socket.emit('song_ended', { filename: video.dataset.filename });
+document.addEventListener('click', () => initAudio(), { once:true });
+</script>
 </body>
 </html>

@@ -59,13 +59,13 @@ def update_library_index(songs_dir: Path, index_path: Path) -> None:
                 "song": mp4_file.name,
                 "instrumental": f"{stem}.instrumental.m4a" if (songs_dir / f"{stem}.instrumental.m4a").is_file() else "",
                 "vocals": f"{stem}.vocals.wav" if (songs_dir / f"{stem}.vocals.wav").is_file() else "",
-                "ktv_lrc": f"{stem}.ktv.lrc" if (songs_dir / f"{stem}.ktv.lrc").is_file() else "",
+                "lyrics_lrc": f"{stem}.lrc" if (songs_dir / f"{stem}.lrc").is_file() else "",
                 "indexed_at": timestamp,
             }
         )
 
     with index_path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["song", "instrumental", "vocals", "ktv_lrc", "indexed_at"])
+        writer = csv.DictWriter(handle, fieldnames=["song", "instrumental", "vocals", "lyrics_lrc", "indexed_at"])
         writer.writeheader()
         writer.writerows(rows)
 

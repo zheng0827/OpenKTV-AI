@@ -1,6 +1,6 @@
 # OpenKTV-AI
 
-本分支 (`copilot/migrate-audio-separation-to-demucs`) 目前採用 **Demucs + 伺服器權威播放同步**。
+本分支 (`copilot/migrate-audio-separation-to-demucs`) 目前採用 **Demucs + faster-whisper 對齊管線 + 伺服器權威播放同步**。
 
 ## 核心變更
 
@@ -18,23 +18,28 @@
    - 由伺服器從 `.ktv.lrc` / `.lrc` 解析第一句時間，自動計算「第一句前 N 秒」（預設 5 秒）。
    - 僅在可用時間窗內顯示按鈕，超過第一句時間自動隱藏。
 
-4. **Demucs 音訊管線**
-   - 支援 `2 stems / 4 stems`，預設改為 `4 stems`。
+4. **Demucs + 歌詞對齊音訊管線**
+   - 支援 `2 stems / 4 stems`，預設 `4 stems`。
    - 保留輸出 `vocals.wav`（`<song>.vocals.wav`）。
    - 混音策略固定為 `pseudo-spatial`：
      - vocals 置中
      - 不對 vocals 加 EQ
      - backing track 才套用輕量偽空間（delay/early reflections/reverb）
    - 另輸出 `<song>.instrumental.m4a` 供伴奏切換。
+   - 整體流程：`下載影片 -> Demucs 分離 -> faster-whisper 句級定位 -> 強制對齊 word-level -> 對白回填 -> 輸出 .mp4/.m4a/.lrc/.wav -> 寫入曲庫索引`
 
 5. **Admin 下載流程強化**
    - 支援單曲與 playlist 連結（含 playlist 預覽/勾選 modal）。
    - 任務進度回報（逐首、重試次數、成功/失敗統計）。
    - 下載失敗自動重試（可設定重試次數）。
 
-6. **歌詞與索引（最小可行基礎）**
-   - 新增曲庫索引 CSV：`library_index.csv`。
-   - 新增 ktv-lrc 範本生成與 lrclib 嘗試抓詞（作為字幕/前奏跳過基礎資料）。
+6. **歌詞與索引**
+   - 新增 `openktv_ai/lyrics_pipeline/` 專責處理：
+     - faster-whisper 句級定位
+     - 強制對齊 word-level（whisperx，可走獨立 python）
+     - 對白偵測與回填 backing track
+   - 產生 `ktv-lrc` 格式 `.lrc`，供播放器字幕特效使用。
+   - 曲庫索引 CSV：`library_index.csv`。
 
 ---
 
@@ -71,6 +76,10 @@ python main.py
 - `KTV_DEVICE=auto|cuda|cpu`
 - `KTV_DEMUCS_MODEL=htdemucs_ft`
 - `KTV_MIX_MODE=pseudo-spatial`（固定策略）
+- `KTV_WHISPER_MODEL=large-v3`
+- `KTV_WHISPER_COMPUTE_TYPE=auto`
+- `KTV_WHISPER_LANGUAGE=zh`
+- `KTV_ALIGNMENT_PYTHON`（選填，指定 whisperx 獨立環境 python）
 - `KTV_INTRO_SKIP_LEAD_SECONDS=5`
 - `KTV_DOWNLOAD_RETRY_COUNT=2`
 - `KTV_LIBRARY_INDEX_PATH`（預設 `ktv_songs/library_index.csv`）
@@ -98,4 +107,4 @@ Pseudo-spatial 參數：
 
 3. **歌詞資料與索引**
    - 處理歌曲後確認 `library_index.csv` 更新
-   - 檢查 `*.ktv.lrc` 是否建立
+   - 檢查 `*.lrc`（ktv-lrc 格式）是否建立

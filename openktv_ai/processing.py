@@ -9,6 +9,8 @@ import time
 from pathlib import Path
 
 from .config import AppSettings
+from .library import fetch_lrclib_lyrics
+from .lyrics_pipeline import run_lyrics_alignment_pipeline
 
 
 def configure_demucs_cache(cache_dir: Path) -> Path:
@@ -282,6 +284,12 @@ class KTVProcessor:
     def sanitize_filename(self, name: str) -> str:
         return "".join([c for c in name if c not in r'\\/:*?"<>|'])
 
+    def _extract_song_artist(self, title: str) -> tuple[str, str]:
+        if " - " in title:
+            artist, song = title.split(" - ", 1)
+            return song.strip(), artist.strip()
+        return title.strip(), ""
+
     def _separate_audio(self, input_path: Path, job_temp_dir: Path, stems: int, mix_mode: str, device_pref: str) -> tuple[Path, Path]:
         demucs_out_root = job_temp_dir / "demucs_out"
         demucs_out_root.mkdir(parents=True, exist_ok=True)
@@ -339,13 +347,18 @@ class KTVProcessor:
     def process_song(self, url: str, manual_title: str, options: dict | None = None) -> bool:
         options = options or {}
         stems = 4 if str(options.get("stems", self.settings.separator_stems)) == "4" else 2
-        mix_mode = str(options.get("mix_mode", self.settings.mix_mode)).lower()
+        mix_mode = "pseudo-spatial"
         device_pref = str(options.get("device", self.settings.device_preference)).lower()
+        lyrics_text = (options.get("lyrics_text") or "").strip()
+        singer = (options.get("singer") or "").strip()
 
         job_temp_dir: Path | None = None
         try:
             safe_title = self.sanitize_filename(manual_title)
             self.log(f"目標歌曲：{safe_title}")
+            song_name, inferred_singer = self._extract_song_artist(safe_title)
+            if not singer:
+                singer = inferred_singer
 
             job_id = str(int(time.time()))
             job_temp_dir = self.settings.temp_base_dir / job_id
@@ -355,6 +368,8 @@ class KTVProcessor:
             temp_output = job_temp_dir / "output.mp4"
             temp_instrumental = job_temp_dir / "instrumental.m4a"
             temp_vocals = job_temp_dir / "vocals.wav"
+            temp_lrc = job_temp_dir / "lyrics.lrc"
+            temp_backing_refilled = job_temp_dir / "accompaniment_refilled.wav"
 
             self.log("步驟 1/4: 下載影片...")
             cmd_dl = [
@@ -375,8 +390,27 @@ class KTVProcessor:
             vocals, accompaniment = self._separate_audio(temp_input, job_temp_dir, stems, mix_mode, device_pref)
             shutil.copyfile(vocals, temp_vocals)
 
-            self._mix_audio(temp_input, vocals, accompaniment, temp_output, mix_mode)
-            _export_instrumental_track(accompaniment, temp_instrumental, mix_mode, self.settings)
+            if not lyrics_text:
+                lyrics_text = fetch_lrclib_lyrics(song_name, singer or "") or ""
+            self.log("步驟 3/4: faster-whisper 句級定位 + 強制對齊 + 對白回填...")
+            whisper_device = resolve_device(device_pref)
+            run_lyrics_alignment_pipeline(
+                vocals_wav=temp_vocals,
+                backing_wav=accompaniment,
+                output_lrc=temp_lrc,
+                output_refilled_backing_wav=temp_backing_refilled,
+                song_name=song_name or safe_title,
+                singer=singer or "",
+                lyrics_text=lyrics_text,
+                whisper_model=self.settings.whisper_model,
+                whisper_device=whisper_device,
+                whisper_compute_type=self.settings.whisper_compute_type,
+                whisper_language=self.settings.whisper_language or None,
+                alignment_python=self.settings.alignment_python or None,
+            )
+
+            self._mix_audio(temp_input, vocals, temp_backing_refilled, temp_output, mix_mode)
+            _export_instrumental_track(temp_backing_refilled, temp_instrumental, mix_mode, self.settings)
 
             self.log(f"步驟 4/4: 儲存為 {safe_title}.mp4")
             final = self.settings.songs_dir / f"{safe_title}.mp4"
@@ -384,10 +418,12 @@ class KTVProcessor:
                 final = self.settings.songs_dir / f"{safe_title}_{job_id}.mp4"
             final_instrumental = final.with_name(f"{final.stem}.instrumental.m4a")
             final_vocals = final.with_name(f"{final.stem}.vocals.wav")
+            final_lrc = final.with_name(f"{final.stem}.lrc")
 
             shutil.move(str(temp_output), str(final))
             shutil.move(str(temp_instrumental), str(final_instrumental))
             shutil.move(str(temp_vocals), str(final_vocals))
+            shutil.move(str(temp_lrc), str(final_lrc))
             self.log("✅ 製作完成！已自動同步至歌單。")
             return True
 

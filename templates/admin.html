@@ -81,9 +81,11 @@
             <input id="lyricSongName">
             <label>歌手</label>
             <input id="lyricSinger">
-            <button class="primary" onclick="confirmSingleWithLyrics()">確認並開始</button>
-            <button class="secondary" onclick="closeModal('lyricsModal')">取消</button>
-        </div>
+        <label>完整歌詞（可貼上；空白則自動嘗試 lrclib）</label>
+        <textarea id="lyricText" style="min-height:140px;color:#222;background:#fafafa;"></textarea>
+        <button class="primary" onclick="confirmSingleWithLyrics()">確認並開始</button>
+        <button class="secondary" onclick="closeModal('lyricsModal')">取消</button>
+    </div>
     </div>
 
     <script>
@@ -167,19 +169,22 @@
             if (!pendingSingle) return;
             const singer = document.getElementById('lyricSinger').value.trim();
             const song = document.getElementById('lyricSongName').value.trim();
+            const lyricText = document.getElementById('lyricText').value || '';
             const mergedTitle = singer ? `${singer} - ${song}` : song;
             closeModal('lyricsModal');
-            emitStart(pendingSingle.url, mergedTitle || pendingSingle.title, null);
+            emitStart(pendingSingle.url, mergedTitle || pendingSingle.title, null, singer, lyricText);
             pendingSingle = null;
         }
 
-        function emitStart(url, title, playlistEntries) {
+        function emitStart(url, title, playlistEntries, singer = '', lyricsText = '') {
             socket.emit('start_download', {
                 url,
                 title,
                 stems: document.getElementById('stems_mode').value,
                 device: document.getElementById('device_mode').value,
                 playlist_entries: playlistEntries,
+                singer,
+                lyrics_text: lyricsText,
             });
         }
 

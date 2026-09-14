@@ -14,7 +14,7 @@ from flask import Blueprint, Flask, current_app, render_template, request, send_
 from flask_socketio import SocketIO, emit
 
 from .config import AppSettings, load_settings
-from .library import fetch_lrclib_lyrics, find_intro_skip_seconds, update_library_index, write_ktv_lrc_template
+from .library import find_intro_skip_seconds, update_library_index
 from .processing import KTVProcessor
 
 CONTROL_ROLES = {"remote", "queue", "admin", "combo"}
@@ -77,6 +77,7 @@ def _playlist_entries(url: str, settings: AppSettings) -> list[dict]:
                 "id": video_id,
                 "title": (item.get("title") or video_id).strip(),
                 "url": f"https://www.youtube.com/watch?v={video_id}",
+                "singer": (item.get("uploader") or "").strip(),
             }
         )
     return entries
@@ -435,6 +436,8 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
             "mix_mode": "pseudo-spatial",
             "device": data.get("device"),
         }
+        manual_singer = (data.get("singer") or "").strip()
+        manual_lyrics = (data.get("lyrics_text") or "").strip()
 
         try:
             if _is_playlist_url(url):
@@ -443,11 +446,13 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
                     {
                         "url": item.get("url") or f"https://www.youtube.com/watch?v={item.get('id')}",
                         "title": item.get("title") or item.get("id") or manual_title,
+                        "singer": (item.get("singer") or "").strip(),
+                        "lyrics_text": "",
                     }
                     for item in selected_entries
                 ]
             else:
-                tasks = [{"url": url, "title": manual_title}]
+                tasks = [{"url": url, "title": manual_title, "singer": manual_singer, "lyrics_text": manual_lyrics}]
         except Exception as error:
             broadcast_log(f"❌ playlist 讀取失敗: {error}")
             return
@@ -463,6 +468,8 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
             for index, task in enumerate(tasks, start=1):
                 title = task["title"]
                 song_name, singer = _extract_title_artist(title)
+                provided_singer = (task.get("singer") or singer or "").strip()
+                provided_lyrics = (task.get("lyrics_text") or "").strip()
                 socketio.emit(
                     "task_progress",
                     {
@@ -486,17 +493,21 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
                             "attempt": attempt + 1,
                         },
                     )
-                    success = processor.process_song(task["url"], title, options=options)
+                    success = processor.process_song(
+                        task["url"],
+                        title,
+                        options={
+                            **options,
+                            "singer": provided_singer,
+                            "lyrics_text": provided_lyrics,
+                        },
+                    )
                     if success:
                         break
                     time.sleep(0.8)
 
                 if success:
                     succeeded += 1
-                    lrc_path = settings.songs_dir / f"{Path(title).stem}.ktv.lrc"
-                    if not lrc_path.exists():
-                        lyrics = fetch_lrclib_lyrics(song_name, singer)
-                        write_ktv_lrc_template(lrc_path, song_name or title, singer, lyrics)
                 else:
                     failed_items.append(title)
 
