@@ -9,6 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+LRC_INLINE_TIMESTAMP_RE = re.compile(r"\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\]")
+SYMBOL_NOISE_LINE_RE = re.compile(r"^[^0-9A-Za-z\u3400-\u9fff]+$")
+MIN_MATCH_SCORE = 0.72
+
 
 @dataclass
 class LyricLine:
@@ -84,8 +88,11 @@ def parse_lyrics_text(lyrics_text: str) -> list[str]:
         line = raw.strip()
         if not line or line.startswith("@") or line.startswith(("%", "$", "&")):
             continue
+        line = LRC_INLINE_TIMESTAMP_RE.sub("", line).strip()
+        if not line:
+            continue
         line = clean_text(line)
-        if line:
+        if line and not SYMBOL_NOISE_LINE_RE.fullmatch(line):
             lines.append(line)
     return lines
 
@@ -219,6 +226,38 @@ def find_segment(lyric_line: str, segments: list[dict[str, Any]], start_index: i
     return best_idx, best_score
 
 
+def _is_reliable_match(lyric_line: str, segment_text: str, score: float) -> bool:
+    if score >= MIN_MATCH_SCORE:
+        return True
+    target = normalize_match(lyric_line)
+    candidate = normalize_match(segment_text)
+    if not target or not candidate:
+        return False
+    shorter = min(len(target), len(candidate))
+    return shorter >= 3 and (target in candidate or candidate in target)
+
+
+def _build_line(text: str, start: float, end: float) -> LyricLine:
+    safe_end = max(start + 0.001, end)
+    return LyricLine(
+        start=float(start),
+        end=float(safe_end),
+        text=traditional(text),
+        words=interpolate_words(text, float(start), float(safe_end)),
+    )
+
+
+def _append_interpolated_lines(out: list[LyricLine], texts: list[str], start: float, end: float) -> None:
+    if not texts:
+        return
+    safe_end = max(start + 0.001 * len(texts), end)
+    span = safe_end - start
+    for index, text in enumerate(texts):
+        line_start = start + span * index / len(texts)
+        line_end = start + span * (index + 1) / len(texts)
+        out.append(_build_line(text, line_start, line_end))
+
+
 def interpolate_words(text: str, start: float, end: float) -> list[dict[str, Any]]:
     pieces = tokenize(text)
     if not pieces:
@@ -235,11 +274,22 @@ def interpolate_words(text: str, start: float, end: float) -> list[dict[str, Any
 def align_lyrics(lyrics_lines: list[str], segments: list[dict[str, Any]]) -> list[LyricLine]:
     out: list[LyricLine] = []
     search_idx = 0
+    pending_lines: list[str] = []
+    previous_end = 0.0
     for lyric in lyrics_lines:
-        idx, _score = find_segment(lyric, segments, search_idx)
+        idx, score = find_segment(lyric, segments, search_idx)
         if idx is None:
+            pending_lines.append(lyric)
             continue
         segment = segments[idx]
+        if not _is_reliable_match(lyric, segment.get("text", ""), score):
+            pending_lines.append(lyric)
+            continue
+
+        if pending_lines:
+            _append_interpolated_lines(out, pending_lines, previous_end, float(segment["start"]))
+            pending_lines = []
+
         words = segment.get("words", [])
         tokens = tokenize(lyric)
         if len(tokens) == len(words) and tokens:
@@ -248,6 +298,11 @@ def align_lyrics(lyrics_lines: list[str], segments: list[dict[str, Any]]) -> lis
             matched_words = interpolate_words(lyric, segment["start"], segment["end"])
         out.append(LyricLine(start=float(segment["start"]), end=float(segment["end"]), text=traditional(lyric), words=matched_words))
         search_idx = idx + 1
+        previous_end = float(segment["end"])
+
+    if pending_lines:
+        tail_end = float(segments[-1]["end"]) if segments else previous_end + max(1.0, len(pending_lines))
+        _append_interpolated_lines(out, pending_lines, previous_end, tail_end)
     return out
 
 

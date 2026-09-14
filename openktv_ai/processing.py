@@ -238,12 +238,12 @@ def build_demucs_command(
 
 def build_mix_filter(_mode: str, settings: AppSettings) -> str:
     return (
-        # Preserve separated vocals as-is and keep them centered.
-        "[1:a]pan=mono|c0=0.5*FL+0.5*FR[vocal_mono];"
-        "[vocal_mono]pan=stereo|c0=c0|c1=c0[vocals];"
+        # Preserve the separated vocal track exactly as Demucs produced it.
+        "[1:a]anull[vocals];"
         # Spatial processing is applied only to accompaniment/backing track.
         + build_pseudo_accompaniment_filter("[2:a]", settings, "acc")
-        + "[vocals][acc]amix=inputs=2:normalize=0[a]"
+        # Keep headroom stable to avoid re-triggering loudness control artifacts.
+        + "[vocals][acc]amix=inputs=2:normalize=0,volume=0.5[a]"
     )
 
 
@@ -255,9 +255,12 @@ def build_pseudo_accompaniment_filter(input_stream: str, settings: AppSettings, 
         f"{input_stream}aformat=channel_layouts=stereo,asplit=2[acc_dry][acc_ref];"
         f"[acc_ref]adelay={delay_left}|{delay_right},"
         f"volume={settings.pseudo_reflection_gain}[acc_er];"
-        f"[acc_dry][acc_er]amix=inputs=2:normalize=0,volume={settings.pseudo_backing_gain},"
-        f"aecho=0.6:0.4:{max(40, delay_right * 3)}:{settings.pseudo_reverb_room},"
-        f"aecho=0.6:0.3:{max(70, delay_right * 5)}:{settings.pseudo_reverb_damping}"
+        "[acc_dry][acc_er]amix=inputs=2:normalize=0,"
+        "highpass=f=55,"
+        "equalizer=f=180:t=q:w=0.8:g=-1.2,"
+        "equalizer=f=3200:t=q:w=1.0:g=0.7,"
+        f"volume={settings.pseudo_backing_gain},"
+        "alimiter=limit=0.95"
         f"[{output_label}];"
     )
 
@@ -321,9 +324,9 @@ def _export_instrumental_track(
     command.extend(
         [
             "-filter_complex",
-            processed_filter,
+            processed_filter + "[processed_acc]volume=0.5[mastered_acc]",
             "-map",
-            "[processed_acc]",
+            "[mastered_acc]",
         ]
     )
     command.extend(["-c:a", "aac", "-b:a", "192k", str(output_path)])

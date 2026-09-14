@@ -9,6 +9,8 @@ import urllib.request
 from pathlib import Path
 
 TIMESTAMP_RE = re.compile(r"\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]|^[%$&](\d+(?:\.\d+)?)")
+LRC_INLINE_TIMESTAMP_RE = re.compile(r"\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\]")
+SYMBOL_NOISE_LINE_RE = re.compile(r"^[^0-9A-Za-z\u3400-\u9fff]+$")
 
 
 def parse_first_lyric_time(lrc_path: Path) -> float | None:
@@ -88,7 +90,26 @@ def fetch_lrclib_lyrics(song_name: str, singer: str) -> str | None:
     item = payload[0] if isinstance(payload[0], dict) else None
     if not item:
         return None
-    return item.get("syncedLyrics") or item.get("plainLyrics")
+    return sanitize_lrclib_lyrics(item.get("syncedLyrics") or item.get("plainLyrics"))
+
+
+def sanitize_lrclib_lyrics(lyrics: str | None) -> str | None:
+    if not lyrics:
+        return None
+
+    cleaned_lines: list[str] = []
+    for raw_line in lyrics.splitlines():
+        line = raw_line.replace("\ufeff", "").replace("\u200b", "").strip()
+        if not line:
+            continue
+        line = LRC_INLINE_TIMESTAMP_RE.sub("", line).strip()
+        if not line or SYMBOL_NOISE_LINE_RE.fullmatch(line):
+            continue
+        cleaned_lines.append(line)
+
+    if not cleaned_lines:
+        return None
+    return "\n".join(cleaned_lines)
 
 
 def write_ktv_lrc_template(output_path: Path, song_name: str, singer: str, lyrics: str | None) -> None:
