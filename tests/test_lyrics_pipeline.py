@@ -78,6 +78,24 @@ class LyricsPipelineTests(unittest.TestCase):
         self.assertTrue(should_fallback_to_transcript_sync(lyrics_lines, matched_lines=1))
         self.assertFalse(should_fallback_to_transcript_sync(lyrics_lines, matched_lines=3))
 
+    def test_should_not_fallback_to_low_quality_transcript(self):
+        lyrics_lines = ["一", "二", "三", "四"]
+        segments = [
+            {"start": 0.0, "end": 53.31, "text": "作詞 作曲 編曲 混音 母帶 母帶 母帶 母帶 母帶 母帶", "words": []},
+            {"start": 54.0, "end": 102.0, "text": "母帶 母帶 母帶 母帶 母帶 母帶 母帶 母帶", "words": []},
+            {"start": 103.0, "end": 130.0, "text": "母帶 母帶 母帶 母帶 母帶", "words": []},
+        ]
+        self.assertFalse(should_fallback_to_transcript_sync(lyrics_lines, matched_lines=1, segments=segments))
+
+    def test_build_word_level_lines_from_segments_skips_low_quality_transcript(self):
+        segments = [
+            {"start": 0.0, "end": 50.0, "text": "母帶 母帶 母帶 母帶 母帶 母帶 母帶 母帶", "words": []},
+            {"start": 51.0, "end": 52.0, "text": "你好", "words": [{"text": "你", "start": 51.0, "end": 51.5}, {"text": "好", "start": 51.5, "end": 52.0}]},
+        ]
+        lines = build_word_level_lines_from_segments(segments)
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0].text, "你好")
+
 
 if __name__ == '__main__':
     unittest.main()
