@@ -94,7 +94,10 @@ function updateMode(mode) {
     if (!audioReady) return;
     const now = audioCtx.currentTime;
     if (mode === 'instrumental') {
-        originalGain.gain.setTargetAtTime(0.25, now, 0.08);
+        // The instrumental file already contains the processed backing track.
+        // Do not leave the mixed video audible, otherwise vocals bleed into
+        // accompaniment mode and can expose the source's old channel split.
+        originalGain.gain.setTargetAtTime(0, now, 0.08);
         instGain.gain.setTargetAtTime(1.0, now, 0.08);
         if (instrumentalAvailable && !video.paused) instrumental.play().catch(() => {});
         overlay.innerText = '🚫 伴奏模式';

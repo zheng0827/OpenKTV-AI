@@ -1,5 +1,73 @@
 from __future__ import annotations
 
+import os
+import sys
+import site
+import re
+import argparse
+import json
+import subprocess
+import tempfile
+from pathlib import Path
+
+def inject_nvidia_dlls():
+
+    search_paths = []
+    try:
+        search_paths.extend(site.getsitepackages())
+    except Exception:
+        pass
+
+    try:
+        search_paths.append(site.getusersitepackages())
+    except Exception:
+        pass
+
+    search_paths.append(sys.prefix)
+
+    seen = set()
+
+    for base_path in search_paths:
+
+        nvidia_dir = os.path.join(base_path, "nvidia")
+
+        if not os.path.isdir(nvidia_dir):
+            continue
+
+        for root, dirs, files in os.walk(nvidia_dir):
+
+            if os.path.basename(root).lower() != "bin":
+                continue
+
+            root = os.path.abspath(root)
+
+            if root in seen:
+                continue
+
+            seen.add(root)
+
+            # 加入 PATH
+            current_path = os.environ.get("PATH", "")
+
+            if root not in current_path.split(os.pathsep):
+                os.environ["PATH"] = root +os.pathsep +current_path
+
+            if hasattr(os, "add_dll_directory"):
+
+                try:
+                    os.add_dll_directory(root)
+                except Exception:
+                    pass
+
+            if "cublas64_12.dll" in files:
+                print(f"✅ 找到 CUDA DLL：{root}")
+
+    print("✅ NVIDIA DLL 搜尋路徑初始化完成")
+
+
+if "--alignment-worker" not in sys.argv:
+    inject_nvidia_dlls()
+
 import json
 import re
 import subprocess

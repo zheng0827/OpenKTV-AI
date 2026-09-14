@@ -56,9 +56,14 @@ class ProcessingTests(unittest.TestCase):
 
     def test_build_mix_filter_pseudo_only(self):
         pseudo = build_mix_filter('legacy', self.settings)
-        self.assertIn('vocal_mono', pseudo)
+        self.assertIn('[vocals]', pseudo)
         self.assertIn('aecho=', pseudo)
         self.assertNotIn('equalizer=', pseudo)
+
+    def test_build_mix_filter_centers_vocals_without_legacy_channel_join(self):
+        pseudo = build_mix_filter('pseudo-spatial', self.settings)
+        self.assertIn('pan=stereo|c0=0.5*c0+0.5*c1|c1=0.5*c0+0.5*c1', pseudo)
+        self.assertNotIn('join=inputs=2', pseudo)
 
     @patch('openktv_ai.processing._is_cuda_available', return_value=True)
     def test_resolve_device_prefers_cuda_when_auto(self, _mock_available):

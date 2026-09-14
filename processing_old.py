@@ -9,8 +9,6 @@ import time
 from pathlib import Path
 
 from .config import AppSettings
-from .library import fetch_lrclib_lyrics
-from .lyrics_pipeline import run_lyrics_alignment_pipeline
 
 
 def configure_demucs_cache(cache_dir: Path) -> Path:
@@ -182,15 +180,35 @@ def build_demucs_command(
     return command
 
 
-def build_mix_filter(_mode: str, settings: AppSettings) -> str:
+def build_mix_filter(mode: str, settings: AppSettings) -> str:
+    selected = (mode or "pseudo-spatial").lower()
+    if selected == "legacy":
+        return (
+            "[0:a]pan=mono|c0=0.5*FL+0.5*FR[L];"
+            "[2:a]pan=mono|c0=0.5*FL+0.5*FR[R];"
+            "[L][R]join=inputs=2:channel_layout=stereo[a]"
+        )
+
+    if selected == "stereo-balance":
+        l_orig = settings.stereo_balance_left_original
+        r_orig = settings.stereo_balance_right_original
+        l_acc = 1.0 - l_orig
+        r_acc = 1.0 - r_orig
+        return (
+            "[0:a]pan=mono|c0=0.5*FL+0.5*FR[orig];"
+            "[2:a]pan=mono|c0=0.5*FL+0.5*FR[acc];"
+            "[orig][acc]amerge=inputs=2[base];"
+            f"[base]pan=stereo|c0={l_orig}*c0+{l_acc}*c1|c1={r_orig}*c0+{r_acc}*c1[a]"
+        )
+
     return (
-        # Always build a centered vocal signal from both channels. This avoids
-        # inheriting any left/right vocal split from the source audio.
-        "[1:a]aformat=channel_layouts=stereo,"
-        "pan=stereo|c0=0.5*c0+0.5*c1|c1=0.5*c0+0.5*c1[vocals];"
-        # Spatial processing is applied only to accompaniment/backing track.
+        # Preserve the separated vocal track exactly as Demucs produced it.
+        # Spatial processing is applied only to accompaniment.
+        "[1:a]anull[vocals];"
         + build_pseudo_accompaniment_filter("[2:a]", settings, "acc")
-        + "[vocals][acc]amix=inputs=2:normalize=0[a]"
+        # Fixed headroom avoids a limiter changing the vocal when it is mixed
+        # with accompaniment. The companion track receives the same gain.
+        + "[vocals][acc]amix=inputs=2:normalize=0,volume=0.5[a]"
     )
 
 
@@ -202,10 +220,12 @@ def build_pseudo_accompaniment_filter(input_stream: str, settings: AppSettings, 
         f"{input_stream}aformat=channel_layouts=stereo,asplit=2[acc_dry][acc_ref];"
         f"[acc_ref]adelay={delay_left}|{delay_right},"
         f"volume={settings.pseudo_reflection_gain}[acc_er];"
-        f"[acc_dry][acc_er]amix=inputs=2:normalize=0,volume={settings.pseudo_backing_gain},"
-        f"aecho=0.6:0.4:{max(40, delay_right * 3)}:{settings.pseudo_reverb_room},"
-        f"aecho=0.6:0.3:{max(70, delay_right * 5)}:{settings.pseudo_reverb_damping}"
-        f"[{output_label}];"
+        "[acc_dry][acc_er]amix=inputs=2:normalize=0,"
+        "highpass=f=55,"
+        "equalizer=f=180:t=q:w=0.8:g=-1.2,"
+        "equalizer=f=3200:t=q:w=1.0:g=0.7,"
+        f"volume={settings.pseudo_accompaniment_gain},"
+        f"alimiter=limit=0.95[{output_label}];"
     )
 
 
@@ -264,15 +284,16 @@ def _export_instrumental_track(
 ) -> None:
     """Create the browser-playable companion track used by the player UI."""
     command = ["ffmpeg", "-y", "-i", str(accompaniment)]
-    processed_filter = build_pseudo_accompaniment_filter("[0:a]", settings, "processed_acc")
-    command.extend(
-        [
-            "-filter_complex",
-            processed_filter,
-            "-map",
-            "[processed_acc]",
-        ]
-    )
+    if (mix_mode or "").lower() == "pseudo-spatial":
+        processed_filter = build_pseudo_accompaniment_filter("[0:a]", settings, "processed_acc")
+        command.extend(
+            [
+                "-filter_complex",
+                processed_filter + "[processed_acc]volume=0.5[mastered_acc]",
+                "-map",
+                "[mastered_acc]",
+            ]
+        )
     command.extend(["-c:a", "aac", "-b:a", "192k", str(output_path)])
     _run_command(command)
 
@@ -284,12 +305,6 @@ class KTVProcessor:
 
     def sanitize_filename(self, name: str) -> str:
         return "".join([c for c in name if c not in r'\\/:*?"<>|'])
-
-    def _extract_song_artist(self, title: str) -> tuple[str, str]:
-        if " - " in title:
-            artist, song = title.split(" - ", 1)
-            return song.strip(), artist.strip()
-        return title.strip(), ""
 
     def _separate_audio(self, input_path: Path, job_temp_dir: Path, stems: int, mix_mode: str, device_pref: str) -> tuple[Path, Path]:
         demucs_out_root = job_temp_dir / "demucs_out"
@@ -320,7 +335,8 @@ class KTVProcessor:
         return vocals, accompaniment
 
     def _mix_audio(self, temp_input: Path, vocals: Path, accompaniment: Path, temp_output: Path, mix_mode: str) -> None:
-        filter_complex = build_mix_filter(mix_mode, self.settings)
+        selected_mode = mix_mode if mix_mode in {"legacy", "stereo-balance", "pseudo-spatial"} else self.settings.mix_mode
+        filter_complex = build_mix_filter(selected_mode, self.settings)
         cmd = [
             "ffmpeg",
             "-y",
@@ -342,24 +358,19 @@ class KTVProcessor:
             "aac",
             str(temp_output),
         ]
-        self.log("步驟 3/4: 混音策略 pseudo-spatial...")
+        self.log(f"步驟 3/4: 混音策略 {selected_mode}...")
         _run_command(cmd)
 
     def process_song(self, url: str, manual_title: str, options: dict | None = None) -> bool:
         options = options or {}
         stems = 4 if str(options.get("stems", self.settings.separator_stems)) == "4" else 2
-        mix_mode = "pseudo-spatial"
+        mix_mode = str(options.get("mix_mode", self.settings.mix_mode)).lower()
         device_pref = str(options.get("device", self.settings.device_preference)).lower()
-        lyrics_text = (options.get("lyrics_text") or "").strip()
-        singer = (options.get("singer") or "").strip()
 
         job_temp_dir: Path | None = None
         try:
             safe_title = self.sanitize_filename(manual_title)
             self.log(f"目標歌曲：{safe_title}")
-            song_name, inferred_singer = self._extract_song_artist(safe_title)
-            if not singer:
-                singer = inferred_singer
 
             job_id = str(int(time.time()))
             job_temp_dir = self.settings.temp_base_dir / job_id
@@ -368,9 +379,6 @@ class KTVProcessor:
             temp_input = job_temp_dir / "input.mp4"
             temp_output = job_temp_dir / "output.mp4"
             temp_instrumental = job_temp_dir / "instrumental.m4a"
-            temp_vocals = job_temp_dir / "vocals.wav"
-            temp_lrc = job_temp_dir / "lyrics.lrc"
-            temp_backing_refilled = job_temp_dir / "accompaniment_refilled.wav"
 
             self.log("步驟 1/4: 下載影片...")
             cmd_dl = [
@@ -389,44 +397,18 @@ class KTVProcessor:
 
             self.log("步驟 2/4: AI 分離 (Demucs)...")
             vocals, accompaniment = self._separate_audio(temp_input, job_temp_dir, stems, mix_mode, device_pref)
-            shutil.copyfile(vocals, temp_vocals)
 
-            if not lyrics_text:
-                lyrics_text = fetch_lrclib_lyrics(song_name, singer or "") or ""
-            self.log("步驟 3/4: faster-whisper 句級定位 + 強制對齊 + 對白回填...")
-            whisper_device = resolve_device(device_pref)
-            run_lyrics_alignment_pipeline(
-                vocals_wav=temp_vocals,
-                backing_wav=accompaniment,
-                output_lrc=temp_lrc,
-                output_refilled_backing_wav=temp_backing_refilled,
-                song_name=song_name or safe_title,
-                singer=singer or "",
-                lyrics_text=lyrics_text,
-                whisper_model=self.settings.whisper_model,
-                whisper_device=whisper_device,
-                whisper_compute_type=self.settings.whisper_compute_type,
-                whisper_language=self.settings.whisper_language or None,
-                alignment_python=self.settings.alignment_python or None,
-            )
-
-            self._mix_audio(temp_input, vocals, temp_backing_refilled, temp_output, mix_mode)
-            _export_instrumental_track(temp_backing_refilled, temp_instrumental, mix_mode, self.settings)
+            self._mix_audio(temp_input, vocals, accompaniment, temp_output, mix_mode)
+            _export_instrumental_track(accompaniment, temp_instrumental, mix_mode, self.settings)
 
             self.log(f"步驟 4/4: 儲存為 {safe_title}.mp4")
             final = self.settings.songs_dir / f"{safe_title}.mp4"
             if final.exists():
                 final = self.settings.songs_dir / f"{safe_title}_{job_id}.mp4"
             final_instrumental = final.with_name(f"{final.stem}.instrumental.m4a")
-            # Keep only the current song's vocal stem in the library. The
-            # complete per-job directory is removed in finally below.
-            final_vocals = self.settings.songs_dir / f"{final.stem}.vocals.wav"
-            final_lrc = final.with_name(f"{final.stem}.lrc")
 
             shutil.move(str(temp_output), str(final))
             shutil.move(str(temp_instrumental), str(final_instrumental))
-            shutil.move(str(temp_vocals), str(final_vocals))
-            shutil.move(str(temp_lrc), str(final_lrc))
             self.log("✅ 製作完成！已自動同步至歌單。")
             return True
 
