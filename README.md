@@ -63,4 +63,4 @@ pip install -r requirements.txt
 python main.py
 ```
 
-如果目前分離後端使用 `demucs` 或 `hybrid`，啟動前會先檢查 Demucs 權重。
+若預設分離後端使用 `demucs` 或 `hybrid`，啟動前會先檢查 Demucs 權重；若在管理頁單次切換到 `demucs` / `hybrid`，處理該首歌前也會補做權重檢查。

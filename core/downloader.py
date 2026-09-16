@@ -5,9 +5,9 @@ import subprocess
 from pathlib import Path
 
 
-def download_youtube_video(url: str, output_path: Path, ffmpeg_dir: Path) -> None:
+def download_youtube_video(url: str, output_path: Path, ffmpeg_dir: Path, yt_dlp_path: Path) -> None:
     command = [
-        "yt-dlp",
+        str(yt_dlp_path) if yt_dlp_path.exists() else "yt-dlp",
         "--ffmpeg-location",
         str(ffmpeg_dir),
         "--force-overwrites",

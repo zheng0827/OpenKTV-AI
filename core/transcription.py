@@ -6,6 +6,7 @@ from typing import Any
 from .gpu import gpu_model
 from .language_detection import detect_language_multiwindow
 from .qwen_alignment import QwenUnsupportedError, is_supported as qwen_supported, qwen_align_with_cpu_fallback
+from .runtime import align_device_for
 from .whisper_alignment import align_with_backend
 
 
@@ -63,9 +64,10 @@ def transcribe_segments(
 ) -> tuple[list[dict[str, Any]], str]:
     import whisperx  # pylint: disable=import-outside-toplevel
 
+    transcription_device = align_device_for(device)
     audio = whisperx.load_audio(str(vocals_wav))
-    with gpu_model(f"whisperx:{model_name}:{device}") as held:
-        model = whisperx.load_model(model_name, device=device, compute_type=compute_type, task="transcribe")
+    with gpu_model(f"whisperx:{model_name}:{transcription_device}") as held:
+        model = whisperx.load_model(model_name, device=transcription_device, compute_type=compute_type, task="transcribe")
         held.append(model)
         detected_language = language or detect_language_multiwindow(model, audio)
         result = model.transcribe(audio, batch_size=8, task="transcribe", language=detected_language, chunk_size=30)
@@ -102,7 +104,7 @@ def transcribe_segments(
             base_segments,
             audio,
             detected_language,
-            device,
+            transcription_device,
             backend=fallback_backend,
             allow_ctc_fallback_to_whisperx=True,
         )

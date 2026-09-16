@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from .ctc_alignment import ctc_align
 from .gpu import gpu_model, log_vram
-from .runtime import is_oom
+from .runtime import align_device_for, is_oom
 
 
 def _run_whisperx(raw_segments, audio, language: str, device: str, model_name=None):
@@ -50,6 +50,7 @@ def align_with_backend(
     model_name=None,
     allow_ctc_fallback_to_whisperx: bool = True,
 ):
+    device = align_device_for(device)
     runner = _run_ctc if backend == "ctc" else _run_whisperx
     try:
         return runner(raw_segments, audio, language, device, model_name=model_name)

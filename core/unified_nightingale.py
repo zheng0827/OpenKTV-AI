@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .config import AppSettings
+from .demucs_separator import ensure_demucs_weights
 from .downloader import download_youtube_video
 from .library import fetch_lrclib_lyrics
 from .lyrics_alignment import run_alignment_workflow
@@ -108,7 +109,14 @@ class KTVProcessor:
             temp_dialogue_vocals = job_temp_dir / "dialogue.vocals.wav"
 
             self.log("步驟 1/8: 下載影片...")
-            download_youtube_video(url, temp_input, self.settings.ffmpeg_dir)
+            download_youtube_video(url, temp_input, self.settings.ffmpeg_dir, self.settings.yt_dlp_path)
+
+            if separator_backend in {"demucs", "hybrid"}:
+                ensure_demucs_weights(
+                    self.settings.demucs_model,
+                    cache_dir=self.settings.demucs_cache_dir,
+                    log_cb=self.log,
+                )
 
             self.log(f"步驟 2/8: 分離人聲/伴奏 ({separator_backend})...")
             separated = separate_audio(

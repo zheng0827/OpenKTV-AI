@@ -527,8 +527,9 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
             broadcast_log(f"❌ playlist 讀取失敗: {error}")
             return
 
+        state["is_processing"] = True
+
         def run_process():
-            state["is_processing"] = True
             socketio.emit("task_status", {"status": "busy"})
             processor = KTVProcessor(settings=settings, log_cb=broadcast_log)
             total = len(tasks)
