@@ -29,7 +29,6 @@ def run_unified_nightingale(
     *,
     settings: AppSettings,
     vocals_wav: Path,
-    accompaniment_wav: Path,
     output_lyrics_vocals: Path,
     output_dialogue_vocals: Path,
     output_lrc: Path,
@@ -131,7 +130,6 @@ class KTVProcessor:
             run_unified_nightingale(
                 settings=self.settings,
                 vocals_wav=separated.vocals_path,
-                accompaniment_wav=separated.accompaniment_path,
                 output_lyrics_vocals=temp_lyrics_vocals,
                 output_dialogue_vocals=temp_dialogue_vocals,
                 output_lrc=temp_lrc,

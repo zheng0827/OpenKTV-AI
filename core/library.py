@@ -35,7 +35,8 @@ def parse_first_lyric_time(lrc_path: Path) -> float | None:
 
 
 def find_intro_skip_seconds(songs_dir: Path, song_filename: str, lead_seconds: float) -> tuple[float | None, float | None]:
-    song_stem = Path(song_filename).stem
+    song_name = Path(song_filename).name
+    song_stem = song_name[:-4] if song_name.lower().endswith(".mp4") else song_name
     lrc_candidates = [
         songs_dir / f"{song_stem}.ktv.lrc",
         songs_dir / f"{song_stem}.lrc",

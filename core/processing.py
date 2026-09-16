@@ -41,15 +41,21 @@ def build_instrumental_filter(settings: AppSettings) -> str:
 
 
 def _run_command(command: list[str]) -> None:
-    subprocess.run(
-        command,
-        shell=False,
-        check=True,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
+    try:
+        subprocess.run(
+            command,
+            shell=False,
+            check=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+    except subprocess.CalledProcessError as error:
+        detail = (error.stderr or "").strip()
+        message = detail or "ffmpeg command failed"
+        raise RuntimeError(message) from error
 
 
 def extract_timed_vocals(source_wav: Path, segments: list[dict], output_wav: Path) -> None:

@@ -26,9 +26,9 @@
 3. 從 `lrclib.net` 取得歌詞（或使用手動提供歌詞）
 4. WhisperX 轉錄 + `ctc` / `whisperx` / `qwen` 對齊
 5. 偵測對白時間並一起寫入 `ktv-lrc` `.lrc`
-7. 依時間切出 `lyrics.vocals.wav` 與 `dialogue.vocals.wav`
-8. 將 `dialogue.vocals.wav` 混入伴奏，輸出 `instrumental.m4a`
-9. 將 `lyrics.vocals.wav + dialogue + backing track` 混回 `mp4`
+6. 依時間切出 `lyrics.vocals.wav` 與 `dialogue.vocals.wav`
+7. 將 `dialogue.vocals.wav` 混入伴奏，輸出 `instrumental.m4a`
+8. 將 `lyrics.vocals.wav + dialogue + backing track` 混回 `mp4`
 
 ## 產出檔案
 

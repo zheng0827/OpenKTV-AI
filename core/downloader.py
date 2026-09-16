@@ -18,11 +18,17 @@ def download_youtube_video(url: str, output_path: Path, ffmpeg_dir: Path) -> Non
         str(output_path),
         url,
     ]
-    subprocess.run(
-        command,
-        check=True,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
+    try:
+        subprocess.run(
+            command,
+            check=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+    except subprocess.CalledProcessError as error:
+        detail = (error.stderr or "").strip()
+        message = detail or "yt-dlp download failed"
+        raise RuntimeError(message) from error

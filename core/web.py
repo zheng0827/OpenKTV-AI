@@ -179,10 +179,10 @@ def _create_blueprint() -> Blueprint:
         try:
             entries = _playlist_entries(url, settings)
             return json.dumps({"ok": True, "entries": entries})
-        except ValueError as error:
-            return json.dumps({"ok": False, "error": str(error)}), 400
-        except Exception as error:
-            return json.dumps({"ok": False, "error": f"playlist 讀取失敗: {error}"}), 500
+        except ValueError:
+            return json.dumps({"ok": False, "error": "playlist 參數無效"}), 400
+        except Exception:
+            return json.dumps({"ok": False, "error": "playlist 讀取失敗"}), 500
 
     @bp.route("/api/resolve_yt_title")
     def resolve_yt_title():
@@ -192,8 +192,8 @@ def _create_blueprint() -> Blueprint:
         try:
             data = _extract_youtube_title(url)
             return json.dumps({"ok": True, **data})
-        except ValueError as error:
-            return json.dumps({"ok": False, "error": str(error)}), 400
+        except ValueError:
+            return json.dumps({"ok": False, "error": "YouTube 連結格式不正確"}), 400
         except Exception:
             return json.dumps({"ok": False, "error": "無法解析 YouTube 標題"}), 500
 
