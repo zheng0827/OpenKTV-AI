@@ -91,8 +91,10 @@ def transcribe_segments(
         try:
             aligned_payload = qwen_align_with_cpu_fallback(base_segments, audio, detected_language)
         except QwenUnsupportedError:
+            print(f"[core:align] qwen backend unsupported for language={detected_language}, fallback to wav2vec2", flush=True)
             aligned_payload = None
-        except Exception:
+        except Exception as error:
+            print(f"[core:align] qwen backend failed: {error}", flush=True)
             aligned_payload = None
     if aligned_payload is None:
         fallback_backend = "ctc" if alignment_backend == "ctc" else "whisperx"

@@ -177,6 +177,9 @@ def separate_with_demucs(input_path: Path, output_dir: Path, model_name: str, st
     demucs_out_root.mkdir(parents=True, exist_ok=True)
 
     device = resolve_device(device_preference)
+    if device == "mps":
+        log_cb("⚠️ Demucs 目前改用 CPU，Apple Silicon 仍可在 WhisperX/Qwen 對齊階段使用 MPS。")
+        device = "cpu"
     if device_preference == "cuda" and device != "cuda":
         log_cb("⚠️ 已要求 CUDA，但目前不可用，已自動改用 CPU。")
     log_cb(f"Demucs device: {device}")

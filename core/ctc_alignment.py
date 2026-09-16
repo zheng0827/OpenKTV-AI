@@ -13,6 +13,7 @@ def ctc_align(
     return_char_alignments: bool = False,
 ) -> dict:
     import nltk  # pylint: disable=import-outside-toplevel
+    import numpy as np  # pylint: disable=import-outside-toplevel
     import pandas as pd  # pylint: disable=import-outside-toplevel
     import torch  # pylint: disable=import-outside-toplevel
     from nltk.data import load as nltk_load  # pylint: disable=import-outside-toplevel

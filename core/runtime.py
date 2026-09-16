@@ -31,8 +31,7 @@ def resolve_device(preference: str) -> str:
         return "cpu"
     if preferred == "cuda":
         return "cuda" if is_cuda_available() else "cpu"
-    detected = detect_device()
-    return detected if detected != "mps" else "cpu"
+    return detect_device()
 
 
 def align_device_for(device: str) -> str:
