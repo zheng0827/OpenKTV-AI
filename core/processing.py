@@ -101,5 +101,6 @@ def mix_video_audio(temp_input: Path, lyrics_vocals: Path, dialogue_vocals: Path
         "-map", "[a]",
         "-c:v", "copy",
         "-c:a", "aac",
+        "-shortest",
         str(temp_output),
     ])

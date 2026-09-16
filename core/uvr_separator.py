@@ -43,11 +43,11 @@ def separate_with_uvr(input_path: Path, output_dir: Path, model_dir: Path, model
     separator.load_model(model_name)
     separator.separate(
         str(input_path),
-        custom_output_names={"Vocals": "uvr_vocals", "Instrumental": "uvr_instrumental"},
+        custom_output_names={"Vocals": CANONICAL_OUTPUTS["Vocals"], "Instrumental": CANONICAL_OUTPUTS["Instrumental"]},
     )
 
-    vocals = _find_output(output_dir, ("uvr_vocals", CANONICAL_OUTPUTS["Vocals"]), ("vocals",))
-    instrumental = _find_output(output_dir, ("uvr_instrumental", CANONICAL_OUTPUTS["Instrumental"]), ("instrumental", "karaoke", "no_vocals", "inst"))
+    vocals = _find_output(output_dir, (CANONICAL_OUTPUTS["Vocals"], "uvr_vocals"), ("vocals",))
+    instrumental = _find_output(output_dir, (CANONICAL_OUTPUTS["Instrumental"], "uvr_instrumental"), ("instrumental", "karaoke", "no_vocals", "inst"))
     if vocals is None or instrumental is None:
         raise FileNotFoundError("UVR output missing vocals or instrumental stem")
     return vocals, instrumental

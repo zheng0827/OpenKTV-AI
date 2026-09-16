@@ -104,6 +104,6 @@ def transcribe_segments(
             detected_language,
             device,
             backend=fallback_backend,
-            allow_ctc_fallback_to_whisperx=alignment_backend != "qwen",
+            allow_ctc_fallback_to_whisperx=True,
         )
     return _merge_alignment(base_segments, aligned_payload.get("segments", [])), detected_language
