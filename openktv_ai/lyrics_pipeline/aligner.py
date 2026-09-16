@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 LRC_INLINE_TIMESTAMP_RE = re.compile(r"\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\]")
 SYMBOL_NOISE_LINE_RE = re.compile(r"^[^0-9A-Za-z\u3400-\u9fff]+$")
-MIN_MATCH_SCORE = 0.72
+MIN_MATCH_SCORE = 0.3
 MIN_LYRIC_MATCH_RATIO = 0.35
 _OPENCC = None
 
@@ -133,10 +133,23 @@ def similarity(a: str, b: str) -> float:
 
 def parse_lyrics_text(lyrics_text: str) -> list[str]:
     lines: list[str] = []
+    section = ""
     for raw in (lyrics_text or "").splitlines():
         line = raw.strip()
-        if not line or line.startswith("@") or line.startswith(("%", "$", "&")):
+        if not line:
             continue
+        if line.startswith("@"):
+            if line.startswith("@dialogue"):
+                section = "dialogue"
+            elif line.startswith("@lyric "):
+                section = "lyric"
+            continue
+        if section == "dialogue" or line.startswith("$"):
+            continue
+        if line.startswith(("%", "&")):
+            if section != "lyric":
+                continue
+            line = re.sub(r"^[%&]\s*\d+(?:\.\d+)?\s+\d+(?:\.\d+)?\s*", "", line)
         line = LRC_INLINE_TIMESTAMP_RE.sub("", line).strip()
         if not line:
             continue
@@ -159,9 +172,9 @@ def transcribe_segments(
     if backend in {"auto", "whisperx"}:
         try:
             import whisperx  # pylint: disable=import-outside-toplevel
-
+            print("ewwwwwwwwwwwww")
             model = whisperx.load_model(model_name, device=device, compute_type=compute_type, language=language)
-            result = model.transcribe(str(vocals_wav), batch_size=8, language=language, initial_prompt=lyrics_prompt)
+            result = model.transcribe(str(vocals_wav), batch_size=8, language=language)
             out = []
             for seg in result.get("segments", []):
                 seg_start = seg.get("start")
@@ -486,7 +499,11 @@ def _align_lyrics_with_match_count(lyrics_lines: list[str], segments: list[dict[
         elif segments:
             first_start = float(segments[0]["start"])
             tail_start = _estimate_prefix_start(first_start, len(pending_lines))
-            tail_end = max(first_start, tail_start + 0.001 * len(pending_lines))
+            tail_end = max(
+                first_start,
+                float(segments[-1]["end"]),
+                tail_start + 0.001 * len(pending_lines),
+            )
         else:
             tail_start = 0.0
             tail_end = max(1.0, len(pending_lines))
@@ -584,7 +601,7 @@ def build_word_level_lines_from_segments(segments: list[dict[str, Any]], text_tr
             token_end = word.get("end")
             if token and token_start is not None and token_end is not None and float(token_end) >= float(token_start):
                 words.append({"text": token, "start": float(token_start), "end": float(token_end)})
-        if not words:
+        if not words or len(tokenize(text)) != len(words):
             words = interpolate_words(text, start, end)
         mapped_words = [{**word, "text": text_transform(str(word.get("text", "")))} for word in words]
         lines.append(LyricLine(start=start, end=end, text=text_transform(text), words=mapped_words))
@@ -620,6 +637,34 @@ def detect_dialogue(aligned_lines: list[LyricLine], segments: list[dict[str, Any
         if text:
             dialogue.append({"start": start, "end": end, "text": text})
     return dialogue
+
+
+def merge_display_words(words: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge punctuation and contraction fragments into displayable words.
+
+    ASR tokenization often emits ``you'`` + ``d`` or punctuation as separate
+    words. Those are useful to the aligner but produce visibly distracting
+    karaoke flashes, so the display token keeps the combined timing window.
+    """
+    merged: list[dict[str, Any]] = []
+    for source in words:
+        text = clean_text(str(source.get("text", "")))
+        start = source.get("start")
+        end = source.get("end")
+        if not text or start is None or end is None:
+            continue
+        item = {**source, "text": text, "start": float(start), "end": float(end)}
+        punctuation_only = not re.search(r"[0-9A-Za-z\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]", text)
+        contraction_fragment = bool(merged) and (
+            merged[-1]["text"].endswith(("'", "\u2019")) or text.startswith(("\u2019", "'"))
+        )
+        if merged and (punctuation_only or contraction_fragment):
+            previous = merged[-1]
+            previous["text"] += text
+            previous["end"] = max(previous["end"], item["end"])
+            continue
+        merged.append(item)
+    return merged
 
 
 def refill_dialogue_to_backing(vocals_wav: Path, backing_wav: Path, dialogue: list[dict[str, Any]], output_wav: Path) -> None:
@@ -658,7 +703,7 @@ def write_ktv_lrc(output: Path, song_name: str, singer: str, duration_seconds: f
 
         for line in aligned_lines:
             file.write(f"%{line.start:.3f} {line.end:.3f} {line.text}\n")
-            for word in line.words:
+            for word in merge_display_words(line.words):
                 file.write(f"${word['start']:.3f} {word['end']:.3f} {clean_text(str(word['text']))}\n")
             file.write("\n")
 
@@ -684,9 +729,7 @@ def run_lyrics_alignment_pipeline(
     asr_backend: str = "auto",
 ) -> tuple[list[LyricLine], list[dict[str, Any]]]:
     lyrics_lines = parse_lyrics_text(lyrics_text)
-    if not lyrics_lines:
-        lyrics_lines = [song_name]
-
+    print("\n".join(lyrics_lines))
     segments, detected_language = transcribe_segments(
         vocals_wav=vocals_wav,
         model_name=whisper_model,
@@ -696,6 +739,7 @@ def run_lyrics_alignment_pipeline(
         lyrics_prompt="\n".join(lyrics_lines),
         asr_backend=asr_backend,
     )
+
     text_transform, _chinese_detected = build_text_transform(detected_language or whisper_language or "")
     aligned_segments = apply_forced_alignment(
         wav_path=vocals_wav,
@@ -704,22 +748,18 @@ def run_lyrics_alignment_pipeline(
         device=whisper_device,
         alignment_python=alignment_python,
     )
-    aligned_lines, matched_lines, filtered_lyrics_dialogue = align_gt_lyrics_strict(lyrics_lines, aligned_segments, text_transform)
-    if should_fallback_to_transcript_sync(lyrics_lines, matched_lines, aligned_segments):
-        fallback_lines = build_word_level_lines_from_segments(aligned_segments, text_transform=text_transform)
-        if fallback_lines:
-            aligned_lines = fallback_lines
-            filtered_lyrics_dialogue = []
-    dialogue = detect_dialogue(aligned_lines, aligned_segments, text_transform=text_transform)
-    dialogue.extend(
-        item
-        for item in filtered_lyrics_dialogue
-        if not any(
-            item.get("text") == existing.get("text")
-            and abs(float(item.get("start", -1.0)) - float(existing.get("start", -2.0))) < 0.05
-            for existing in dialogue
+    # LRCLIB is the source of lyric text. ASR is used only to locate those lines;
+    # never replace trusted lyrics with unverified transcript text.
+    aligned_lines = [
+        LyricLine(
+            start=line.start,
+            end=line.end,
+            text=text_transform(line.text),
+            words=[{**word, "text": text_transform(str(word["text"]))} for word in line.words],
         )
-    )
+        for line in align_lyrics(lyrics_lines, aligned_segments)
+    ]
+    dialogue = detect_dialogue(aligned_lines, aligned_segments, text_transform=text_transform)
     dialogue.sort(key=lambda item: (float(item.get("start", 0.0)), float(item.get("end", 0.0))))
     refill_dialogue_to_backing(vocals_wav, backing_wav, dialogue, output_refilled_backing_wav)
     if output_dialogue_audit_json is not None:
@@ -728,7 +768,7 @@ def run_lyrics_alignment_pipeline(
                 {
                     "detected_language": detected_language,
                     "chinese_conversion_enabled": _chinese_detected,
-                    "filtered_lyrics_dialogue": filtered_lyrics_dialogue,
+                    "filtered_lyrics_dialogue": [],
                     "dialogue_total": dialogue,
                 },
                 ensure_ascii=False,

@@ -470,8 +470,8 @@ class KTVProcessor:
             )
 
 
-            self._mix_audio(temp_input, vocals, temp_backing_refilled, temp_output, mix_mode)
-            _export_instrumental_track(temp_backing_refilled, temp_instrumental, mix_mode, self.settings)
+            self._mix_audio(temp_input, vocals, accompaniment, temp_output, mix_mode)
+            _export_instrumental_track(accompaniment, temp_instrumental, mix_mode, self.settings)
 
             self.log(f"步驟 4/4: 儲存為 {safe_title}.mp4")
             final = self.settings.songs_dir / f"{safe_title}.mp4"

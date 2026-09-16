@@ -10,13 +10,38 @@
         #overlay { position:absolute; left:16px; top:16px; background:rgba(0,0,0,.55); border-radius:8px; padding:8px 12px; font-size:18px; z-index:5; }
         #full-btn { position:absolute; right:16px; top:16px; z-index:6; border:1px solid #fff; border-radius:8px; padding:8px 12px; background:rgba(0,0,0,.4); color:#fff; }
         #waiting { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#aaa; font-size:26px; z-index:4; }
-        #subtitle-panel { position:absolute; left:6%; right:6%; bottom:20px; z-index:6; pointer-events:none; }
-        .line { font-size:38px; font-weight:700; line-height:1.35; text-shadow:0 2px 8px rgba(0,0,0,.75); white-space:pre-wrap; }
-        #line-top { text-align:left; margin-bottom:8px; }
-        #line-bottom { text-align:right; color:#f5f5f5; }
-        .word { color:#fff; transition:color .1s linear; }
-        .word.active { color:#1e88e5; }
-        .countdown { color:#64b5f6; letter-spacing:3px; }
+        #subtitle-panel { position:absolute; left:6%; right:6%; bottom:30px; z-index:6; pointer-events:none; }
+        
+        /* 增強 KTV 字體邊框與陰影，使其在複雜背景下更清晰 */
+        .line { 
+            font-size:42px; 
+            font-weight:700; 
+            line-height:1.4; 
+            text-shadow: 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 0 4px 10px rgba(0,0,0,0.8);
+            white-space:pre-wrap; 
+        }
+        #line-top { text-align:left; margin-bottom:10px; }
+        #line-bottom { text-align:right; }
+        
+        /* 使用偽元素實現平滑滑動填色 (Sweep effect) */
+        .word { 
+            position: relative;
+            display: inline-block;
+            color: #ffffff; /* 未唱到的底色 */
+        }
+        .word::after {
+            content: attr(data-text);
+            position: absolute;
+            left: 0;
+            top: 0;
+            color: #1e88e5; /* 唱到的高光色 (藍色) */
+            overflow: hidden;
+            white-space: nowrap;
+            width: var(--p, 0%); /* 透過 JS 即時改變寬度百分比 */
+        }
+        
+        /* 倒數點點樣式 */
+        .countdown { color:#64b5f6; letter-spacing:4px; margin-right: 8px; display: inline-block; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 </head>
@@ -48,9 +73,6 @@ let audioReady = false;
 let activeMode = 'original';
 let instrumentalAvailable = false;
 let lyricLines = [];
-let lineA = null;
-let lineB = null;
-let countdownAnchors = [];
 
 function initAudio() {
     if (!audioCtx) {
@@ -117,78 +139,186 @@ function parseKtvLrc(text) {
         } else if (line.startsWith('$') && current) {
             const m = line.match(/^\$(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(.+)$/);
             if (!m) continue;
-            current.words.push({ start:Number(m[1]), end:Number(m[2]), text:m[3] });
+            const word = { start:Number(m[1]), end:Number(m[2]), text:m[3] };
+            const previous = current.words[current.words.length - 1];
+            const punctuationOnly = !/[0-9A-Za-z\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(word.text);
+            const contractionFragment = previous && (
+                /['\u2019]$/.test(previous.text) || /^['\u2019]/.test(word.text)
+            );
+            if (previous && (punctuationOnly || contractionFragment)) {
+                previous.text += word.text;
+                previous.end = Math.max(previous.end, word.end);
+            } else {
+                current.words.push(word);
+            }
+        }
+    }
+
+    // 每個字的填色區間延續到下一個字開始，句尾字則延續到整句結束。
+    for (const line of lines) {
+        for (let i = 0; i < line.words.length; i++) {
+            line.words[i].end = i + 1 < line.words.length
+                ? line.words[i + 1].start
+                : line.end;
+        }
+    }
+    
+    // 計算哪些行需要顯示倒數點點 (前奏 > 4秒，或第一句)
+    for (let i = 0; i < lines.length; i++) {
+        if (i === 0 || (lines[i].start - lines[i-1].end >= 4)) {
+            lines[i].needsCountdown = true;
+        } else {
+            lines[i].needsCountdown = false;
         }
     }
     return lines;
 }
 
-function buildCountdownAnchors(lines) {
-    const anchors = [];
-    let lastAnchor = -999;
-    for (let i = 0; i < lines.length; i++) {
-        const start = lines[i].start;
-        if (i === 0 || start - lastAnchor >= 20) {
-            anchors.push(start);
-            lastAnchor = start;
-        }
-    }
-    return anchors;
-}
-
 async function loadLyricsForSong(filename) {
     lyricLines = [];
-    lineA = null;
-    lineB = null;
-    countdownAnchors = [];
     try {
         const lrcName = filename.replace(/\.mp4$/i, '.lrc');
         const resp = await fetch(`/songs/${encodeURIComponent(lrcName)}`);
         if (!resp.ok) throw new Error('missing lrc');
         const text = await resp.text();
         lyricLines = parseKtvLrc(text);
-        countdownAnchors = buildCountdownAnchors(lyricLines);
     } catch (_) {
         lyricLines = [];
-        countdownAnchors = [];
     }
 }
 
-function countdownText(now) {
-    for (const anchor of countdownAnchors) {
-        const remain = anchor - now;
+// 渲染單行歌詞，並精準計算字元滑動的百分比 (0% ~ 100%)
+function renderLine(line, now, isActiveLine) {
+    if (!line) return '';
+    let html = '';
+    
+    // 只在當前準備要唱的該行(isActiveLine)且需要倒數時，顯示點點
+    if (isActiveLine && line.needsCountdown) {
+        const remain = line.start - now;
         if (remain <= 3 && remain > 0) {
             const dots = Math.ceil(remain);
-            return `<span class="countdown">${'●'.repeat(Math.max(1, Math.min(3, dots)))}</span>`;
+            html += `<span class="countdown">${'●'.repeat(Math.max(1, Math.min(3, dots)))}</span>`;
         }
     }
-    return '';
+
+    if (!line.words || !line.words.length) {
+        let p = 0;
+        if (now >= line.end) p = 100;
+        else if (now > line.start) p = ((now - line.start) / (line.end - line.start)) * 100;
+        const safeText = line.text.replace(/"/g, '&quot;');
+        return html + `<span class="word" data-text="${safeText}" style="--p:${p}%">${line.text}</span>`;
+    }
+
+    html += line.words.map(w => {
+        let p = 0;
+        if (now >= w.end) p = 100;
+        else if (now > w.start) p = ((now - w.start) / (w.end - w.start)) * 100;
+        const safeText = w.text.replace(/"/g, '&quot;');
+        return `<span class="word" data-text="${safeText}" style="--p:${p}%">${w.text}</span>`;
+    }).join('');
+    
+    return html;
 }
 
-function renderLine(line, now) {
-    if (!line) return '';
-    if (!line.words || !line.words.length) return `<span class="word active">${line.text}</span>`;
-    return line.words.map(w => `<span class="word ${now >= w.end ? 'active' : ''}">${w.text}</span>`).join('');
+const lyricRenderState = {
+    top: { key: '', line: null, words: [] },
+    bottom: { key: '', line: null, words: [] }
+};
+
+function updateRenderedLine(container, state, line, now, isActiveLine) {
+    const key = line ? `${line.start}:${line.end}:${line.text}` : '';
+    if (state.key !== key) {
+        state.key = key;
+        state.line = line;
+        state.words = [];
+        container.replaceChildren();
+        if (!line) return;
+
+        if (line.needsCountdown) {
+            const countdown = document.createElement('span');
+            countdown.className = 'countdown';
+            state.countdown = countdown;
+            container.appendChild(countdown);
+        } else {
+            state.countdown = null;
+        }
+
+        const words = line.words && line.words.length
+            ? line.words
+            : [{ start: line.start, end: line.end, text: line.text }];
+        for (const word of words) {
+            const element = document.createElement('span');
+            element.className = 'word';
+            element.dataset.text = word.text;
+            element.textContent = word.text;
+            container.appendChild(element);
+            state.words.push({ data: word, element });
+        }
+    }
+
+    if (!line) return;
+    if (state.countdown) {
+        const remain = line.start - now;
+        state.countdown.textContent = isActiveLine || remain > 0
+            ? (remain > 0 && remain <= 3 ? '●'.repeat(Math.max(1, Math.min(3, Math.ceil(remain)))) : '')
+            : '';
+    }
+    for (const item of state.words) {
+        const duration = Math.max(0.001, item.data.end - item.data.start);
+        const progress = now <= item.data.start
+            ? 0
+            : now >= item.data.end
+                ? 100
+                : ((now - item.data.start) / duration) * 100;
+        item.element.style.setProperty('--p', `${Math.max(0, Math.min(100, progress))}%`);
+    }
 }
 
+// 核心：KTV 上下輪替邏輯與刷新
 function updateLyrics(now) {
     if (!lyricLines.length) {
-        lineTop.innerHTML = countdownText(now);
-        lineBottom.innerHTML = '';
+        updateRenderedLine(lineTop, lyricRenderState.top, null, now, false);
+        updateRenderedLine(lineBottom, lyricRenderState.bottom, null, now, false);
         return;
     }
 
-    lineA = null;
-    lineB = null;
-    for (let i = lyricLines.length - 1; i >= 0; i--) {
-        if (!lineA && i % 2 === 0 && now >= lyricLines[i].start) lineA = lyricLines[i];
-        if (!lineB && i % 2 === 1 && now >= lyricLines[i].start) lineB = lyricLines[i];
-        if (lineA && lineB) break;
+    // During a gap, keep the next line as a preview rather than treating it as
+    // already active. This prevents the next line from filling too early.
+    const activeIndex = lyricLines.findIndex(l => l.start <= now && now < l.end);
+    const nextIndex = lyricLines.findIndex(l => l.start > now);
+    const currentIndex = activeIndex >= 0 ? activeIndex : nextIndex >= 0 ? nextIndex : lyricLines.length;
+    const currentIsActive = activeIndex >= 0;
+
+    let topIdx = -1, bottomIdx = -1;
+    let activeIsTop = false;
+
+    // 奇偶數交替邏輯：上面結束換下下句，下面結束換下下下句
+    if (currentIndex < lyricLines.length) {
+        if (currentIndex % 2 === 0) { // 偶數句：Top 是當前句，Bottom 是下一句 (預備)
+            topIdx = currentIndex;
+            bottomIdx = currentIndex + 1;
+            activeIsTop = currentIsActive;
+        } else { // 奇數句：Bottom 是當前句，Top 是下一句 (預備)
+            bottomIdx = currentIndex;
+            topIdx = currentIndex + 1;
+            activeIsTop = currentIsActive;
+        }
+    } else { // 結尾殘留處理
+        if (lyricLines.length % 2 === 0) bottomIdx = lyricLines.length - 1;
+        else topIdx = lyricLines.length - 1;
     }
 
-    const topCountdown = countdownText(now);
-    lineTop.innerHTML = `${topCountdown}${renderLine(lineA, now)}`;
-    lineBottom.innerHTML = renderLine(lineB, now);
+    // 渲染 Top 與 Bottom，傳入 activeIsTop 判斷倒數點點該畫在哪一行
+    updateRenderedLine(
+        lineTop, lyricRenderState.top,
+        topIdx >= 0 && topIdx < lyricLines.length ? lyricLines[topIdx] : null,
+        now, activeIsTop && topIdx === currentIndex
+    );
+    updateRenderedLine(
+        lineBottom, lyricRenderState.bottom,
+        bottomIdx >= 0 && bottomIdx < lyricLines.length ? lyricLines[bottomIdx] : null,
+        now, !activeIsTop && bottomIdx === currentIndex
+    );
 }
 
 function handleSnapshot(snapshot) {
@@ -199,8 +329,8 @@ function handleSnapshot(snapshot) {
         waiting.style.display = 'flex';
         video.pause();
         instrumental.pause();
-        lineTop.innerHTML = '';
-        lineBottom.innerHTML = '';
+        updateRenderedLine(lineTop, lyricRenderState.top, null, 0, false);
+        updateRenderedLine(lineBottom, lyricRenderState.bottom, null, 0, false);
         return;
     }
 
@@ -240,9 +370,14 @@ socket.on('connect', () => { overlay.innerText = '✅ 已連線'; });
 socket.on('playback_snapshot', handleSnapshot);
 socket.on('playback_state', handleSnapshot);
 
-setInterval(() => {
-    if (!video.paused) updateLyrics(video.currentTime);
-}, 80);
+// 使用 requestAnimationFrame 達到 60fps 刷新，讓 CSS 滑動遮罩超級平滑
+function renderLoop() {
+    if (!video.paused) {
+        updateLyrics(video.currentTime);
+    }
+    requestAnimationFrame(renderLoop);
+}
+requestAnimationFrame(renderLoop);
 
 video.onended = () => socket.emit('song_ended', { filename: video.dataset.filename });
 document.addEventListener('click', () => initAudio(), { once:true });

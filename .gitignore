@@ -6,3 +6,7 @@ temp_processing/
 ffmpeg/
 model_cache/
 *.exe
+.venv*
+*.lrc
+*.txt
+lyrics/

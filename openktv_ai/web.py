@@ -131,6 +131,10 @@ def _create_blueprint() -> Blueprint:
     def page_player():
         return render_template("player.html")
 
+    @bp.route("/lyrics-editor")
+    def page_lyrics_editor():
+        return render_template("lyrics_editor.html")
+
     @bp.route("/remote")
     def page_remote():
         return render_template("remote.html")

@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KTV 歌詞時間編輯器 (兩階段精調版)</title>
+    <style>
+        :root { color-scheme: light; font-family: "Segoe UI", "Microsoft JhengHei", sans-serif; }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: #f0f2f5; color: #1c1e21; }
+        header { position: sticky; top: 0; z-index: 10; padding: 15px 20px; background: #242526; color: #e4e6eb; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
+        header h1 { margin: 0 0 12px; font-size: 22px; font-weight: 600; }
+        .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+        select, button { border: none; border-radius: 6px; padding: 10px 14px; font-size: 14px; font-weight: 600; transition: all 0.2s; }
+        select { min-width: 250px; border: 1px solid #ccd0d5; background: #fff; color: #000; }
+        button { background: #1877f2; color: #fff; cursor: pointer; }
+        button:hover:not(:disabled) { filter: brightness(1.1); }
+        button.secondary { background: #606770; }
+        button.warn { background: #e41e3f; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        main { width: min(1000px, 96vw); margin: 20px auto 60px; }
+        .card { background: #fff; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        video { display: block; width: 100%; max-height: 250px; background: #000; border-radius: 8px; margin-bottom: 10px; }
+        .status { color: #606770; font-size: 14px; margin: 0; }
+        
+        /* 第一階段：句級列表 */
+        .line-card { border: 1px solid #dadde1; border-radius: 8px; margin-bottom: 12px; background: #fff; overflow: hidden; }
+        .line-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: #f7f8fa; cursor: pointer; user-select: none; }
+        .line-header:hover { background: #eef0f3; }
+        .line-info { display: flex; align-items: center; gap: 15px; flex: 1; }
+        .line-text { font-size: 18px; font-weight: 700; color: #1c1e21; }
+        .line-time { font-family: monospace; font-size: 14px; color: #606770; background: #e4e6eb; padding: 4px 8px; border-radius: 4px; }
+        .line-actions { display: flex; gap: 8px; }
+        
+        /* 第二階段：單字微調列表 (預設隱藏) */
+        .words-container { display: none; padding: 15px 16px; border-top: 1px solid #dadde1; background: #fff; }
+        .line-card.open .words-container { display: block; }
+        .line-card.open .line-header { background: #e3f2fd; }
+        
+        .word-row { display: grid; grid-template-columns: 100px 1fr 120px; align-items: center; gap: 15px; padding: 10px 0; border-bottom: 1px dashed #e4e6eb; }
+        .word-row:last-child { border-bottom: none; padding-bottom: 0; }
+        .word-row.active { background: #fff9e6; outline: 2px solid #ffc107; border-radius: 4px; padding: 10px; margin: 0 -10px; }
+        .word-char { font-size: 20px; font-weight: 700; color: #d93025; text-align: center; }
+        .nudge-group { display: flex; align-items: center; justify-content: center; gap: 6px; }
+        .nudge-btn { padding: 6px 10px; font-size: 13px; font-family: monospace; background: #e4e6eb; color: #1c1e21; border-radius: 4px; }
+        .nudge-btn.fine { background: #f0f2f5; }
+        .word-time { font-family: monospace; font-size: 15px; font-weight: 600; text-align: right; color: #1877f2; }
+    </style>
+</head>
+<body>
+<header>
+    <h1>KTV 歌詞時間編輯器 (兩階段版)</h1>
+    <div class="toolbar">
+        <select id="songSelect"><option value="">選擇歌曲...</option></select>
+        <button id="loadButton">載入歌詞</button>
+        <button id="playButton" class="secondary" disabled>播放</button>
+        <button id="pauseButton" class="secondary" disabled>暫停</button>
+        <button id="downloadButton" class="warn" disabled>下載修正後 LRC</button>
+    </div>
+</header>
+<main>
+    <section class="card" style="position: sticky; top: 120px; z-index: 9;">
+        <video id="video" controls playsinline></video>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
+            <p id="status" class="status">請選擇歌曲並點擊載入。</p>
+            <span style="font-size: 13px; color: #606770;">💡 點擊「展開微調」進入第二階段。微調時會自動跳轉影片。</span>
+        </div>
+    </section>
+    <section id="lyrics"></section>
+</main>
+
+<script>
+const songSelect = document.getElementById('songSelect');
+const video = document.getElementById('video');
+const lyricsElement = document.getElementById('lyrics');
+const statusElement = document.getElementById('status');
+const loadButton = document.getElementById('loadButton');
+const playButton = document.getElementById('playButton');
+const pauseButton = document.getElementById('pauseButton');
+const downloadButton = document.getElementById('downloadButton');
+
+let sourceText = '';
+let lines = [];
+let openLineIndexes = new Set(); // 記錄哪些句子被展開了
+
+function setStatus(message) { statusElement.textContent = message; }
+function formatTime(value) { return Number(value).toFixed(3); }
+function escapeHtml(value) { return value.replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c])); }
+
+// 解析 LRC
+function parseLrc(text) {
+    const parsed = [];
+    let current = null;
+    for (const raw of text.split(/\r?\n/)) {
+        const line = raw.trim();
+        const lineMatch = line.match(/^%(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(.*)$/);
+        const wordMatch = line.match(/^\$(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(.*)$/);
+        
+        if (lineMatch) {
+            current = { start: Number(lineMatch[1]), end: Number(lineMatch[2]), text: lineMatch[3], words: [] };
+            parsed.push(current);
+        } else if (wordMatch && current) {
+            current.words.push({ start: Number(wordMatch[1]), end: Number(wordMatch[2]), text: wordMatch[3] });
+        }
+    }
+    return parsed;
+}
+
+// 重新計算結尾時間 (基於下一個字的開頭)
+function recalculateEnds() {
+    for (const line of lines) {
+        for (let i = 0; i < line.words.length; i++) {
+            line.words[i].end = i + 1 < line.words.length ? line.words[i + 1].start : line.end;
+        }
+        // 更新句子的起始時間與第一個字同步
+        if(line.words.length > 0) {
+            line.start = line.words[0].start;
+        }
+    }
+}
+
+// 播放特定時間點
+function seekAndPlay(time, ev) {
+    if(ev) ev.stopPropagation();
+    video.currentTime = time;
+    video.play();
+}
+
+// 展開/收合句子 (第一階段進入第二階段)
+function toggleLine(index) {
+    if (openLineIndexes.has(index)) openLineIndexes.delete(index);
+    else openLineIndexes.add(index);
+    renderLyrics();
+}
+
+// 更新單字時間 (附帶自動跳轉與防呆)
+function updateWordTime(lIdx, wIdx, delta) {
+    const line = lines[lIdx];
+    const word = line.words[wIdx];
+    let newStart = word.start + delta;
+
+    // 防呆：不能超過前一個字的開頭，也不能超過下一個字的開頭
+    const minLimit = (wIdx === 0) ? 0 : line.words[wIdx - 1].start;
+    const maxLimit = (wIdx === line.words.length - 1) ? line.end : line.words[wIdx + 1].start - 0.001;
+    
+    word.start = Math.max(minLimit, Math.min(maxLimit, newStart));
+    
+    // 自動跳轉到修改後的時間點，方便聽邊界
+    video.currentTime = word.start;
+    
+    renderLyrics();
+}
+
+// 渲染畫面
+function renderLyrics() {
+    recalculateEnds();
+    lyricsElement.replaceChildren();
+    
+    lines.forEach((line, lIdx) => {
+        const isOpen = openLineIndexes.has(lIdx);
+        const card = document.createElement('div');
+        card.className = `line-card ${isOpen ? 'open' : ''}`;
+        
+        // 句級標題 (第一階段)
+        const header = document.createElement('div');
+        header.className = 'line-header';
+        header.onclick = () => toggleLine(lIdx);
+        header.innerHTML = `
+            <div class="line-info">
+                <span class="line-text">${escapeHtml(line.text)}</span>
+                <span class="line-time">${formatTime(line.start)} → ${formatTime(line.end)}</span>
+            </div>
+            <div class="line-actions">
+                <button class="secondary" onclick="seekAndPlay(${line.start}, event)">▶ 試聽此句</button>
+                <button>${isOpen ? '收合' : '展開單字微調 ▼'}</button>
+            </div>
+        `;
+        card.appendChild(header);
+
+        // 單字微調區 (第二階段)
+        if (isOpen) {
+            const wordsContainer = document.createElement('div');
+            wordsContainer.className = 'words-container';
+            
+            line.words.forEach((word, wIdx) => {
+                const row = document.createElement('div');
+                row.className = 'word-row';
+                row.dataset.line = lIdx;
+                row.dataset.word = wIdx;
+                
+                row.innerHTML = `
+                    <div class="word-char">${escapeHtml(word.text)}</div>
+                    <div class="nudge-group">
+                        <button class="nudge-btn" onclick="updateWordTime(${lIdx}, ${wIdx}, -0.1)">-0.1</button>
+                        <button class="nudge-btn fine" onclick="updateWordTime(${lIdx}, ${wIdx}, -0.01)">-0.01</button>
+                        <button class="nudge-btn fine" onclick="updateWordTime(${lIdx}, ${wIdx}, 0.01)">+0.01</button>
+                        <button class="nudge-btn" onclick="updateWordTime(${lIdx}, ${wIdx}, 0.1)">+0.1</button>
+                    </div>
+                    <div class="word-time">${formatTime(word.start)}s</div>
+                `;
+                wordsContainer.appendChild(row);
+            });
+            card.appendChild(wordsContainer);
+        }
+        
+        lyricsElement.appendChild(card);
+    });
+    
+    downloadButton.disabled = lines.length === 0;
+}
+
+// 產生最終 LRC
+function serializeLrc() {
+    recalculateEnds();
+    const output = [];
+    output.push("@format ktv-lrc", "@version 1", "", "@id 000000", "", `@song_name ${songSelect.value.replace('.mp4','')}, zh-tw`, "@lyric_synced word", "", "@lyric zh-tw");
+    
+    for (const line of lines) {
+        output.push(`%${formatTime(line.start)} ${formatTime(line.end)} ${line.text}`);
+        for (const word of line.words) {
+            output.push(`$${formatTime(word.start)} ${formatTime(word.end)} ${word.text}`);
+        }
+        output.push("");
+    }
+    return output.join('\n');
+}
+
+// API 與事件綁定
+async function loadSongs() {
+    try {
+        const response = await fetch('/api/list');
+        if (!response.ok) throw new Error('無法取得歌曲清單');
+        const songs = await response.json();
+        songs.forEach(song => songSelect.add(new Option(song, song)));
+    } catch (e) { setStatus(e.message); }
+}
+
+async function loadLyrics() {
+    const filename = songSelect.value;
+    if (!filename) return setStatus('請先選擇歌曲。');
+    const lrcName = filename.replace(/\.mp4$/i, '.lrc');
+    setStatus('載入中...');
+    try {
+        const response = await fetch(`/songs/${encodeURIComponent(lrcName)}`);
+        if (!response.ok) throw new Error('找不到對應的 LRC 歌詞檔');
+        sourceText = await response.text();
+        lines = parseLrc(sourceText);
+        openLineIndexes.clear();
+        renderLyrics();
+        video.src = `/songs/${encodeURIComponent(filename)}`;
+        playButton.disabled = false;
+        pauseButton.disabled = false;
+        setStatus(`✅ 已載入 ${lines.length} 句歌詞。點擊「展開單字微調」進入編輯。`);
+    } catch (e) { setStatus(e.message); }
+}
+
+loadButton.addEventListener('click', loadLyrics);
+playButton.addEventListener('click', () => video.play());
+pauseButton.addEventListener('click', () => video.pause());
+
+// 播放時同步標記 (黃色底色)
+video.addEventListener('timeupdate', () => {
+    document.querySelectorAll('.word-row.active').forEach(row => row.classList.remove('active'));
+    lines.forEach((line, lIdx) => line.words.forEach((word, wIdx) => {
+        if (video.currentTime >= word.start && video.currentTime < word.end) {
+            const row = lyricsElement.querySelector(`[data-line="${lIdx}"][data-word="${wIdx}"]`);
+            if (row) {
+                row.classList.add('active');
+                // 若字所在的句子被展開，自動捲動一點點以保持在視角內
+                if(openLineIndexes.has(lIdx)) {
+                    row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                }
+            }
+        }
+    }));
+});
+
+downloadButton.addEventListener('click', () => {
+    const content = serializeLrc();
+    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = songSelect.value.replace(/\.mp4$/i, '.lrc');
+    link.click();
+    URL.revokeObjectURL(link.href);
+});
+
+loadSongs();
+</script>
+</body>
+</html>

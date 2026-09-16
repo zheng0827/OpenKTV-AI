@@ -208,9 +208,7 @@
             }
             area.innerText = `處理中 ${data.current}/${data.total}：${data.title}（第 ${data.attempt} 次）`;
         });
-    </script>
-</body>
-</html>
+
         async function resolveTitleFromYoutube() {
             const url = document.getElementById('yt_url').value.trim();
             if (!url) { alert('請先輸入 YouTube 連結'); return; }
@@ -225,3 +223,6 @@
             document.getElementById('lyricSongName').value = data.song || '';
             document.getElementById('lyricSinger').value = data.singer || '';
         }
+    </script>
+</body>
+</html>
