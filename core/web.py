@@ -390,7 +390,10 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
     def handle_queue_remove(data):
         if not can_control():
             return
-        queue_id = int(data.get("queue_id", -1))
+        try:
+            queue_id = int(data.get("queue_id", -1))
+        except (TypeError, ValueError):
+            return
         removed_current = state["current_song"] and state["current_song"]["queue_id"] == queue_id
         state["playlist_queue"] = [item for item in state["playlist_queue"] if item["queue_id"] != queue_id]
         if removed_current:
@@ -442,7 +445,11 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
     def handle_seek(data):
         if not can_control() or not state["current_song"]:
             return
-        apply_seek(float(data.get("position", 0.0)))
+        try:
+            position = float(data.get("position", 0.0))
+        except (TypeError, ValueError):
+            return
+        apply_seek(position)
         emit_all_state()
 
     @socketio.on("skip_intro")

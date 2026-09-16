@@ -97,6 +97,6 @@ def transcribe_segments(
             print(f"[core:align] qwen backend failed: {error}", flush=True)
             aligned_payload = None
     if aligned_payload is None:
-        fallback_backend = "ctc" if alignment_backend == "ctc" else "whisperx"
+        fallback_backend = "ctc" if alignment_backend in {"ctc", "qwen"} else "whisperx"
         aligned_payload = align_with_backend(base_segments, audio, detected_language, device, backend=fallback_backend)
     return _merge_alignment(base_segments, aligned_payload.get("segments", [])), detected_language

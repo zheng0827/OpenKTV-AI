@@ -23,7 +23,7 @@ def build_pseudo_accompaniment_filter(input_stream: str, settings: AppSettings, 
     )
 
 
-def build_mix_filter(_mode: str, settings: AppSettings) -> str:
+def build_mix_filter(settings: AppSettings) -> str:
     return (
         "[1:a]anull[lyrics];"
         "[2:a]anull[dialogue];"
@@ -96,7 +96,7 @@ def mix_video_audio(temp_input: Path, lyrics_vocals: Path, dialogue_vocals: Path
         "-i", str(lyrics_vocals),
         "-i", str(dialogue_vocals),
         "-i", str(accompaniment),
-        "-filter_complex", build_mix_filter(settings.mix_mode, settings),
+        "-filter_complex", build_mix_filter(settings),
         "-map", "0:v",
         "-map", "[a]",
         "-c:v", "copy",
