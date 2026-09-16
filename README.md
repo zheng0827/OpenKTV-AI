@@ -35,7 +35,7 @@
 每首歌會輸出：
 
 - `<song>.mp4`
-- `<song>.instrumental.m4a`
+- `<song>.instrumental.m4a`（伴奏 + dialogue.vocals）
 - `<song>.lyrics.vocals.wav`
 - `<song>.dialogue.vocals.wav`
 - `<song>.lrc`

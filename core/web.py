@@ -23,11 +23,9 @@ CONTROL_ROLES = {"remote", "queue", "admin", "combo"}
 
 def get_local_ip() -> str:
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.connect(("8.8.8.8", 80))
-        ip = sock.getsockname()[0]
-        sock.close()
-        return ip
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            return sock.getsockname()[0]
     except Exception:
         return "127.0.0.1"
 
@@ -530,30 +528,18 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
         state["is_processing"] = True
 
         def run_process():
-            socketio.emit("task_status", {"status": "busy"})
-            processor = KTVProcessor(settings=settings, log_cb=broadcast_log)
-            total = len(tasks)
-            succeeded = 0
-            failed_items = []
+            try:
+                socketio.emit("task_status", {"status": "busy"})
+                processor = KTVProcessor(settings=settings, log_cb=broadcast_log)
+                total = len(tasks)
+                succeeded = 0
+                failed_items = []
 
-            for index, task in enumerate(tasks, start=1):
-                title = task["title"]
-                song_name, singer = _extract_title_artist(title)
-                provided_singer = (task.get("singer") or singer or "").strip()
-                provided_lyrics = (task.get("lyrics_text") or "").strip()
-                socketio.emit(
-                    "task_progress",
-                    {
-                        "phase": "processing",
-                        "current": index,
-                        "total": total,
-                        "title": title,
-                        "attempt": 1,
-                    },
-                )
-
-                success = False
-                for attempt in range(settings.download_retry_count + 1):
+                for index, task in enumerate(tasks, start=1):
+                    title = task["title"]
+                    _song_name, singer = _extract_title_artist(title)
+                    provided_singer = (task.get("singer") or singer or "").strip()
+                    provided_lyrics = (task.get("lyrics_text") or "").strip()
                     socketio.emit(
                         "task_progress",
                         {
@@ -561,42 +547,55 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
                             "current": index,
                             "total": total,
                             "title": title,
-                            "attempt": attempt + 1,
+                            "attempt": 1,
                         },
                     )
-                    success = processor.process_song(
-                        task["url"],
-                        title,
-                        options={
-                            **options,
-                            "singer": provided_singer,
-                            "lyrics_text": provided_lyrics,
-                        },
-                    )
+                    success = False
+                    for attempt in range(settings.download_retry_count + 1):
+                        socketio.emit(
+                            "task_progress",
+                            {
+                                "phase": "processing",
+                                "current": index,
+                                "total": total,
+                                "title": title,
+                                "attempt": attempt + 1,
+                            },
+                        )
+                        success = processor.process_song(
+                            task["url"],
+                            title,
+                            options={
+                                **options,
+                                "singer": provided_singer,
+                                "lyrics_text": provided_lyrics,
+                            },
+                        )
+                        if success:
+                            break
+                        time.sleep(0.8)
+
                     if success:
-                        break
-                    time.sleep(0.8)
+                        succeeded += 1
+                    else:
+                        failed_items.append(title)
 
-                if success:
-                    succeeded += 1
-                else:
-                    failed_items.append(title)
+                update_library_index(settings.songs_dir, settings.library_index_path)
+                if succeeded:
+                    socketio.emit("refresh_list")
 
-            update_library_index(settings.songs_dir, settings.library_index_path)
-            if succeeded:
-                socketio.emit("refresh_list")
-
-            socketio.emit(
-                "task_progress",
-                {
-                    "phase": "done",
-                    "total": total,
-                    "success": succeeded,
-                    "failed": failed_items,
-                },
-            )
-            state["is_processing"] = False
-            socketio.emit("task_status", {"status": "idle"})
+                socketio.emit(
+                    "task_progress",
+                    {
+                        "phase": "done",
+                        "total": total,
+                        "success": succeeded,
+                        "failed": failed_items,
+                    },
+                )
+            finally:
+                state["is_processing"] = False
+                socketio.emit("task_status", {"status": "idle"})
 
         broadcast_log("=== 開始新任務 ===")
         threading.Thread(target=run_process, daemon=True).start()

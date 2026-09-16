@@ -47,7 +47,7 @@ def compute_type_for(device: str) -> str:
         major, _minor = torch.cuda.get_device_capability()
         return "float16" if major >= 7 else "int8"
     except Exception:
-        return "float16"
+        return "int8"
 
 
 def is_oom(error: Exception | str) -> bool:

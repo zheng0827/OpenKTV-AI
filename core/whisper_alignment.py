@@ -74,4 +74,9 @@ def align_with_backend(
             if not is_oom(retry_error):
                 raise
             log_vram("oom:align_attempt2")
-    return runner(raw_segments, audio, language, "cpu", model_name=model_name)
+    try:
+        return runner(raw_segments, audio, language, "cpu", model_name=model_name)
+    except Exception as final_error:
+        if backend == "ctc" and allow_ctc_fallback_to_whisperx and not is_oom(final_error):
+            return _run_whisperx(raw_segments, audio, language, "cpu", model_name=model_name)
+        raise
