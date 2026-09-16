@@ -48,12 +48,13 @@ def align_with_backend(
     backend: str = "whisperx",
     pre_align_cleanup=None,
     model_name=None,
+    allow_ctc_fallback_to_whisperx: bool = True,
 ):
     runner = _run_ctc if backend == "ctc" else _run_whisperx
     try:
         return runner(raw_segments, audio, language, device, model_name=model_name)
     except Exception as error:
-        if backend == "ctc" and not is_oom(error):
+        if backend == "ctc" and allow_ctc_fallback_to_whisperx and not is_oom(error):
             return _run_whisperx(raw_segments, audio, language, device, model_name=model_name)
         if not is_oom(error):
             raise
@@ -67,7 +68,7 @@ def align_with_backend(
         try:
             return runner(raw_segments, audio, language, device, model_name=model_name)
         except Exception as retry_error:
-            if backend == "ctc" and not is_oom(retry_error):
+            if backend == "ctc" and allow_ctc_fallback_to_whisperx and not is_oom(retry_error):
                 return _run_whisperx(raw_segments, audio, language, device, model_name=model_name)
             if not is_oom(retry_error):
                 raise

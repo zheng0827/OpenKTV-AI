@@ -42,7 +42,6 @@ class AppSettings:
     separator_backend: str
     separator_stems: int
     device_preference: str
-    mix_mode: str
     pseudo_delay_ms: int
     pseudo_reflection_gain: float
     pseudo_reverb_room: float
@@ -52,7 +51,6 @@ class AppSettings:
     whisper_language: str
     whisper_compute_type: str
     alignment_backend: str
-    alignment_python: str
     intro_skip_lead_seconds: float
     download_retry_count: int
     library_index_path: Path
@@ -100,7 +98,6 @@ def load_settings(base_dir: Path | None = None) -> AppSettings:
         separator_backend=os.getenv("KTV_SEPARATOR_BACKEND", "demucs").strip().lower(),
         separator_stems=separator_stems,
         device_preference=os.getenv("KTV_DEVICE", "auto").strip().lower(),
-        mix_mode=os.getenv("KTV_MIX_MODE", "pseudo-spatial").strip().lower(),
         pseudo_delay_ms=_to_int(os.getenv("KTV_PSEUDO_DELAY_MS"), 12),
         pseudo_reflection_gain=_to_float(os.getenv("KTV_PSEUDO_REFLECTION_GAIN"), 0.12),
         pseudo_reverb_room=_to_float(os.getenv("KTV_PSEUDO_REVERB_ROOM"), 0.45),
@@ -110,7 +107,6 @@ def load_settings(base_dir: Path | None = None) -> AppSettings:
         whisper_language=os.getenv("KTV_WHISPER_LANGUAGE", "").strip().lower(),
         whisper_compute_type=os.getenv("KTV_WHISPER_COMPUTE_TYPE", "auto"),
         alignment_backend=os.getenv("KTV_ALIGNMENT_BACKEND", "ctc").strip().lower(),
-        alignment_python=os.getenv("KTV_ALIGNMENT_PYTHON", ""),
         intro_skip_lead_seconds=_to_float(os.getenv("KTV_INTRO_SKIP_LEAD_SECONDS"), 5.0),
         download_retry_count=_to_int(os.getenv("KTV_DOWNLOAD_RETRY_COUNT"), 2),
         library_index_path=Path(os.getenv("KTV_LIBRARY_INDEX_PATH", root / "ktv_songs" / "library_index.csv")),

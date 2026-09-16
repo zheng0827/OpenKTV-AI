@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -94,7 +95,7 @@ class KTVProcessor:
             if not singer:
                 singer = inferred_singer
 
-            job_id = str(int(time.time()))
+            job_id = uuid.uuid4().hex
             job_temp_dir = self.settings.temp_base_dir / job_id
             job_temp_dir.mkdir(parents=True, exist_ok=True)
 

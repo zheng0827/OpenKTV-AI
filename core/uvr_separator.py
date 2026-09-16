@@ -10,10 +10,11 @@ CANONICAL_OUTPUTS = {
 }
 
 
-def _find_output(output_dir: Path, explicit_name: str, aliases: tuple[str, ...]) -> Path | None:
-    candidate = output_dir / explicit_name
-    if candidate.exists():
-        return candidate
+def _find_output(output_dir: Path, explicit_names: tuple[str, ...], aliases: tuple[str, ...]) -> Path | None:
+    for explicit_name in explicit_names:
+        candidate = output_dir / explicit_name
+        if candidate.exists():
+            return candidate
     for path in output_dir.iterdir():
         if not path.is_file():
             continue
@@ -45,8 +46,8 @@ def separate_with_uvr(input_path: Path, output_dir: Path, model_dir: Path, model
         custom_output_names={"Vocals": "uvr_vocals", "Instrumental": "uvr_instrumental"},
     )
 
-    vocals = _find_output(output_dir, CANONICAL_OUTPUTS["Vocals"], ("vocals",))
-    instrumental = _find_output(output_dir, CANONICAL_OUTPUTS["Instrumental"], ("instrumental", "karaoke", "no_vocals", "inst"))
+    vocals = _find_output(output_dir, ("uvr_vocals", CANONICAL_OUTPUTS["Vocals"]), ("vocals",))
+    instrumental = _find_output(output_dir, ("uvr_instrumental", CANONICAL_OUTPUTS["Instrumental"]), ("instrumental", "karaoke", "no_vocals", "inst"))
     if vocals is None or instrumental is None:
         raise FileNotFoundError("UVR output missing vocals or instrumental stem")
     return vocals, instrumental

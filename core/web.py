@@ -510,15 +510,17 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
         try:
             if _is_playlist_url(url):
                 selected_entries = data.get("playlist_entries") or _playlist_entries(url, settings)
-                tasks = [
-                    {
-                        "url": item.get("url") or f"https://www.youtube.com/watch?v={item.get('id')}",
-                        "title": item.get("title") or item.get("id") or manual_title,
-                        "singer": (item.get("singer") or "").strip(),
-                        "lyrics_text": "",
-                    }
-                    for item in selected_entries
-                ]
+                tasks = []
+                for item in selected_entries:
+                    item_url = item.get("url") or f"https://www.youtube.com/watch?v={item.get('id')}"
+                    tasks.append(
+                        {
+                            "url": _validate_youtube_url(item_url),
+                            "title": item.get("title") or item.get("id") or manual_title,
+                            "singer": (item.get("singer") or "").strip(),
+                            "lyrics_text": "",
+                        }
+                    )
             else:
                 tasks = [{"url": url, "title": manual_title, "singer": manual_singer, "lyrics_text": manual_lyrics}]
         except Exception as error:
