@@ -248,7 +248,11 @@ def build_word_level_lines_from_segments(segments: list[dict[str, Any]], text_tr
 
 def should_fallback_to_transcript_sync(lyrics_lines: list[str], matched_lines: int, segments: list[dict[str, Any]] | None = None) -> bool:
     if not lyrics_lines:
-        return False
+        # No reference lyrics text was available at all (e.g. lrclib had no
+        # match), so there is nothing to align against. Fall back to using
+        # the ASR transcript itself as the lyrics rather than letting every
+        # transcribed vocal segment be discarded as "dialogue".
+        return bool(segments)
     ratio = matched_lines / len(lyrics_lines)
     if ratio >= MIN_LYRIC_MATCH_RATIO or len(lyrics_lines) < 3:
         return False

@@ -23,9 +23,17 @@ def detect_language_multiwindow(model, audio, sample_rate=16000, window_secs=30)
         encoder_output = model.model.encode(segment)
         results = model.model.model.detect_language(encoder_output)
         lang_token, prob = results[0][0]
-        votes.append((lang_token[2:-2], float(prob)))
+        language = lang_token[2:-2]
+        print(
+            f"[core:language] window @{offset / sample_rate:.0f}s: "
+            f"lang={language} prob={float(prob):.2f}",
+            flush=True,
+        )
+        votes.append((language, float(prob)))
 
     scores: dict[str, float] = {}
     for language, probability in votes:
         scores[language] = scores.get(language, 0.0) + probability
-    return max(scores, key=lambda item: scores[item]) if scores else "zh"
+    detected = max(scores, key=lambda item: scores[item]) if scores else "zh"
+    print(f"[core:language] scores={scores} -> {detected}", flush=True)
+    return detected

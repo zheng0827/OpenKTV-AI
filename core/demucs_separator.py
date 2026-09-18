@@ -184,7 +184,19 @@ def separate_with_demucs(input_path: Path, output_dir: Path, model_name: str, st
         log_cb("⚠️ 已要求 CUDA，但目前不可用，已自動改用 CPU。")
     log_cb(f"Demucs device: {device}")
     log_cb(f"Demucs 分離中 (model={model_name}, stems={stems})...")
-    _run_command(build_demucs_command(input_path, demucs_out_root, model_name, stems, device))
+    
+    # --- 恢復進程內呼叫，避免反覆啟動子進程的巨大開銷 ---
+    from demucs.separate import main as demucs_main
+    
+    args = ["-n", model_name, "-d", device, "-o", str(demucs_out_root)]
+    if stems == 2:
+        args.extend(["--two-stems", "vocals"])
+    args.append(str(input_path))
+    
+    try:
+        demucs_main(args)
+    except Exception as e:
+        raise RuntimeError(f"Demucs 分離失敗: {e}") from e
 
     stem_folder = demucs_out_root / model_name / input_path.stem
     vocals = stem_folder / "vocals.wav"

@@ -37,7 +37,14 @@ def _run_ctc(raw_segments, audio, language: str, device: str, model_name=None):
             model_name=model_name,
         )
         held.append(align_model)
-        return ctc_align(raw_segments, align_model, metadata, audio, device)
+        return ctc_align(
+            raw_segments,
+            align_model,
+            metadata,
+            audio,
+            device,
+            return_char_alignments=True,
+        )
 
 
 def align_with_backend(

@@ -46,7 +46,7 @@
 - `KTV_SEPARATOR_BACKEND=demucs|uvr|hybrid`
 - `KTV_SEPARATOR_STEMS=4|2`
 - `KTV_DEMUCS_MODEL=htdemucs_ft`
-- `KTV_UVR_MODEL=UVR-MDX-NET-Inst_HQ_320d.onnx`
+- `KTV_UVR_MODEL=UVR-MDX-NET-Voc_FT.onnx`
 - `KTV_UVR_MODEL_DIR`
 - `KTV_DEVICE=auto|cuda|cpu`
 - `KTV_WHISPER_MODEL=large-v3`

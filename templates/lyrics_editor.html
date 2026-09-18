@@ -1,291 +1,406 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KTV 歌詞時間編輯器 (兩階段精調版)</title>
+    <title>KTV 歌詞時間軸編輯器</title>
     <style>
-        :root { color-scheme: light; font-family: "Segoe UI", "Microsoft JhengHei", sans-serif; }
-        * { box-sizing: border-box; }
-        body { margin: 0; background: #f0f2f5; color: #1c1e21; }
-        header { position: sticky; top: 0; z-index: 10; padding: 15px 20px; background: #242526; color: #e4e6eb; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
-        header h1 { margin: 0 0 12px; font-size: 22px; font-weight: 600; }
-        .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-        select, button { border: none; border-radius: 6px; padding: 10px 14px; font-size: 14px; font-weight: 600; transition: all 0.2s; }
-        select { min-width: 250px; border: 1px solid #ccd0d5; background: #fff; color: #000; }
-        button { background: #1877f2; color: #fff; cursor: pointer; }
-        button:hover:not(:disabled) { filter: brightness(1.1); }
-        button.secondary { background: #606770; }
-        button.warn { background: #e41e3f; }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
-        main { width: min(1000px, 96vw); margin: 20px auto 60px; }
-        .card { background: #fff; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
-        video { display: block; width: 100%; max-height: 250px; background: #000; border-radius: 8px; margin-bottom: 10px; }
-        .status { color: #606770; font-size: 14px; margin: 0; }
-        
-        /* 第一階段：句級列表 */
-        .line-card { border: 1px solid #dadde1; border-radius: 8px; margin-bottom: 12px; background: #fff; overflow: hidden; }
-        .line-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: #f7f8fa; cursor: pointer; user-select: none; }
-        .line-header:hover { background: #eef0f3; }
-        .line-info { display: flex; align-items: center; gap: 15px; flex: 1; }
-        .line-text { font-size: 18px; font-weight: 700; color: #1c1e21; }
-        .line-time { font-family: monospace; font-size: 14px; color: #606770; background: #e4e6eb; padding: 4px 8px; border-radius: 4px; }
-        .line-actions { display: flex; gap: 8px; }
-        
-        /* 第二階段：單字微調列表 (預設隱藏) */
-        .words-container { display: none; padding: 15px 16px; border-top: 1px solid #dadde1; background: #fff; }
-        .line-card.open .words-container { display: block; }
-        .line-card.open .line-header { background: #e3f2fd; }
-        
-        .word-row { display: grid; grid-template-columns: 100px 1fr 120px; align-items: center; gap: 15px; padding: 10px 0; border-bottom: 1px dashed #e4e6eb; }
-        .word-row:last-child { border-bottom: none; padding-bottom: 0; }
-        .word-row.active { background: #fff9e6; outline: 2px solid #ffc107; border-radius: 4px; padding: 10px; margin: 0 -10px; }
-        .word-char { font-size: 20px; font-weight: 700; color: #d93025; text-align: center; }
-        .nudge-group { display: flex; align-items: center; justify-content: center; gap: 6px; }
-        .nudge-btn { padding: 6px 10px; font-size: 13px; font-family: monospace; background: #e4e6eb; color: #1c1e21; border-radius: 4px; }
-        .nudge-btn.fine { background: #f0f2f5; }
-        .word-time { font-family: monospace; font-size: 15px; font-weight: 600; text-align: right; color: #1877f2; }
+        :root {
+            --bg-color: #1e1e24;
+            --track-bg: #2b2b36;
+            --text-color: #e0e0e0;
+            --sentence-color: #4CAF50;
+            --word-color: #2196F3;
+            --handle-color: #ffffff;
+            --pps: 100px; /* 每秒對應的像素寬度 (Pixels Per Second) */
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 上方播放器區域 (固定不滾動) */
+        .player-section {
+            padding: 20px;
+            background-color: #121212;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* 下方時間軸區域 (可自由滾動) */
+        .timeline-wrapper {
+            flex: 1;
+            overflow-y: auto; /* 上下滾動軌道 */
+            overflow-x: auto; /* 左右滾動時間軸 */
+            position: relative;
+            padding: 20px 0;
+        }
+
+        .timeline-container {
+            position: relative;
+            height: 100%;
+            min-width: 2000px; /* 根據歌曲總長度動態設定 */
+        }
+
+        /* 時間標尺 */
+        .ruler {
+            height: 30px;
+            background-color: #333;
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            border-bottom: 1px solid #555;
+            pointer-events: none;
+        }
+
+        /* 軌道設定 */
+        .track {
+            position: relative;
+            height: 60px;
+            background-color: var(--track-bg);
+            margin-bottom: 10px;
+            border-top: 1px solid #3f3f4e;
+            border-bottom: 1px solid #3f3f4e;
+        }
+
+        .track-label {
+            position: sticky;
+            left: 0;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 5px 10px;
+            font-size: 12px;
+            z-index: 2;
+            display: inline-block;
+        }
+
+        /* 歌詞方塊 */
+        .lyric-block {
+            position: absolute;
+            top: 5px;
+            height: 50px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: bold;
+            user-select: none;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+            transition: filter 0.2s;
+        }
+
+        .lyric-block:hover {
+            filter: brightness(1.2);
+        }
+
+        .lyric-block.sentence {
+            background-color: rgba(76, 175, 80, 0.7);
+            border: 1px solid var(--sentence-color);
+        }
+
+        .lyric-block.word {
+            background-color: rgba(33, 150, 243, 0.7);
+            border: 1px solid var(--word-color);
+        }
+
+        /* 左右縮放把手 */
+        .resize-handle {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 10px;
+            background-color: rgba(255, 255, 255, 0.3);
+            cursor: ew-resize;
+            z-index: 2;
+        }
+        .resize-handle:hover {
+            background-color: rgba(255, 255, 255, 0.8);
+        }
+        .resize-handle.left { left: 0; border-radius: 4px 0 0 4px; }
+        .resize-handle.right { right: 0; border-radius: 0 4px 4px 0; }
+
+        /* 中間拖曳區 */
+        .drag-area {
+            flex: 1;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: grab;
+            overflow: hidden;
+            white-space: nowrap;
+        }
+        .drag-area:active { cursor: grabbing; }
+
+        /* 播放指針 (Playhead) */
+        .playhead {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: 0;
+            width: 2px;
+            background-color: #f44336;
+            z-index: 10;
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
-<header>
-    <h1>KTV 歌詞時間編輯器 (兩階段版)</h1>
-    <div class="toolbar">
-        <select id="songSelect"><option value="">選擇歌曲...</option></select>
-        <button id="loadButton">載入歌詞</button>
-        <button id="playButton" class="secondary" disabled>播放</button>
-        <button id="pauseButton" class="secondary" disabled>暫停</button>
-        <button id="downloadButton" class="warn" disabled>下載修正後 LRC</button>
+
+    <!-- 上方播放器 -->
+    <div class="player-section">
+        <h3>歌詞時間軸編輯器 (展示)</h3>
+        <audio id="audio-player" controls>
+            <!-- 替換為你的音檔來源 -->
+            <source src="your-audio-file.mp3" type="audio/mpeg">
+            你的瀏覽器不支援 audio 標籤。
+        </audio>
     </div>
-</header>
-<main>
-    <section class="card" style="position: sticky; top: 120px; z-index: 9;">
-        <video id="video" controls playsinline></video>
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 10px;">
-            <p id="status" class="status">請選擇歌曲並點擊載入。</p>
-            <span style="font-size: 13px; color: #606770;">💡 點擊「展開微調」進入第二階段。微調時會自動跳轉影片。</span>
-        </div>
-    </section>
-    <section id="lyrics"></section>
-</main>
 
-<script>
-const songSelect = document.getElementById('songSelect');
-const video = document.getElementById('video');
-const lyricsElement = document.getElementById('lyrics');
-const statusElement = document.getElementById('status');
-const loadButton = document.getElementById('loadButton');
-const playButton = document.getElementById('playButton');
-const pauseButton = document.getElementById('pauseButton');
-const downloadButton = document.getElementById('downloadButton');
-
-let sourceText = '';
-let lines = [];
-let openLineIndexes = new Set(); // 記錄哪些句子被展開了
-
-function setStatus(message) { statusElement.textContent = message; }
-function formatTime(value) { return Number(value).toFixed(3); }
-function escapeHtml(value) { return value.replace(/[&<>"']/g, c => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c])); }
-
-// 解析 LRC
-function parseLrc(text) {
-    const parsed = [];
-    let current = null;
-    for (const raw of text.split(/\r?\n/)) {
-        const line = raw.trim();
-        const lineMatch = line.match(/^%(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(.*)$/);
-        const wordMatch = line.match(/^\$(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(.*)$/);
-        
-        if (lineMatch) {
-            current = { start: Number(lineMatch[1]), end: Number(lineMatch[2]), text: lineMatch[3], words: [] };
-            parsed.push(current);
-        } else if (wordMatch && current) {
-            current.words.push({ start: Number(wordMatch[1]), end: Number(wordMatch[2]), text: wordMatch[3] });
-        }
-    }
-    return parsed;
-}
-
-// 重新計算結尾時間 (基於下一個字的開頭)
-function recalculateEnds() {
-    for (const line of lines) {
-        for (let i = 0; i < line.words.length; i++) {
-            line.words[i].end = i + 1 < line.words.length ? line.words[i + 1].start : line.end;
-        }
-        // 更新句子的起始時間與第一個字同步
-        if(line.words.length > 0) {
-            line.start = line.words[0].start;
-        }
-    }
-}
-
-// 播放特定時間點
-function seekAndPlay(time, ev) {
-    if(ev) ev.stopPropagation();
-    video.currentTime = time;
-    video.play();
-}
-
-// 展開/收合句子 (第一階段進入第二階段)
-function toggleLine(index) {
-    if (openLineIndexes.has(index)) openLineIndexes.delete(index);
-    else openLineIndexes.add(index);
-    renderLyrics();
-}
-
-// 更新單字時間 (附帶自動跳轉與防呆)
-function updateWordTime(lIdx, wIdx, delta) {
-    const line = lines[lIdx];
-    const word = line.words[wIdx];
-    let newStart = word.start + delta;
-
-    // 防呆：不能超過前一個字的開頭，也不能超過下一個字的開頭
-    const minLimit = (wIdx === 0) ? 0 : line.words[wIdx - 1].start;
-    const maxLimit = (wIdx === line.words.length - 1) ? line.end : line.words[wIdx + 1].start - 0.001;
-    
-    word.start = Math.max(minLimit, Math.min(maxLimit, newStart));
-    
-    // 自動跳轉到修改後的時間點，方便聽邊界
-    video.currentTime = word.start;
-    
-    renderLyrics();
-}
-
-// 渲染畫面
-function renderLyrics() {
-    recalculateEnds();
-    lyricsElement.replaceChildren();
-    
-    lines.forEach((line, lIdx) => {
-        const isOpen = openLineIndexes.has(lIdx);
-        const card = document.createElement('div');
-        card.className = `line-card ${isOpen ? 'open' : ''}`;
-        
-        // 句級標題 (第一階段)
-        const header = document.createElement('div');
-        header.className = 'line-header';
-        header.onclick = () => toggleLine(lIdx);
-        header.innerHTML = `
-            <div class="line-info">
-                <span class="line-text">${escapeHtml(line.text)}</span>
-                <span class="line-time">${formatTime(line.start)} → ${formatTime(line.end)}</span>
-            </div>
-            <div class="line-actions">
-                <button class="secondary" onclick="seekAndPlay(${line.start}, event)">▶ 試聽此句</button>
-                <button>${isOpen ? '收合' : '展開單字微調 ▼'}</button>
-            </div>
-        `;
-        card.appendChild(header);
-
-        // 單字微調區 (第二階段)
-        if (isOpen) {
-            const wordsContainer = document.createElement('div');
-            wordsContainer.className = 'words-container';
+    <!-- 下方時間軸 -->
+    <div class="timeline-wrapper">
+        <div class="timeline-container" id="timeline-container">
+            <div class="ruler" id="ruler"></div>
+            <div class="playhead" id="playhead"></div>
             
-            line.words.forEach((word, wIdx) => {
-                const row = document.createElement('div');
-                row.className = 'word-row';
-                row.dataset.line = lIdx;
-                row.dataset.word = wIdx;
-                
-                row.innerHTML = `
-                    <div class="word-char">${escapeHtml(word.text)}</div>
-                    <div class="nudge-group">
-                        <button class="nudge-btn" onclick="updateWordTime(${lIdx}, ${wIdx}, -0.1)">-0.1</button>
-                        <button class="nudge-btn fine" onclick="updateWordTime(${lIdx}, ${wIdx}, -0.01)">-0.01</button>
-                        <button class="nudge-btn fine" onclick="updateWordTime(${lIdx}, ${wIdx}, 0.01)">+0.01</button>
-                        <button class="nudge-btn" onclick="updateWordTime(${lIdx}, ${wIdx}, 0.1)">+0.1</button>
-                    </div>
-                    <div class="word-time">${formatTime(word.start)}s</div>
-                `;
-                wordsContainer.appendChild(row);
-            });
-            card.appendChild(wordsContainer);
-        }
+            <div class="track" id="track-sentence">
+                <div class="track-label">Track 1: 整句歌詞</div>
+            </div>
+            
+            <div class="track" id="track-word">
+                <div class="track-label">Track 2: 單字拆分</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // === 1. 模擬資料結構 (與你專案的 Lrc 格式相似) ===
+        let lyricsData = [
+            {
+                id: "line_1",
+                text: "想要有直昇機",
+                start: 1.0,
+                end: 4.5,
+                words: [
+                    { id: "w_1_1", text: "想要", start: 1.0, end: 1.8 },
+                    { id: "w_1_2", text: "有直", start: 1.8, end: 3.2 },
+                    { id: "w_1_3", text: "昇", start: 3.2, end: 3.8 },
+                    { id: "w_1_4", text: "機", start: 3.8, end: 4.5 }
+                ]
+            },
+            {
+                id: "line_2",
+                text: "想要和妳飛到宇宙去",
+                start: 5.0,
+                end: 8.5,
+                words: [
+                    { id: "w_2_1", text: "想要", start: 5.0, end: 5.8 },
+                    { id: "w_2_2", text: "和", start: 5.8, end: 6.2 },
+                    { id: "w_2_3", text: "妳", start: 6.2, end: 6.6 },
+                    { id: "w_2_4", text: "飛到", start: 6.6, end: 7.4 },
+                    { id: "w_2_5", text: "宇宙", start: 7.4, end: 8.2 },
+                    { id: "w_2_6", text: "去", start: 8.2, end: 8.5 }
+                ]
+            }
+        ];
+
+        // === 2. 核心全域變數 ===
+        const PIXELS_PER_SECOND = 100; // 縮放比例：1 秒 = 100px
+        const MIN_DURATION = 0.1; // 方塊最小長度 (秒)
         
-        lyricsElement.appendChild(card);
-    });
-    
-    downloadButton.disabled = lines.length === 0;
-}
+        const trackSentence = document.getElementById("track-sentence");
+        const trackWord = document.getElementById("track-word");
+        const timelineContainer = document.getElementById("timeline-container");
+        const playhead = document.getElementById("playhead");
+        const audio = document.getElementById("audio-player");
 
-// 產生最終 LRC
-function serializeLrc() {
-    recalculateEnds();
-    const output = [];
-    output.push("@format ktv-lrc", "@version 1", "", "@id 000000", "", `@song_name ${songSelect.value.replace('.mp4','')}, zh-tw`, "@lyric_synced word", "", "@lyric zh-tw");
-    
-    for (const line of lines) {
-        output.push(`%${formatTime(line.start)} ${formatTime(line.end)} ${line.text}`);
-        for (const word of line.words) {
-            output.push(`$${formatTime(word.start)} ${formatTime(word.end)} ${word.text}`);
+        // === 3. 渲染時間軸 ===
+        function renderTimeline() {
+            // 清空舊方塊 (保留 label)
+            trackSentence.querySelectorAll('.lyric-block').forEach(el => el.remove());
+            trackWord.querySelectorAll('.lyric-block').forEach(el => el.remove());
+
+            // 確保容器長度足夠
+            let maxTime = lyricsData[lyricsData.length - 1].end + 5;
+            timelineContainer.style.width = `${maxTime * PIXELS_PER_SECOND}px`;
+
+            lyricsData.forEach((line, lineIndex) => {
+                // 畫整句
+                createBlock(trackSentence, line, 'sentence', null, lineIndex);
+
+                // 畫單字
+                line.words.forEach((word, wordIndex) => {
+                    createBlock(trackWord, word, 'word', line, lineIndex, wordIndex);
+                });
+            });
         }
-        output.push("");
-    }
-    return output.join('\n');
-}
 
-// API 與事件綁定
-async function loadSongs() {
-    try {
-        const response = await fetch('/api/list');
-        if (!response.ok) throw new Error('無法取得歌曲清單');
-        const songs = await response.json();
-        songs.forEach(song => songSelect.add(new Option(song, song)));
-    } catch (e) { setStatus(e.message); }
-}
+        function createBlock(parentTrack, data, type, parentLine = null, lineIndex, wordIndex = -1) {
+            const block = document.createElement("div");
+            block.className = `lyric-block ${type}`;
+            block.id = data.id;
+            
+            // 設定位置與寬度
+            block.style.left = `${data.start * PIXELS_PER_SECOND}px`;
+            block.style.width = `${(data.end - data.start) * PIXELS_PER_SECOND}px`;
 
-async function loadLyrics() {
-    const filename = songSelect.value;
-    if (!filename) return setStatus('請先選擇歌曲。');
-    const lrcName = filename.replace(/\.mp4$/i, '.lrc');
-    setStatus('載入中...');
-    try {
-        const response = await fetch(`/songs/${encodeURIComponent(lrcName)}`);
-        if (!response.ok) throw new Error('找不到對應的 LRC 歌詞檔');
-        sourceText = await response.text();
-        lines = parseLrc(sourceText);
-        openLineIndexes.clear();
-        renderLyrics();
-        video.src = `/songs/${encodeURIComponent(filename)}`;
-        playButton.disabled = false;
-        pauseButton.disabled = false;
-        setStatus(`✅ 已載入 ${lines.length} 句歌詞。點擊「展開單字微調」進入編輯。`);
-    } catch (e) { setStatus(e.message); }
-}
+            // 存入 dataset 以利後續拖曳邏輯尋找相鄰節點
+            block.dataset.start = data.start;
+            block.dataset.end = data.end;
+            block.dataset.lineIndex = lineIndex;
+            block.dataset.wordIndex = wordIndex;
+            block.dataset.type = type;
 
-loadButton.addEventListener('click', loadLyrics);
-playButton.addEventListener('click', () => video.play());
-pauseButton.addEventListener('click', () => video.pause());
+            block.innerHTML = `
+                <div class="resize-handle left"></div>
+                <div class="drag-area">${data.text}</div>
+                <div class="resize-handle right"></div>
+            `;
 
-// 播放時同步標記 (黃色底色)
-video.addEventListener('timeupdate', () => {
-    document.querySelectorAll('.word-row.active').forEach(row => row.classList.remove('active'));
-    lines.forEach((line, lIdx) => line.words.forEach((word, wIdx) => {
-        if (video.currentTime >= word.start && video.currentTime < word.end) {
-            const row = lyricsElement.querySelector(`[data-line="${lIdx}"][data-word="${wIdx}"]`);
-            if (row) {
-                row.classList.add('active');
-                // 若字所在的句子被展開，自動捲動一點點以保持在視角內
-                if(openLineIndexes.has(lIdx)) {
-                    row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            parentTrack.appendChild(block);
+            initDragEvents(block, data, parentLine);
+        }
+
+        // === 4. 拖曳與防重疊邏輯 (核心) ===
+        function initDragEvents(block, dataObj, parentLine) {
+            const leftHandle = block.querySelector('.left');
+            const rightHandle = block.querySelector('.right');
+            const dragArea = block.querySelector('.drag-area');
+
+            let isDragging = false;
+            let action = ''; // 'move', 'resize-left', 'resize-right'
+            let startMouseX = 0;
+            let initialStart = 0;
+            let initialEnd = 0;
+
+            // 定義邊界限制
+            let minTime = 0;
+            let maxTime = 9999;
+
+            function calculateBounds() {
+                const lineIdx = parseInt(block.dataset.lineIndex);
+                const wordIdx = parseInt(block.dataset.wordIndex);
+
+                if (block.dataset.type === 'word') {
+                    // 單字的邊界：前一個單字的結束，到下一個單字的開始。若無，則以整句的頭尾為界。
+                    const lineData = lyricsData[lineIdx];
+                    minTime = wordIdx > 0 ? lineData.words[wordIdx - 1].end : lineData.start;
+                    maxTime = wordIdx < lineData.words.length - 1 ? lineData.words[wordIdx + 1].start : lineData.end;
+                } else {
+                    // 整句的邊界：前一句的結束，到下一句的開始。
+                    minTime = lineIdx > 0 ? lyricsData[lineIdx - 1].end : 0;
+                    maxTime = lineIdx < lyricsData.length - 1 ? lyricsData[lineIdx + 1].start : 9999;
                 }
             }
+
+            function onMouseDown(e, dragAction) {
+                e.preventDefault();
+                isDragging = true;
+                action = dragAction;
+                startMouseX = e.clientX;
+                initialStart = dataObj.start;
+                initialEnd = dataObj.end;
+                calculateBounds();
+
+                document.addEventListener('mousemove', onMouseMove);
+                document.addEventListener('mouseup', onMouseUp);
+            }
+
+            function onMouseMove(e) {
+                if (!isDragging) return;
+
+                const deltaX = e.clientX - startMouseX;
+                const deltaTime = deltaX / PIXELS_PER_SECOND;
+
+                let newStart = initialStart;
+                let newEnd = initialEnd;
+
+                if (action === 'move') {
+                    newStart = initialStart + deltaTime;
+                    newEnd = initialEnd + deltaTime;
+                    
+                    // 防重疊箝制 (Clamp)
+                    const duration = initialEnd - initialStart;
+                    if (newStart < minTime) {
+                        newStart = minTime;
+                        newEnd = newStart + duration;
+                    }
+                    if (newEnd > maxTime) {
+                        newEnd = maxTime;
+                        newStart = newEnd - duration;
+                    }
+                } else if (action === 'resize-left') {
+                    newStart = initialStart + deltaTime;
+                    if (newStart < minTime) newStart = minTime;
+                    if (newStart > initialEnd - MIN_DURATION) newStart = initialEnd - MIN_DURATION;
+                } else if (action === 'resize-right') {
+                    newEnd = initialEnd + deltaTime;
+                    if (newEnd > maxTime) newEnd = maxTime;
+                    if (newEnd < initialStart + MIN_DURATION) newEnd = initialStart + MIN_DURATION;
+                }
+
+                // 即時更新 UI
+                block.style.left = `${newStart * PIXELS_PER_SECOND}px`;
+                block.style.width = `${(newEnd - newStart) * PIXELS_PER_SECOND}px`;
+
+                // 更新暫存數據
+                block.dataset.tempStart = newStart;
+                block.dataset.tempEnd = newEnd;
+            }
+
+            function onMouseUp(e) {
+                if (!isDragging) return;
+                isDragging = false;
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+
+                // 將變更寫回真實資料結構
+                if (block.dataset.tempStart !== undefined) {
+                    dataObj.start = parseFloat(block.dataset.tempStart);
+                    dataObj.end = parseFloat(block.dataset.tempEnd);
+                    
+                    // 如果移動的是整句，必須確保裡面的單字不要超出整句範圍
+                    // (進階實作可加入：移動整句時，裡面的單字跟著等比例平移)
+                }
+
+                // 重新渲染以確保資料與 UI 完全同步
+                renderTimeline();
+                
+                // 此處可以觸發 callback 將 lyricsData 寫回後端或儲存
+                console.log("更新後的資料:", lyricsData);
+            }
+
+            leftHandle.addEventListener('mousedown', (e) => onMouseDown(e, 'resize-left'));
+            rightHandle.addEventListener('mousedown', (e) => onMouseDown(e, 'resize-right'));
+            dragArea.addEventListener('mousedown', (e) => onMouseDown(e, 'move'));
         }
-    }));
-});
 
-downloadButton.addEventListener('click', () => {
-    const content = serializeLrc();
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = songSelect.value.replace(/\.mp4$/i, '.lrc');
-    link.click();
-    URL.revokeObjectURL(link.href);
-});
+        // === 5. 音訊播放指針連動 ===
+        audio.addEventListener('timeupdate', () => {
+            const currentTime = audio.currentTime;
+            playhead.style.left = `${currentTime * PIXELS_PER_SECOND}px`;
+            
+            // 當播放指針超出目前視窗時，自動滾動時間軸 (可選)
+            // const containerWidth = document.querySelector('.timeline-wrapper').clientWidth;
+            // const scrollLeft = document.querySelector('.timeline-wrapper').scrollLeft;
+            // if (currentTime * PIXELS_PER_SECOND > scrollLeft + containerWidth * 0.8) {
+            //     document.querySelector('.timeline-wrapper').scrollLeft = currentTime * PIXELS_PER_SECOND - containerWidth * 0.2;
+            // }
+        });
 
-loadSongs();
-</script>
+        // 初始渲染
+        renderTimeline();
+    </script>
 </body>
 </html>
