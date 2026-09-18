@@ -1,12 +1,45 @@
 Flask>=3.0,<4.0
 Flask-SocketIO>=5.3,<6.0
 python-dotenv>=1.0,<2.0
+
 demucs>=4.0,<5.0
-faster-whisper>=1.1,<2.0
+audio-separator>=0.47.0,<1.0
+# The latest tagged PyPI release (whisperx==3.8.6) pins huggingface-hub<1.0,
+# which conflicts with pyannote-audio>=4.0 (a whisperx dependency) needing
+# huggingface-hub>=1.0. Pin to the commit that is verified working with the
+# rest of this file's constraints until upstream resolves that conflict.
+whisperx @ git+https://github.com/m-bain/whisperx.git@2cfd7b7c5c7bba144954364db747319b50e8232b
+huggingface-hub>=1.0,<2.0
+# ctranslate2>=4.5 dropped cuDNN 8 support entirely (Python package only
+# supports cuDNN 9+), matching the cuDNN 9 DLLs shipped by torch>=2.8/CUDA 12.
+# Pinning below 4.5 (as before) lets pip/whisperx resolve to a newer release
+# anyway, which then reports a spurious "ctranslate2_cudnn8: MISSING" from
+# core/gpu.py's compatibility probe even though nothing is actually broken.
+ctranslate2>=4.5,<5.0
 opencc-python-reimplemented>=0.1.7,<1.0
 yt-dlp>=2024.12.23
+numpy>=2.1,<3.0
+pandas>=2.2,<4.0
+nltk>=3.9,<4.0
+transformers>=4.55,<6.0
+scipy>=1.13,<2.0
+fugashi>=1.3,<2.0
+unidic-lite>=1.0,<2.0
+pykakasi>=2.3,<3.0
+jieba>=0.42,<1.0
+pypinyin>=0.52,<1.0
+ToJyutping>=1.0,<2.0
+hangul-romanize>=0.1,<1.0
 
 # CPU users can install directly from PyPI.
-# CUDA users should install matching torch/torchaudio wheels from https://pytorch.org/get-started/locally/
-torch>=2.4,<2.7
-torchaudio>=2.4,<2.7
+# CUDA users should install matching torch/torchaudio/torchvision wheels from
+# https://pytorch.org/get-started/locally/ (verified working combo: CUDA 12.8
+# wheels, e.g. `pip install torch torchaudio torchvision --index-url
+# https://download.pytorch.org/whl/cu128`).
+# whisperx requires torch~=2.8.0 / torchaudio~=2.8.0 / torchvision~=0.23.0; older
+# torch pins here would conflict and silently resolve to an incompatible torch
+# build (e.g. missing sm_120 kernels for RTX 50-series/Blackwell GPUs, causing
+# "no kernel image is available").
+torch>=2.8,<2.9
+torchaudio>=2.8,<2.9
+torchvision>=0.23,<0.24

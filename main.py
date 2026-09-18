@@ -11,9 +11,9 @@ import webbrowser
 import tkinter as tk
 from tkinter import messagebox
 
-from openktv_ai import load_settings
-from openktv_ai.processing import ensure_demucs_weights
-from openktv_ai.web import create_app, get_local_ip, register_socket_handlers
+from core import load_settings
+from core.demucs_separator import ensure_demucs_weights
+from core.web import create_app, get_local_ip, register_socket_handlers
 
 
 system_log_queue = queue.Queue()
@@ -157,11 +157,12 @@ if __name__ == "__main__":
             print("找不到 FFmpeg")
     else:
         try:
-            ensure_demucs_weights(
-                settings.demucs_model,
-                cache_dir=settings.demucs_cache_dir,
-                log_cb=print,
-            )
+            if settings.separator_backend in {"demucs", "hybrid"}:
+                ensure_demucs_weights(
+                    settings.demucs_model,
+                    cache_dir=settings.demucs_cache_dir,
+                    log_cb=print,
+                )
         except Exception as error:
             try:
                 messagebox.showerror("錯誤", str(error))

@@ -37,10 +37,24 @@
         <input id="yt_title" placeholder="歌手 - 歌名">
         <button class="secondary" onclick="resolveTitleFromYoutube()">從 YouTube 標題自動解析歌手/歌名</button>
 
+        <label>分離後端</label>
+        <select id="separator_backend">
+            <option value="demucs">Demucs</option>
+            <option value="uvr">UVR</option>
+            <option value="hybrid">Hybrid（Demucs伴奏 + UVR人聲）</option>
+        </select>
+
         <label>Demucs stems</label>
         <select id="stems_mode">
             <option value="4">4 stems（預設）</option>
             <option value="2">2 stems</option>
+        </select>
+
+        <label>歌詞對齊後端</label>
+        <select id="alignment_backend">
+            <option value="ctc">CTC</option>
+            <option value="whisperx">WhisperX</option>
+            <option value="qwen">Qwen</option>
         </select>
 
         <label>Device</label>
@@ -52,7 +66,7 @@
 
         <button id="btnPreview" class="secondary" onclick="previewPlaylist()">預覽 Playlist 曲目</button>
         <button id="btnStart" class="primary" onclick="startDownload()">開始處理</button>
-        <p class="muted">混音固定 pseudo-spatial；lyrics 會嘗試建立 ktv-lrc 範本並套用可用的 lrclib 內容。</p>
+        <p class="muted">流程：下載影片 → 分離 → lrclib 歌詞 → 對齊 → 對白切分 → 輸出 mp4 / instrumental.m4a / lyrics.vocals.wav。</p>
     </div>
 
     <div class="card">
@@ -183,6 +197,8 @@
                 title,
                 stems: document.getElementById('stems_mode').value,
                 device: document.getElementById('device_mode').value,
+                separator_backend: document.getElementById('separator_backend').value,
+                alignment_backend: document.getElementById('alignment_backend').value,
                 playlist_entries: playlistEntries,
                 singer,
                 lyrics_text: lyricsText,
