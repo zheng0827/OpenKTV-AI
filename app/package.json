@@ -1,0 +1,18 @@
+{
+  "name": "ktv-enterprise-system",
+  "version": "3.0.0",
+  "description": "企業級雙端分離 (Host & Remote) KTV 點播與即時混響系統",
+  "main": "main.js",
+  "type": "module",
+  "scripts": {
+    "start": "electron .",
+    "server": "node server.js"
+  },
+  "dependencies": {
+    "csv-parser": "^3.0.0",
+    "electron": "^28.2.0",
+    "express": "^4.18.2",
+    "minisearch": "^6.3.0",
+    "socket.io": "^4.7.4"
+  }
+}

@@ -11,3 +11,7 @@ model_cache/
 *.txt
 lyrics/
 nightingale_code/
+*-lock.json
+node_modules/
+app/public/songs/
+openktv_ai_drop/
