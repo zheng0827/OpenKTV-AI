@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>OpenKTV</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#090d18;color:#eef2ff;font:16px system-ui,sans-serif;min-height:100vh;display:grid;place-items:center}
+    main{width:min(680px,92vw);padding:40px;border:1px solid #28324a;border-radius:24px;background:#111827;box-shadow:0 24px 90px #0008}
+    h1{font-size:clamp(2.2rem,8vw,4rem);margin:0 0 8px}p{color:#aab4cc;line-height:1.65}.actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:28px}
+    a,button{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:12px;padding:14px 20px;background:#695cff;color:white;font:inherit;font-weight:700;text-decoration:none;cursor:pointer}
+    a.secondary{background:#26324a}footer{margin-top:32px;color:#7985a1;font-size:.85rem}
+  </style>
+</head>
+<body><main>
+  <h1>OpenKTV</h1><p>建立歌房並在主螢幕播放，或使用手機加入歌房點歌。</p>
+  <div class="actions"><a href="/player">開啟主播放器</a><a class="secondary" href="/remote">手機遙控／加入歌房</a></div>
+  <footer><span id="health">正在檢查服務…</span></footer>
+  <script>fetch('/health').then(r=>r.json()).then(s=>document.querySelector('#health').textContent=`播放服務正常 · 曲庫 ${s.librarySongs} 首 · ${s.rooms} 個歌房`).catch(()=>document.querySelector('#health').textContent='播放服務狀態無法取得');</script>
+</main></body></html>

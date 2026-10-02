@@ -54,6 +54,12 @@ class AppSettings:
     intro_skip_lead_seconds: float
     download_retry_count: int
     library_index_path: Path
+    retry_delay_seconds: float
+    lyrics_alignment_backends: tuple[str, ...]
+    alignment_parallelism: int
+    dereverb_enabled: bool
+    spotify_match_threshold: float
+    musixmatch_api_key: str
 
 
 class Config:
@@ -77,6 +83,22 @@ def resolve_base_dir() -> Path:
 def load_settings(base_dir: Path | None = None) -> AppSettings:
     root = base_dir or resolve_base_dir()
     load_dotenv(dotenv_path=root / ".env", override=False)
+    config_values = {}
+    config_path = Path(os.getenv("KTV_CONFIG_PATH", root / "config.yaml"))
+    if config_path.is_file():
+        try:
+            import yaml
+
+            loaded = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+            config_values = loaded if isinstance(loaded, dict) else {}
+        except Exception as error:
+            raise RuntimeError(f"無法載入設定檔 {config_path}: {error}") from error
+
+    download_cfg = config_values.get("download", {})
+    retry_cfg = download_cfg.get("background_jobs", {})
+    audio_cfg = config_values.get("audio_processing", {})
+    alignment_cfg = audio_cfg.get("alignment", {})
+    metadata_cfg = config_values.get("metadata", {})
 
     stems = os.getenv("KTV_SEPARATOR_STEMS", "4").strip()
     separator_stems = 4 if stems == "4" else 2
@@ -108,6 +130,24 @@ def load_settings(base_dir: Path | None = None) -> AppSettings:
         whisper_compute_type=os.getenv("KTV_WHISPER_COMPUTE_TYPE", "auto"),
         alignment_backend=os.getenv("KTV_ALIGNMENT_BACKEND", "ctc").strip().lower(),
         intro_skip_lead_seconds=_to_float(os.getenv("KTV_INTRO_SKIP_LEAD_SECONDS"), 5.0),
-        download_retry_count=_to_int(os.getenv("KTV_DOWNLOAD_RETRY_COUNT"), 2),
+        download_retry_count=_to_int(
+            os.getenv("KTV_DOWNLOAD_RETRY_COUNT"),
+            _to_int(str(retry_cfg.get("retry_count", download_cfg.get("retry_count", 2))), 2),
+        ),
         library_index_path=Path(os.getenv("KTV_LIBRARY_INDEX_PATH", root / "ktv_songs" / "library_index.csv")),
+        retry_delay_seconds=_to_float(
+            os.getenv("KTV_DOWNLOAD_RETRY_DELAY_SECONDS"),
+            _to_float(str(retry_cfg.get("retry_delay_seconds", download_cfg.get("retry_delay_seconds", 2))), 2.0),
+        ),
+        lyrics_alignment_backends=tuple(alignment_cfg.get("backends", ["ctc", "whisperx", "qwen"])),
+        alignment_parallelism=_to_int(
+            os.getenv("KTV_ALIGNMENT_PARALLELISM"),
+            _to_int(str(alignment_cfg.get("max_parallel_backends", 1)), 1),
+        ),
+        dereverb_enabled=bool(audio_cfg.get("dereverb", {}).get("enabled", True)),
+        spotify_match_threshold=_to_float(
+            os.getenv("KTV_SPOTIFY_MATCH_THRESHOLD"),
+            _to_float(str(metadata_cfg.get("spotify", {}).get("minimum_match_score", 0.72)), 0.72),
+        ),
+        musixmatch_api_key=os.getenv("MUSIXMATCH_API_KEY", ""),
     )

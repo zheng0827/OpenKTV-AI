@@ -1,811 +1,125 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
+<!doctype html>
+<html lang="zh-Hant">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>KTV 主螢幕播放器</title>
-    <style>
-        body { 
-            margin: 0; 
-            background: #000; 
-            color: #fff; 
-            font-family: Arial, sans-serif; 
-            overflow: hidden; 
-            user-select: none;
-        }
-        #root { 
-            position: relative; 
-            width: 100vw; 
-            height: 100vh; 
-        }
-        video { 
-            width: 100%; 
-            height: 100%; 
-            object-fit: contain; 
-            background: #000; 
-        }
-
-        /* 頂部資訊列與控制按鈕 */
-        #top-bar {
-            position: absolute;
-            left: 16px;
-            top: 16px;
-            right: 16px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            z-index: 10;
-            pointer-events: none;
-        }
-        .hud-panel {
-            background: rgba(0, 0, 0, 0.75);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 10px;
-            padding: 8px 16px;
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            pointer-events: auto;
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
-        }
-        .btn-action {
-            border: 1px solid rgba(255, 255, 255, 0.35);
-            border-radius: 8px;
-            padding: 6px 12px;
-            background: rgba(255, 255, 255, 0.1);
-            color: #fff;
-            cursor: pointer;
-            font-size: 13px;
-            transition: all 0.2s ease;
-        }
-        .btn-action:hover {
-            background: rgba(255, 255, 255, 0.25);
-            border-color: #fff;
-        }
-        .btn-active {
-            background: #0284c7 !important;
-            border-color: #38bdf8 !important;
-            color: #fff !important;
-        }
-        .btn-skip {
-            background: rgba(225, 29, 72, 0.25) !important;
-            border-color: rgba(244, 63, 94, 0.5) !important;
-            color: #fecdd3 !important;
-        }
-        .btn-skip:hover {
-            background: rgba(225, 29, 72, 0.45) !important;
-            border-color: #f43f5e !important;
-            color: #fff !important;
-        }
-
-        #waiting { 
-            position: absolute; 
-            inset: 0; 
-            display: flex; 
-            flex-direction: column;
-            align-items: center; 
-            justify-content: center; 
-            color: #888; 
-            font-size: 28px; 
-            font-weight: bold;
-            z-index: 4; 
-            background: radial-gradient(circle, #111827 0%, #000 100%);
-            gap: 16px;
-        }
-
-        /* KTV 字幕面版 (經典 Arial 粗體與四向實心立體黑描邊) */
-        #subtitle-panel { 
-            position: absolute; 
-            left: 6%; 
-            right: 6%; 
-            bottom: 40px; 
-            z-index: 6; 
-            pointer-events: none; 
-        }
-        .line { 
-            font-size: 46px; 
-            font-weight: 700; 
-            line-height: 1.4; 
-            text-shadow: 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000, 0 4px 12px rgba(0,0,0,0.9);
-            white-space: pre-wrap; 
-        }
-        #line-top { 
-            text-align: left; 
-            margin-bottom: 12px; 
-        }
-        #line-bottom { 
-            text-align: right; 
-        }
-
-        /* 偽元素漸變平滑划過 (Sweep effect) */
-        .word { 
-            position: relative;
-            display: inline-block;
-            color: #ffffff;
-            white-space: pre; 
-        }
-        .word::after {
-            content: attr(data-text);
-            position: absolute;
-            left: 0;
-            top: 0;
-            color: #00e5ff;
-            overflow: hidden;
-            white-space: pre;
-            width: var(--p, 0%);
-            transition: width 0.04s linear;
-        }
-
-        /* 倒數點點樣式 */
-        .countdown { 
-            color: #38bdf8; 
-            letter-spacing: 6px; 
-            margin-right: 12px; 
-            display: inline-block; 
-            text-shadow: 0 0 10px rgba(56, 189, 248, 0.8);
-        }
-
-        /* 音準即時波形條 */
-        #pitch-meter {
-            width: 90px;
-            height: 8px;
-            background: #1f2937;
-            border-radius: 4px;
-            overflow: hidden;
-            position: relative;
-        }
-        #pitch-fill {
-            height: 100%;
-            width: 0%;
-            background: linear-gradient(90deg, #10b981, #38bdf8);
-            transition: width 0.1s ease;
-        }
-    </style>
-    <script src="/socket.io/socket.io.js"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>OpenKTV 播放器</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#080b13;color:#f5f6fa;font:15px system-ui,sans-serif;height:100vh;overflow:hidden}
+    header{height:64px;padding:0 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #252b39;background:#101522}
+    header strong{font-size:1.15rem}.pill{border:1px solid #323b50;border-radius:99px;padding:7px 12px;color:#b8c3da}
+    main{height:calc(100vh - 132px);display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px;padding:14px}
+    .stage,.side{background:#111725;border:1px solid #232c3d;border-radius:18px;overflow:hidden}.stage{position:relative;display:grid;place-items:center;background:#000}
+    video{width:100%;height:100%;object-fit:contain}.empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:#8792a8;padding:20px}
+    .side{padding:18px;overflow:auto}.side h2{margin:4px 0 14px}.sub{color:#9aa6bd;font-size:.9rem;overflow-wrap:anywhere}
+    button,input{font:inherit;border-radius:10px;border:1px solid #343e53;padding:10px;background:#1b2435;color:#f3f4f6}
+    button{cursor:pointer;background:#685bff;border:0;font-weight:650}button.secondary{background:#273249}button:disabled{opacity:.4;cursor:not-allowed}
+    .row{display:flex;gap:8px;margin:10px 0}.row>*{min-width:0;flex:1}.controls{display:flex;gap:8px;flex-wrap:wrap;margin:18px 0}
+    #qr{width:100%;border-radius:12px;background:white;margin-top:10px}.queue{padding:0;list-style:none}.queue li{padding:10px 0;border-bottom:1px solid #283146}
+    #bottom{height:68px;position:fixed;bottom:0;left:0;right:0;background:#111725;border-top:1px solid #252b39;display:flex;align-items:center;gap:10px;padding:10px 16px}
+    #bottom a{color:#b9c5dc;text-decoration:none;padding:10px}#status{margin-left:auto;color:#9aa6bd}
+    .meter{width:100%}.mic{margin-top:16px;border-top:1px solid #283146;padding-top:10px}
+    @media(max-width:850px){main{grid-template-columns:1fr;height:calc(100vh - 132px);overflow:auto}.stage{min-height:42vh}.side{min-height:260px}body{overflow:auto}header{position:sticky;top:0;z-index:4}#bottom{position:sticky;bottom:0}}
+  </style>
 </head>
 <body>
-<div id="root">
-    <!-- 原唱視訊與人聲音訊軌 -->
-    <video id="video" playsinline crossorigin="anonymous"></video>
-    <!-- 純伴奏音訊軌 (.instrumental.m4a) -->
-    <audio id="instrumental" preload="auto" crossorigin="anonymous"></audio>
-
-    <!-- 頂部控制與狀態 HUD -->
-    <div id="top-bar">
-        <div class="hud-panel">
-            <span id="conn-status" style="color: #10b981; font-weight: bold;">● 就緒</span>
-            <span id="mode-badge" style="color: #38bdf8; font-weight: bold;">原唱模式</span>
-            <span id="current-title" style="color: #f3f4f6; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500;">等待點歌...</span>
-            <span id="next-title" style="color: #9ca3af; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-left: 1px solid rgba(255,255,255,0.2); padding-left: 10px;">下一首: 無</span>
-        </div>
-
-        <div class="hud-panel">
-            <!-- 音量顯示標籤 -->
-            <div style="font-size: 11px; color: #cbd5e1; display: flex; gap: 10px;">
-                <span>🎵 音樂: <b id="hud-music-vol" style="color: #38bdf8;">80%</b></span>
-                <span>🎤 麥克風: <b id="hud-mic-vol" style="color: #34d399;">120%</b></span>
-            </div>
-
-            <!-- 即時音準計量條 -->
-            <div style="display: flex; flex-direction: column; gap: 2px;">
-                <div id="pitch-meter"><div id="pitch-fill"></div></div>
-            </div>
-
-            <!-- 防嘯叫模式開關 -->
-            <button id="btn-anti-feedback" class="btn-action btn-active" onclick="toggleAntiFeedback()">
-                🛡️ 筆電防嘯叫：開
-            </button>
-
-            <!-- 麥克風開關 -->
-            <button id="btn-mic" class="btn-action" onclick="toggleMic()">
-                🎤 啟動麥克風
-            </button>
-
-            <!-- 快速切歌按鈕 -->
-            <button id="btn-skip" class="btn-action btn-skip" onclick="skipSong()">
-                ⏭️ 切歌
-            </button>
-
-            <button class="btn-action" onclick="toggleFullscreen()">⛶</button>
-        </div>
-    </div>
-
-    <!-- 待播待機介面 -->
-    <div id="waiting">
-        <div style="font-size: 52px;">🎤</div>
-        <div>包廂已就緒，請使用手機掃碼點歌</div>
-        <div style="font-size: 15px; color: #6b7280;">支援手機遙控即時音量調整、人聲增益放大與空間混響</div>
-    </div>
-
-    <!-- KTV 經典雙行字幕面板 -->
-    <div id="subtitle-panel">
-        <div id="line-top" class="line"></div>
-        <div id="line-bottom" class="line"></div>
-    </div>
-</div>
-
-<script>
-// ==========================================
-// 1. 全域狀態與變數
-// ==========================================
-const socket = io();
-const video = document.getElementById('video');
-const instrumental = document.getElementById('instrumental');
-const waiting = document.getElementById('waiting');
-const connStatus = document.getElementById('conn-status');
-const modeBadge = document.getElementById('mode-badge');
-const currentTitle = document.getElementById('current-title');
-const nextTitle = document.getElementById('next-title');
-const lineTop = document.getElementById('line-top');
-const lineBottom = document.getElementById('line-bottom');
-const btnMic = document.getElementById('btn-mic');
-const btnAntiFeedback = document.getElementById('btn-anti-feedback');
-const pitchFill = document.getElementById('pitch-fill');
-const hudMusicVol = document.getElementById('hud-music-vol');
-const hudMicVol = document.getElementById('hud-mic-vol');
-
-let currentSong = null;
-let activeMode = 'original'; // 'original' 或 'accompaniment'
-let lyricLines = [];
-let isMicRunning = false;
-let isAntiFeedback = true;
-let isSkipping = false;
-
-// 預設音量參數 (由 Remote / Server 同步控制)
-let currentMusicVol = 0.8;
-let currentMicVol = 1.2;
-let currentReverbVol = 0.45;
-
-// ==========================================
-// 2. Web Audio DSP 鏈路 (含前級放大器與音量控制節點)
-// ==========================================
-let audioCtx = null;
-let videoSource = null;
-let instSource = null;
-let originalGain = null;
-let instGain = null;
-let musicGain = null; // 音樂總音量節點
-
-// 麥克風 DSP 鏈路節點
-let micStream = null;
-let micSource = null;
-let micPreAmp = null;    // 前級增益放大 (解決筆電或普通麥克風聲音過小)
-let micDryGain = null;   // 人聲直通乾聲音量 (受 Remote micVol 控制)
-let micWetGain = null;   // 人聲殘響混響量 (受 Remote reverbVol 控制)
-let convolver = null;
-let highpass = null;
-let notchFilter = null;
-let highShelf = null;
-let compressor = null;
-let analyser = null;
-
-function initAudioSystem() {
-    if (!audioCtx) {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)({
-            latencyHint: 'interactive',
-            sampleRate: 48000
-        });
+  <header><strong>🎤 OpenKTV <span class="pill" id="roomLabel">尚未加入歌房</span></strong><button id="createRoom">建立歌房</button></header>
+  <main>
+    <section class="stage"><video id="video" playsinline></video><audio id="instrumental" preload="auto"></audio><div class="empty" id="empty">建立或加入歌房後即可開始播放</div></section>
+    <aside class="side">
+      <h2 id="songTitle">等待點歌</h2><div class="sub" id="songArtist">加入歌房以開始</div>
+      <div class="controls"><button id="play">播放</button><button class="secondary" id="pause">暫停</button><button class="secondary" id="next">切歌</button></div>
+      <label>播放音量 <input class="meter" id="musicVolume" type="range" min="0" max="1" step=".01" value="1"></label>
+      <h3>歌房 QR Code</h3><div class="sub" id="joinUrl">建立歌房後顯示手機加入連結</div><img id="qr" hidden alt="手機加入歌房 QR Code">
+      <h3>播放佇列</h3><ul class="queue" id="queue"></ul>
+      <section class="mic"><h3>麥克風即時混響</h3><p class="sub">瀏覽器提供回音消除及降噪。建議使用耳機；麥克風監聽預設關閉。</p>
+        <button id="micToggle" class="secondary">啟用麥克風監聽</button>
+        <label class="sub">混響量 <input class="meter" id="reverb" type="range" min="0" max=".8" step=".01" value=".25"></label>
+      </section>
+      <p class="sub" id="error"></p>
+    </aside>
+  </main>
+  <nav id="bottom"><a href="/">首頁</a><a href="/remote">手機點歌</a><span id="status">未連線</span></nav>
+  <script type="module">
+    const video=document.querySelector('#video'), instrumental=document.querySelector('#instrumental');
+    const roomLabel=document.querySelector('#roomLabel'), errorBox=document.querySelector('#error');
+    let socket=null, roomId='', adminToken='', lastSongId='', micStream=null, audioContext=null;
+    let roomState=null, syncBusy=false;
+    const escapeMedia=name=>`/media/${encodeURIComponent(name||'')}`;
+    function report(message){errorBox.textContent=message||''}
+    function connectRoom(id,token){
+      if(socket)socket.disconnect();
+      roomId=id;adminToken=token||'';roomLabel.textContent=`歌房 ${id}`;
+      socket=io({auth:{roomId:id,role:'admin',token:adminToken}});
+      socket.on('connect',()=>document.querySelector('#status').textContent='已同步連線');
+      socket.on('connect_error',()=>{document.querySelector('#status').textContent='連線失敗';report('歌房連線驗證失敗，請重新建立歌房。')});
+      socket.on('room_state',state=>{roomState=state;render(state)});
+      socket.on('operation_error',message=>report(`操作失敗：${message.code}`));
+      document.querySelector('#play').disabled=!adminToken;
+      document.querySelector('#pause').disabled=!adminToken;
+      document.querySelector('#next').disabled=!adminToken;
+      if(token)localStorage.setItem(`openktv-admin-${id}`,token);
     }
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    if (videoSource) return;
-
-    // 音樂通道圖譜
-    videoSource = audioCtx.createMediaElementSource(video);
-    instSource = audioCtx.createMediaElementSource(instrumental);
-    originalGain = audioCtx.createGain();
-    instGain = audioCtx.createGain();
-    musicGain = audioCtx.createGain();
-
-    // 路由：原唱/伴奏 -> 切換Gain -> 音樂總音量Gain -> 喇叭輸出
-    videoSource.connect(originalGain).connect(musicGain);
-    instSource.connect(instGain).connect(musicGain);
-    musicGain.connect(audioCtx.destination);
-
-    originalGain.gain.value = 1.0;
-    instGain.gain.value = 0.0;
-    musicGain.gain.value = currentMusicVol;
-}
-
-function applyMusicVolume(val) {
-    currentMusicVol = Math.max(0, Math.min(2.0, parseFloat(val)));
-    hudMusicVol.innerText = `${Math.round(currentMusicVol * 100)}%`;
-    if (musicGain && audioCtx) {
-        musicGain.gain.setTargetAtTime(currentMusicVol, audioCtx.currentTime, 0.04);
+    function render(state){
+      const current=state.current;
+      document.querySelector('#empty').hidden=Boolean(current);
+      document.querySelector('#songTitle').textContent=current?.song_name||current?.title||'等待點歌';
+      document.querySelector('#songArtist').textContent=current?.artist_name||'';
+      document.querySelector('#queue').replaceChildren(...(state.queue||[]).map(item=>{const li=document.createElement('li');li.textContent=`${item.song_name||item.title} · ${item.artist_name||''}`;return li}));
+      document.querySelector('#musicVolume').value=state.effects?.volume??1;
+      document.querySelector('#reverb').value=state.effects?.reverb??.25;
+      if(!current){video.pause();instrumental.pause();return}
+      const nextId=String(current.id||current.video_filename);
+      if(nextId!==lastSongId){
+        lastSongId=nextId;video.muted=true;video.src=escapeMedia(current.video_filename);
+        const accompaniment=current.accompaniment_filename||current.instrumental_filename;
+        if(!accompaniment){report('此歌曲沒有伴奏音檔，為避免原唱外漏，播放器已停止。');instrumental.removeAttribute('src');return}
+        report('');instrumental.src=escapeMedia(accompaniment);video.load();instrumental.load();
+      }
+      const target=Math.max(0,state.position||0);
+      if(Math.abs(instrumental.currentTime-target)>.45&&!syncBusy){syncBusy=true;instrumental.currentTime=target;setTimeout(()=>syncBusy=false,250)}
+      instrumental.volume=Number(document.querySelector('#musicVolume').value);
+      if(state.isPlaying){instrumental.play().catch(()=>report('請先點擊頁面，允許瀏覽器播放音訊。'));video.play().catch(()=>{})}
+      else{instrumental.pause();video.pause()}
     }
-}
-
-function applyMicVolume(val) {
-    currentMicVol = Math.max(0, Math.min(3.0, parseFloat(val)));
-    hudMicVol.innerText = `${Math.round(currentMicVol * 100)}%`;
-    if (micDryGain && audioCtx) {
-        // 配合防嘯叫模式調整最大增益比
-        const targetVal = isAntiFeedback ? currentMicVol * 0.75 : currentMicVol;
-        micDryGain.gain.setTargetAtTime(targetVal, audioCtx.currentTime, 0.04);
+    async function newRoom(){
+      try{
+        const response=await fetch('/api/rooms',{method:'POST'});const data=await response.json();
+        connectRoom(data.roomId,data.adminToken);
+        const qrResponse=await fetch(`/api/rooms/${data.roomId}/qr`);const qr=await qrResponse.json();
+        document.querySelector('#joinUrl').textContent=qr.joinUrl;
+        const image=document.querySelector('#qr');image.src=qr.dataUrl;image.hidden=false;
+        history.replaceState(null,'',`/player?room=${data.roomId}`);
+      }catch(_){report('建立歌房失敗，請檢查播放服務。')}
     }
-}
-
-function applyReverbVolume(val) {
-    currentReverbVol = Math.max(0, Math.min(1.5, parseFloat(val)));
-    if (micWetGain && audioCtx) {
-        micWetGain.gain.setTargetAtTime(currentReverbVol, audioCtx.currentTime, 0.04);
+    document.querySelector('#createRoom').onclick=newRoom;
+    document.querySelector('#play').onclick=()=>socket?.emit('control',{action:'play'});
+    document.querySelector('#pause').onclick=()=>socket?.emit('control',{action:'pause'});
+    document.querySelector('#next').onclick=()=>socket?.emit('control',{action:'next'});
+    document.querySelector('#musicVolume').oninput=e=>{instrumental.volume=Number(e.target.value);socket?.emit('set_effects',{volume:Number(e.target.value)})};
+    document.querySelector('#reverb').oninput=e=>socket?.emit('set_effects',{reverb:Number(e.target.value)});
+    video.onended=()=>{if(roomState?.current)socket?.emit('song_ended',{songId:roomState.current.id})};
+    window.addEventListener('keydown',e=>{if(e.code==='Space'&&document.activeElement===document.body){e.preventDefault();socket?.emit('control',{action:roomState?.isPlaying?'pause':'play'})}});
+    async function toggleMic(){
+      try{
+        if(micStream){micStream.getTracks().forEach(track=>track.stop());micStream=null;document.querySelector('#micToggle').textContent='啟用麥克風監聽';return}
+        micStream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+        audioContext=new AudioContext();
+        const input=audioContext.createMediaStreamSource(micStream), highpass=audioContext.createBiquadFilter(), compressor=audioContext.createDynamicsCompressor();
+        highpass.type='highpass';highpass.frequency.value=90;compressor.threshold.value=-18;compressor.ratio.value=4;
+        const dry=audioContext.createGain(), wet=audioContext.createGain(), convolver=audioContext.createConvolver();
+        const impulse=audioContext.createBuffer(2,audioContext.sampleRate*1.7,audioContext.sampleRate);
+        for(let channel=0;channel<2;channel++){const data=impulse.getChannelData(channel);for(let i=0;i<data.length;i++)data[i]=(Math.random()*2-1)*Math.pow(1-i/data.length,3)}
+        convolver.buffer=impulse;dry.gain.value=.8;wet.gain.value=Number(document.querySelector('#reverb').value);
+        input.connect(highpass).connect(compressor);compressor.connect(dry).connect(audioContext.destination);compressor.connect(convolver).connect(wet).connect(audioContext.destination);
+        document.querySelector('#reverb').oninput=e=>{wet.gain.setTargetAtTime(Number(e.target.value),audioContext.currentTime,.05);socket?.emit('set_effects',{reverb:Number(e.target.value)})};
+        document.querySelector('#micToggle').textContent='關閉麥克風監聽';
+      }catch(_){micStream=null;report('無法使用麥克風，請檢查權限或使用 HTTPS。')}
     }
-}
-
-function createRoomIR(ctx, duration, decay) {
-    const len = ctx.sampleRate * duration;
-    const buf = ctx.createBuffer(2, len, ctx.sampleRate);
-    const left = buf.getChannelData(0);
-    const right = buf.getChannelData(1);
-    for (let i = 0; i < len; i++) {
-        const factor = Math.pow(1 - i / len, decay);
-        left[i] = (Math.random() * 2 - 1) * factor;
-        right[i] = (Math.random() * 2 - 1) * factor;
-    }
-    return buf;
-}
-
-function toggleAntiFeedback() {
-    isAntiFeedback = !isAntiFeedback;
-    btnAntiFeedback.className = isAntiFeedback ? 'btn-action btn-active' : 'btn-action';
-    btnAntiFeedback.innerText = isAntiFeedback ? '🛡️ 筆電防嘯叫：開' : '🛡️ 筆電防嘯叫：關';
-    
-    if (isMicRunning) {
-        toggleMic();
-        setTimeout(() => toggleMic(), 200);
-    }
-}
-
-async function toggleMic() {
-    initAudioSystem();
-
-    if (isMicRunning) {
-        if (micStream) micStream.getTracks().forEach(t => t.stop());
-        isMicRunning = false;
-        btnMic.className = 'btn-action';
-        btnMic.innerText = '🎤 啟動麥克風';
-        pitchFill.style.width = '0%';
-        return;
-    }
-
-    try {
-        micStream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-                echoCancellation: isAntiFeedback,
-                noiseSuppression: true,
-                autoGainControl: false,
-                latency: 0
-            },
-            video: false
-        });
-
-        micSource = audioCtx.createMediaStreamSource(micStream);
-
-        // 1. 前級增益放大器 (Pre-Amp Boost): 先將原始微弱訊號大幅抬升 2.5 倍
-        micPreAmp = audioCtx.createGain();
-        micPreAmp.gain.value = 2.5;
-
-        // 2. 85Hz 高通濾波器：切除噗音與敲擊震動
-        highpass = audioCtx.createBiquadFilter();
-        highpass.type = 'highpass';
-        highpass.frequency.value = 85;
-
-        // 3. 3100Hz 陷波濾波器 (Notch)：切除尖銳嘯叫共鳴點
-        notchFilter = audioCtx.createBiquadFilter();
-        notchFilter.type = 'notch';
-        notchFilter.frequency.value = 3100;
-        notchFilter.Q.value = 4.0;
-
-        // 4. 高頻修整：衰減毛刺感
-        highShelf = audioCtx.createBiquadFilter();
-        highShelf.type = 'highshelf';
-        highShelf.frequency.value = 6500;
-        highShelf.gain.value = isAntiFeedback ? -6.0 : 0.0;
-
-        // 5. 動態壓縮器：保護揚聲器不破音
-        compressor = audioCtx.createDynamicsCompressor();
-        compressor.threshold.setValueAtTime(-28, audioCtx.currentTime);
-        compressor.ratio.setValueAtTime(6, audioCtx.currentTime);
-        compressor.attack.setValueAtTime(0.003, audioCtx.currentTime);
-
-        // 6. 人聲乾濕音訊通道
-        micDryGain = audioCtx.createGain();
-        micWetGain = audioCtx.createGain();
-        
-        applyMicVolume(currentMicVol);
-        applyReverbVolume(currentReverbVol);
-
-        convolver = audioCtx.createConvolver();
-        convolver.buffer = createRoomIR(audioCtx, 1.8, 1.8);
-
-        analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 2048;
-
-        // 串接音訊鏈路
-        micSource.connect(micPreAmp);
-        micPreAmp.connect(highpass);
-        highpass.connect(notchFilter);
-        notchFilter.connect(highShelf);
-        highShelf.connect(compressor);
-        compressor.connect(analyser);
-
-        // 輸出至乾濕混音
-        compressor.connect(micDryGain).connect(audioCtx.destination);
-        compressor.connect(convolver).connect(micWetGain).connect(audioCtx.destination);
-
-        isMicRunning = true;
-        btnMic.className = 'btn-action btn-active';
-        btnMic.innerText = '🎙️ 麥克風已啟動';
-    } catch (err) {
-        alert('麥克風啟動失敗: ' + err.message);
-    }
-}
-
-function detectPitchHz() {
-    if (!analyser || !isMicRunning) return 0;
-    const buf = new Float32Array(analyser.fftSize);
-    analyser.getFloatTimeDomainData(buf);
-
-    let rms = 0;
-    for (let i = 0; i < buf.length; i++) rms += buf[i] * buf[i];
-    rms = Math.sqrt(rms / buf.length);
-    if (rms < 0.015) return 0;
-
-    let r1 = 0, r2 = buf.length - 1, thres = 0.2;
-    for (let i = 0; i < buf.length / 2; i++) {
-        if (Math.abs(buf[i]) < thres) { r1 = i; break; }
-    }
-    for (let i = 1; i < buf.length / 2; i++) {
-        if (Math.abs(buf[buf.length - i]) < thres) { r2 = buf.length - i; break; }
-    }
-
-    const sliced = buf.slice(r1, r2);
-    const c = new Array(sliced.length).fill(0);
-    for (let i = 0; i < sliced.length; i++) {
-        for (let j = 0; j < sliced.length - i; j++) c[i] += sliced[j] * sliced[j + i];
-    }
-
-    let d = 0;
-    while (c[d] > c[d + 1]) d++;
-    let maxval = -1, maxpos = -1;
-    for (let i = d; i < sliced.length; i++) {
-        if (c[i] > maxval) { maxval = c[i]; maxpos = i; }
-    }
-    return audioCtx.sampleRate / maxpos;
-}
-
-// ==========================================
-// 3. 原伴唱切換
-// ==========================================
-function updateAudioMode(mode) {
-    activeMode = mode;
-    modeBadge.innerText = (mode === 'accompaniment') ? '伴奏模式' : '原唱模式';
-    if (!audioCtx || !originalGain) return;
-
-    const now = audioCtx.currentTime;
-    if (mode === 'accompaniment' && instrumental.src) {
-        originalGain.gain.setTargetAtTime(0.0, now, 0.05);
-        instGain.gain.setTargetAtTime(1.0, now, 0.05);
-        if (!video.paused) {
-            instrumental.currentTime = video.currentTime;
-            instrumental.play().catch(() => {});
-        }
-    } else {
-        originalGain.gain.setTargetAtTime(1.0, now, 0.05);
-        instGain.gain.setTargetAtTime(0.0, now, 0.05);
-        instrumental.pause();
-    }
-}
-
-// ==========================================
-// 4. KTV 字元級歌詞解析
-// ==========================================
-function parseKtvLrc(text) {
-    const lines = [];
-    let current = null;
-    for (const raw of text.split(/\r?\n/)) {
-        const line = raw.trim();
-        if (!line || line.startsWith('@')) continue;
-        if (line.startsWith('%')) {
-            const m = line.match(/^%(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(.+)$/);
-            if (!m) continue;
-            current = { start: Number(m[1]), end: Number(m[2]), text: m[3], words: [] };
-            lines.push(current);
-        } else if (line.startsWith('$') && current) {
-            const m = line.match(/^\$(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(.+)$/);
-            if (!m) continue;
-            const word = { start: Number(m[1]), end: Number(m[2]), text: m[3] };
-            const prev = current.words[current.words.length - 1];
-            const punctuationOnly = !/[0-9A-Za-z\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]/.test(word.text);
-            if (prev && punctuationOnly) {
-                prev.text += word.text;
-                prev.end = Math.max(prev.end, word.end);
-            } else {
-                current.words.push(word);
-            }
-        }
-    }
-
-    for (const line of lines) {
-        for (let i = 0; i < line.words.length; i++) {
-            line.words[i].end = (i + 1 < line.words.length) ? line.words[i + 1].start : line.end;
-        }
-
-        // 英文單字間隔自動留空
-        for (let i = 0; i < line.words.length - 1; i++) {
-            const currW = line.words[i];
-            const nextW = line.words[i + 1];
-            const currIsEn = /[0-9A-Za-z]$/.test(currW.text);
-            const nextIsEn = /^[0-9A-Za-z]/.test(nextW.text);
-            if ((currIsEn || nextIsEn) && !currW.text.endsWith(' ') && !nextW.text.startsWith(' ')) {
-                currW.text += ' ';
-            }
-        }
-    }
-
-    for (let i = 0; i < lines.length; i++) {
-        lines[i].needsCountdown = (i === 0 || (lines[i].start - lines[i - 1].end >= 4));
-    }
-    return lines;
-}
-
-async function loadLyrics(songPath) {
-    lyricLines = [];
-    try {
-        const lrcUrl = songPath.replace(/\.mp4$/i, '.lrc');
-        const resp = await fetch(lrcUrl);
-        if (!resp.ok) throw new Error();
-        const text = await resp.text();
-        lyricLines = parseKtvLrc(text);
-    } catch (_) {
-        lyricLines = [];
-    }
-}
-
-const lyricRenderState = {
-    top: { key: '', line: null, words: [], countdown: null },
-    bottom: { key: '', line: null, words: [], countdown: null }
-};
-
-function updateRenderedLine(container, state, line, now, isActiveLine) {
-    const key = line ? `${line.start}:${line.end}:${line.text}` : '';
-    if (state.key !== key) {
-        state.key = key;
-        state.line = line;
-        state.words = [];
-        container.replaceChildren();
-        if (!line) return;
-
-        if (line.needsCountdown) {
-            const cd = document.createElement('span');
-            cd.className = 'countdown';
-            state.countdown = cd;
-            container.appendChild(cd);
-        } else {
-            state.countdown = null;
-        }
-
-        const words = line.words && line.words.length
-            ? line.words
-            : [{ start: line.start, end: line.end, text: line.text }];
-        for (const w of words) {
-            const el = document.createElement('span');
-            el.className = 'word';
-            el.dataset.text = w.text;
-            el.textContent = w.text;
-            container.appendChild(el);
-            state.words.push({ data: w, element: el });
-        }
-    }
-
-    if (!line) return;
-
-    if (state.countdown) {
-        const remain = line.start - now;
-        state.countdown.textContent = (remain > 0 && remain <= 3)
-            ? '●'.repeat(Math.max(1, Math.min(3, Math.ceil(remain))))
-            : '';
-    }
-
-    for (const item of state.words) {
-        const dur = Math.max(0.001, item.data.end - item.data.start);
-        const progress = now <= item.data.start
-            ? 0
-            : now >= item.data.end
-                ? 100
-                : ((now - item.data.start) / dur) * 100;
-        item.element.style.setProperty('--p', `${Math.max(0, Math.min(100, progress))}%`);
-    }
-}
-
-function updateLyrics(now) {
-    if (!lyricLines.length) {
-        updateRenderedLine(lineTop, lyricRenderState.top, null, now, false);
-        updateRenderedLine(lineBottom, lyricRenderState.bottom, null, now, false);
-        return;
-    }
-
-    const activeIndex = lyricLines.findIndex(l => l.start <= now && now < l.end);
-    const nextIndex = lyricLines.findIndex(l => l.start > now);
-    const currentIndex = activeIndex >= 0 ? activeIndex : (nextIndex >= 0 ? nextIndex : lyricLines.length);
-    const currentIsActive = activeIndex >= 0;
-
-    let topIdx = -1, bottomIdx = -1;
-    let activeIsTop = false;
-
-    if (currentIndex < lyricLines.length) {
-        if (currentIndex % 2 === 0) {
-            topIdx = currentIndex;
-            bottomIdx = currentIndex + 1;
-            activeIsTop = currentIsActive;
-        } else {
-            bottomIdx = currentIndex;
-            topIdx = currentIndex + 1;
-            activeIsTop = currentIsActive;
-        }
-    } else {
-        if (lyricLines.length % 2 === 0) bottomIdx = lyricLines.length - 1;
-        else topIdx = lyricLines.length - 1;
-    }
-
-    updateRenderedLine(
-        lineTop, lyricRenderState.top,
-        (topIdx >= 0 && topIdx < lyricLines.length) ? lyricLines[topIdx] : null,
-        now, activeIsTop && topIdx === currentIndex
-    );
-    updateRenderedLine(
-        lineBottom, lyricRenderState.bottom,
-        (bottomIdx >= 0 && bottomIdx < lyricLines.length) ? lyricLines[bottomIdx] : null,
-        now, !activeIsTop && bottomIdx === currentIndex
-    );
-}
-
-// ==========================================
-// 5. 播放歌曲與 Socket 事件監聽
-// ==========================================
-async function playSong(song) {
-    initAudioSystem();
-    currentSong = song;
-    waiting.style.display = 'none';
-    currentTitle.innerText = `${song.title} - ${song.artist}`;
-
-    video.src = song.path;
-    instrumental.src = song.path.replace(/\.mp4$/i, '.instrumental.m4a');
-
-    await loadLyrics(song.path);
-
-    video.play().catch(() => {});
-    updateAudioMode(activeMode);
-}
-
-function updateNextSongDisplay(queue) {
-    if (queue && queue.length > 1) {
-        nextTitle.innerText = `下一首: ${queue[1].title} - ${queue[1].artist}`;
-    } else {
-        nextTitle.innerText = '下一首: 無';
-    }
-}
-
-function skipSong() {
-    if (isSkipping) return;
-    isSkipping = true;
-    socket.emit('next_song');
-    setTimeout(() => { isSkipping = false; }, 800);
-}
-
-// 接收狀態全量同步
-socket.on('sync_state', ({ queue, state }) => {
-    if (state) {
-        if (state.audioMode) activeMode = state.audioMode;
-        if (state.musicVol !== undefined) applyMusicVolume(state.musicVol);
-        if (state.micVol !== undefined) applyMicVolume(state.micVol);
-        if (state.reverbVol !== undefined) applyReverbVolume(state.reverbVol);
-    }
-    updateNextSongDisplay(queue);
-    
-    if (queue && queue.length > 0) {
-        if (!currentSong || currentSong.queueId !== queue[0].queueId) {
-            playSong(queue[0]);
-        }
-    } else {
-        waiting.style.display = 'flex';
-        currentTitle.innerText = '等待點歌...';
-        nextTitle.innerText = '下一首: 無';
-        video.pause();
-        instrumental.pause();
-        currentSong = null;
-        updateRenderedLine(lineTop, lyricRenderState.top, null, 0, false);
-        updateRenderedLine(lineBottom, lyricRenderState.bottom, null, 0, false);
-    }
-});
-
-socket.on('queue_updated', (queue) => {
-    updateNextSongDisplay(queue);
-    if (queue && queue.length > 0) {
-        if (!currentSong || currentSong.queueId !== queue[0].queueId) {
-            playSong(queue[0]);
-        }
-    } else {
-        waiting.style.display = 'flex';
-        currentTitle.innerText = '等待點歌...';
-        nextTitle.innerText = '下一首: 無';
-        video.pause();
-        instrumental.pause();
-        currentSong = null;
-        updateRenderedLine(lineTop, lyricRenderState.top, null, 0, false);
-        updateRenderedLine(lineBottom, lyricRenderState.bottom, null, 0, false);
-    }
-});
-
-socket.on('command_replay', () => {
-    if (currentSong) {
-        video.currentTime = 0;
-        instrumental.currentTime = 0;
-        video.play().catch(() => {});
-        updateAudioMode(activeMode);
-    }
-});
-
-// 執行來自 Remote 端即時命令 (音量/原伴唱/播放)
-socket.on('execute_command', (cmd) => {
-    if (cmd.isPlaying !== undefined) {
-        if (cmd.isPlaying) {
-            video.play().catch(() => {});
-            if (activeMode === 'accompaniment') instrumental.play().catch(() => {});
-        } else {
-            video.pause();
-            instrumental.pause();
-        }
-    }
-    if (cmd.audioMode && cmd.audioMode !== activeMode) {
-        updateAudioMode(cmd.audioMode);
-    }
-    if (cmd.musicVol !== undefined) {
-        applyMusicVolume(cmd.musicVol);
-    }
-    if (cmd.micVol !== undefined) {
-        applyMicVolume(cmd.micVol);
-    }
-    if (cmd.reverbVol !== undefined) {
-        applyReverbVolume(cmd.reverbVol);
-    }
-});
-
-video.onended = () => {
-    socket.emit('next_song');
-};
-
-function toggleFullscreen() {
-    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
-    else document.exitFullscreen?.();
-}
-
-// 60FPS 渲染迴圈
-function renderLoop() {
-    if (!video.paused && video.duration) {
-        updateLyrics(video.currentTime);
-        if (activeMode === 'accompaniment' && !instrumental.paused) {
-            const diff = video.currentTime - instrumental.currentTime;
-            if (Math.abs(diff) > 0.08) instrumental.currentTime = video.currentTime;
-        }
-    }
-
-    if (isMicRunning) {
-        const hz = detectPitchHz();
-        if (hz > 80 && hz < 600) {
-            const pct = Math.min(100, Math.max(10, ((hz - 80) / 450) * 100));
-            pitchFill.style.width = `${pct}%`;
-        } else {
-            pitchFill.style.width = '0%';
-        }
-    }
-
-    requestAnimationFrame(renderLoop);
-}
-requestAnimationFrame(renderLoop);
-
-document.addEventListener('click', () => initAudioSystem(), { once: true });
-</script>
+    document.querySelector('#micToggle').onclick=toggleMic;
+    const queryRoom=new URLSearchParams(location.search).get('room');
+    if(queryRoom){const token=localStorage.getItem(`openktv-admin-${queryRoom}`);if(token)connectRoom(queryRoom,token);else report('此歌房未儲存主機控制權，請由主播放器建立歌房。')}
+  </script>
 </body>
 </html>

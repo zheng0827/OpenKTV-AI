@@ -1,273 +1,56 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
+<!doctype html>
+<html lang="zh-Hant">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>KTV 行動點歌遙控器</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <script src="/socket.io/socket.io.js"></script>
-    <style>
-        body { background: #09090b; }
-        .glass-header {
-            background: rgba(24, 24, 27, 0.85);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-        }
-        .glass-card {
-            background: rgba(39, 39, 42, 0.55);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-        }
-        .hide-scrollbar::-webkit-scrollbar { display: none; }
-    </style>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>OpenKTV 手機點歌</title><script src="/socket.io/socket.io.js"></script>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#0b1020;color:#edf1ff;font:16px system-ui,sans-serif}
+    main{max-width:720px;margin:auto;padding:24px 18px 90px}h1{margin:4px 0}.hint{color:#9ba7c0;line-height:1.6}
+    input,button{width:100%;border:0;border-radius:12px;padding:13px;font:inherit}input{background:#1a2437;color:white;border:1px solid #35415a}
+    button{background:#695cff;color:white;font-weight:700;cursor:pointer}.bar{display:flex;gap:9px;margin:16px 0}.bar>*{flex:1}
+    .song,.queue-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 4px;border-bottom:1px solid #263149}
+    .song small{display:block;color:#9ba7c0;margin-top:3px}.song button{width:auto;padding:9px 14px}
+    .queue-item{display:block;color:#bac5db}.error{color:#ff9d9d}.tabs{display:flex;gap:8px;margin:18px 0}.tabs a{color:white;text-decoration:none;padding:10px;border-radius:9px;background:#202b40}
+  </style>
 </head>
-<body class="text-zinc-100 font-sans h-screen flex flex-col overflow-hidden select-none" id="app">
-    
-    <!-- 頂部搜尋與分類導覽列 -->
-    <div class="glass-header p-4 space-y-3 z-30 shadow-xl">
-        <div class="flex items-center justify-between">
-            <h1 class="text-lg font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-indigo-400">KTV REMOTE</h1>
-            <div class="text-xs font-bold px-3 py-1 bg-zinc-800/80 rounded-full text-zinc-300 flex items-center gap-2 border border-zinc-700/50">
-                <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div> 主機已連線
-            </div>
-        </div>
-        
-        <div class="flex gap-2">
-            <input v-model="searchQuery" @input="fetchSongs" type="text" placeholder="拼音 (ZJL)、注音或歌名..." 
-                   class="flex-1 bg-zinc-900/90 border border-zinc-700/50 rounded-2xl px-5 py-2.5 text-sm text-white focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition placeholder-zinc-500">
-            <button v-show="searchQuery" @click="searchQuery = ''; fetchSongs()" class="px-4 bg-zinc-800 rounded-2xl text-xs text-zinc-400 font-bold active:scale-95 transition">清除</button>
-        </div>
-        
-        <div class="flex gap-2 overflow-x-auto hide-scrollbar pb-1 text-xs">
-            <button @click="selectedLang = ''; fetchSongs()" :class="!selectedLang ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30' : 'bg-zinc-800/60 text-zinc-400'" class="px-4 py-2 rounded-full font-bold whitespace-nowrap transition">全部語種</button>
-            <button @click="selectedLang = '國語'; fetchSongs()" :class="selectedLang === '國語' ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30' : 'bg-zinc-800/60 text-zinc-400'" class="px-4 py-2 rounded-full font-bold whitespace-nowrap transition">國語</button>
-            <button @click="selectedLang = '台語'; fetchSongs()" :class="selectedLang === '台語' ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30' : 'bg-zinc-800/60 text-zinc-400'" class="px-4 py-2 rounded-full font-bold whitespace-nowrap transition">台語</button>
-            <button @click="selectedLang = '粵語'; fetchSongs()" :class="selectedLang === '粵語' ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30' : 'bg-zinc-800/60 text-zinc-400'" class="px-4 py-2 rounded-full font-bold whitespace-nowrap transition">粵語</button>
-        </div>
-    </div>
-
-    <!-- 主內容滑動分頁 -->
-    <div class="flex-1 overflow-y-auto p-4 space-y-3 pb-40">
-        <!-- 點歌大廳清單 -->
-        <div v-show="tab === 'search'" class="space-y-3">
-            <div v-for="song in searchResults" :key="song.id" class="glass-card rounded-2xl p-4 flex justify-between items-center shadow-lg active:scale-[0.98] transition-transform">
-                <div class="flex-1 min-w-0 pr-4">
-                    <h3 class="font-bold text-base text-white truncate">{{ song.title }}</h3>
-                    <p class="text-xs text-zinc-400 mt-1 truncate">
-                        {{ song.artist }}
-                        <span class="text-[10px] bg-zinc-700/60 text-zinc-300 px-2 py-0.5 rounded ml-2">{{ song.language }}</span>
-                        <span class="text-[10px] text-zinc-500 ml-1">{{ song.char_count }}字</span>
-                    </p>
-                </div>
-                <div class="flex items-center gap-2 shrink-0">
-                    <button @click="addQueue(song)" class="px-4 py-2 bg-gradient-to-r from-sky-600 to-blue-600 active:from-sky-500 active:to-blue-500 rounded-xl font-bold text-xs shadow-md transition">點歌</button>
-                    <button @click="insertTop(song)" class="px-3 py-2 bg-zinc-800 text-rose-400 active:bg-zinc-700 rounded-xl font-bold text-xs shadow-md transition border border-rose-900/30">插播</button>
-                </div>
-            </div>
-            <div v-if="searchResults.length === 0" class="text-center text-zinc-500 py-16 font-medium">找不到相關歌曲</div>
-        </div>
-
-        <!-- 已點清單佇列管理 -->
-        <div v-show="tab === 'queue'" class="space-y-3">
-            <div v-for="(song, index) in queue" :key="song.queueId" class="glass-card rounded-2xl p-4 flex justify-between items-center shadow-lg transition-all" :class="index === 0 ? 'border-emerald-500/50 bg-emerald-950/20' : ''">
-                <div class="flex-1 min-w-0 pr-4">
-                    <h3 class="font-bold text-base text-white flex items-center gap-2 truncate">
-                        <span v-if="index === 0" class="shrink-0 text-[10px] bg-emerald-500 text-black px-2 py-0.5 rounded-md font-black animate-pulse">播放中</span>
-                        <span v-else class="shrink-0 text-xs text-zinc-500 w-5 font-bold">{{ index }}</span>
-                        <span class="truncate">{{ song.title }}</span>
-                    </h3>
-                    <p class="text-xs text-zinc-400 mt-1 ml-7 truncate">{{ song.artist }}</p>
-                </div>
-                <button v-if="index !== 0" @click="removeQueue(song.queueId)" class="w-8 h-8 shrink-0 bg-zinc-800/80 rounded-full flex items-center justify-center text-zinc-400 active:bg-rose-900 active:text-rose-400 transition text-xs">✕</button>
-            </div>
-            <div v-if="queue.length === 0" class="text-center text-zinc-500 py-20 flex flex-col items-center gap-3">
-                <span class="text-4xl">📜</span>
-                <span class="font-medium">佇列空空如也，趕快點首歌展現歌喉！</span>
-            </div>
-        </div>
-
-        <!-- 專業調音與評分設定 -->
-        <div v-show="tab === 'settings'" class="space-y-4">
-            <div class="glass-card rounded-2xl p-5 space-y-5">
-                <h3 class="font-black text-sm text-sky-400 flex items-center gap-2"><span>🎛️</span> 專業混音與音量控制</h3>
-                
-                <!-- 音樂/伴奏音量 -->
-                <div class="space-y-2">
-                    <div class="flex justify-between text-xs font-bold text-zinc-200">
-                        <span>🎵 音樂/伴奏大小</span>
-                        <span class="text-sky-400">{{ Math.round(musicVol * 100) }}%</span>
-                    </div>
-                    <input type="range" min="0" max="1.5" step="0.05" v-model="musicVol" @input="updateMixer" class="w-full accent-sky-500">
-                </div>
-
-                <!-- 麥克風音量 (支援高達 250% 增益放大) -->
-                <div class="space-y-2">
-                    <div class="flex justify-between text-xs font-bold text-zinc-200">
-                        <span>🎤 麥克風增益量 (人聲大小)</span>
-                        <span class="text-emerald-400">{{ Math.round(micVol * 100) }}%</span>
-                    </div>
-                    <input type="range" min="0" max="2.5" step="0.05" v-model="micVol" @input="updateMixer" class="w-full accent-emerald-500">
-                </div>
-
-                <!-- KTV 空間殘響效果 -->
-                <div class="space-y-2">
-                    <div class="flex justify-between text-xs font-bold text-zinc-200">
-                        <span>✨ KTV 空間殘響 (混響效果)</span>
-                        <span class="text-indigo-400">{{ Math.round(reverbVol * 100) }}%</span>
-                    </div>
-                    <input type="range" min="0" max="1.2" step="0.02" v-model="reverbVol" @input="updateMixer" class="w-full accent-indigo-500">
-                </div>
-            </div>
-
-            <div class="glass-card rounded-2xl p-5 flex items-center justify-between">
-                <div>
-                    <h4 class="font-bold text-sm text-white">主機實時評分</h4>
-                    <p class="text-xs text-zinc-400 mt-0.5">即時分析麥克風輸入音準與原音頻段</p>
-                </div>
-                <span class="text-3xl font-black text-amber-400">{{ currentScore }} 分</span>
-            </div>
-        </div>
-    </div>
-
-    <!-- 底部固定控制面板 (遙控器主幹) -->
-    <div class="fixed bottom-0 w-full glass-header z-30 pb-safe">
-        <!-- 快速原唱/伴奏與重唱列 -->
-        <div class="flex justify-between items-center px-5 py-2 border-b border-zinc-800/40 text-xs">
-            <button @click="toggleAudioMode" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold active:scale-95 transition" :class="audioMode === 'accompaniment' ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40' : 'bg-sky-600/30 text-sky-300 border border-sky-500/40'">
-                <span>🎙️</span> {{ audioMode === 'accompaniment' ? '伴奏模式' : '原唱模式' }}
-            </button>
-
-            <!-- 快捷音量微調按鈕 -->
-            <div class="flex items-center gap-1 bg-zinc-800/60 rounded-full px-2 py-1 border border-zinc-700/40">
-                <span class="text-[10px] text-zinc-400 font-bold">🎵 音樂</span>
-                <button @click="adjustMusic(-0.1)" class="w-5 h-5 flex items-center justify-center rounded-full bg-zinc-700 text-xs font-bold active:scale-90">-</button>
-                <span class="text-[11px] font-mono w-8 text-center text-sky-400 font-bold">{{ Math.round(musicVol * 100) }}%</span>
-                <button @click="adjustMusic(0.1)" class="w-5 h-5 flex items-center justify-center rounded-full bg-zinc-700 text-xs font-bold active:scale-90">+</button>
-            </div>
-
-            <button @click="replaySong" class="text-zinc-400 active:text-white font-bold flex items-center gap-1">
-                <span>🔄</span> 重唱
-            </button>
-        </div>
-        
-        <!-- 底部導覽分頁與播放控制 -->
-        <div class="flex justify-around items-center p-2.5">
-            <button @click="tab = 'search'" :class="tab === 'search' ? 'text-sky-400' : 'text-zinc-500'" class="flex flex-col items-center gap-1 font-bold text-[11px] p-2 transition">
-                <span class="text-xl">🔍</span> 點歌
-            </button>
-            <button @click="tab = 'queue'" :class="tab === 'queue' ? 'text-emerald-400' : 'text-zinc-500'" class="flex flex-col items-center gap-1 font-bold text-[11px] p-2 relative transition">
-                <span class="text-xl">📜</span> 佇列
-                <span v-if="queue.length > 0" class="absolute top-1 right-1 bg-rose-500 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-black border border-zinc-900 shadow-md">{{ queue.length }}</span>
-            </button>
-            
-            <div class="w-px h-8 bg-zinc-800 mx-1"></div>
-            
-            <button @click="togglePlay" class="w-12 h-12 bg-zinc-800 active:bg-zinc-700 rounded-full flex items-center justify-center text-lg shadow-lg active:scale-90 transition border border-zinc-700/60">
-                <span v-if="isPlaying">⏸️</span>
-                <span v-else class="ml-0.5">▶️</span>
-            </button>
-            <button @click="nextSong" class="flex flex-col items-center gap-1 text-rose-400 active:scale-90 font-bold text-[11px] p-2 transition">
-                <span class="text-xl">⏭️</span> 切歌
-            </button>
-            
-            <button @click="tab = 'settings'" :class="tab === 'settings' ? 'text-teal-400' : 'text-zinc-500'" class="flex flex-col items-center gap-1 font-bold text-[11px] p-2 transition">
-                <span class="text-xl">🎛️</span> 調音
-            </button>
-        </div>
-    </div>
-
-    <script>
-        const { createApp } = Vue;
-        const socket = io();
-
-        createApp({
-            data() {
-                return {
-                    tab: 'search',
-                    searchQuery: '',
-                    selectedLang: '',
-                    searchResults: [],
-                    queue: [],
-                    isPlaying: true,
-                    audioMode: 'original',
-                    musicVol: 0.8,
-                    micVol: 1.2,
-                    reverbVol: 0.45,
-                    currentScore: 85
-                }
-            },
-            mounted() {
-                socket.on('sync_state', ({ queue, state }) => { 
-                    this.queue = queue; 
-                    if (state) {
-                        this.isPlaying = state.isPlaying;
-                        this.audioMode = state.audioMode;
-                        if (state.musicVol !== undefined) this.musicVol = state.musicVol;
-                        if (state.micVol !== undefined) this.micVol = state.micVol;
-                        if (state.reverbVol !== undefined) this.reverbVol = state.reverbVol;
-                    }
-                });
-                socket.on('queue_updated', (q) => { this.queue = q; });
-                socket.on('search_results', (res) => { this.searchResults = res; });
-                socket.on('score_updated', ({ score }) => { this.currentScore = score; });
-                socket.on('execute_command', (cmd) => {
-                    if (cmd.isPlaying !== undefined) this.isPlaying = cmd.isPlaying;
-                    if (cmd.audioMode) this.audioMode = cmd.audioMode;
-                    if (cmd.musicVol !== undefined) this.musicVol = cmd.musicVol;
-                    if (cmd.micVol !== undefined) this.micVol = cmd.micVol;
-                    if (cmd.reverbVol !== undefined) this.reverbVol = cmd.reverbVol;
-                });
-                this.fetchSongs();
-            },
-            methods: {
-                fetchSongs() {
-                    socket.emit('search_songs', { query: this.searchQuery, language: this.selectedLang });
-                },
-                addQueue(song) { 
-                    socket.emit('add_to_queue', song);
-                    if (navigator.vibrate) navigator.vibrate(40);
-                },
-                insertTop(song) { 
-                    socket.emit('insert_to_top', song); 
-                    if (navigator.vibrate) navigator.vibrate([40, 40, 40]);
-                    this.tab = 'queue';
-                },
-                removeQueue(queueId) {
-                    socket.emit('remove_from_queue', queueId);
-                },
-                nextSong() { 
-                    socket.emit('next_song'); 
-                    if (navigator.vibrate) navigator.vibrate(80);
-                },
-                replaySong() {
-                    socket.emit('replay_current');
-                },
-                togglePlay() {
-                    this.isPlaying = !this.isPlaying;
-                    socket.emit('player_command', { isPlaying: this.isPlaying });
-                },
-                toggleAudioMode() {
-                    this.audioMode = this.audioMode === 'original' ? 'accompaniment' : 'original';
-                    socket.emit('player_command', { audioMode: this.audioMode });
-                },
-                updateMixer() {
-                    socket.emit('player_command', { 
-                        musicVol: parseFloat(this.musicVol),
-                        micVol: parseFloat(this.micVol), 
-                        reverbVol: parseFloat(this.reverbVol) 
-                    });
-                },
-                adjustMusic(delta) {
-                    let nextVal = Math.round((parseFloat(this.musicVol) + delta) * 10) / 10;
-                    if (nextVal < 0) nextVal = 0;
-                    if (nextVal > 1.5) nextVal = 1.5;
-                    this.musicVol = nextVal;
-                    this.updateMixer();
-                }
-            }
-        }).mount('#app');
-    </script>
-</body>
-</html>
+<body><main>
+  <h1>📱 手機點歌</h1><p class="hint">輸入歌房 ID，或使用主播放器的 QR Code 掃描加入。</p>
+  <div class="bar"><input id="roomId" maxlength="12" placeholder="歌房 ID"><button id="join">加入歌房</button></div>
+  <p class="hint" id="connection">尚未連線</p><p class="error" id="error"></p>
+  <div class="tabs"><a href="/">系統首頁</a><a href="/player">主播放器</a></div>
+  <input id="query" placeholder="搜尋歌名或歌手">
+  <section><h2>搜尋結果</h2><div id="results"></div></section>
+  <section><h2>播放佇列</h2><div id="queue"></div></section>
+  <div class="bar"><button id="pause">暫停</button><button id="next">切歌</button></div>
+  <p class="hint">遙控端可點歌；播放控制需由已授權的主播放器執行。</p>
+</main>
+<script type="module">
+  const params=new URLSearchParams(location.search),roomField=document.querySelector('#roomId');
+  roomField.value=(params.get('room')||'').toUpperCase();
+  let socket=null,debounce;
+  function connect(){
+    const roomId=roomField.value.trim().toUpperCase();
+    if(!/^[A-F0-9]{12}$/.test(roomId)){document.querySelector('#error').textContent='歌房 ID 格式錯誤';return}
+    if(socket)socket.disconnect();
+    socket=io({auth:{roomId,role:'remote'}});
+    socket.on('connect',()=>{document.querySelector('#connection').textContent=`已加入歌房 ${roomId}`;document.querySelector('#error').textContent='';history.replaceState(null,'',`/remote?room=${roomId}`)});
+    socket.on('connect_error',()=>{document.querySelector('#connection').textContent='連線失敗';document.querySelector('#error').textContent='找不到歌房或歌房已關閉'});
+    socket.on('search_results',renderResults);
+    socket.on('room_state',renderState);
+    socket.on('operation_error',data=>document.querySelector('#error').textContent=`操作失敗：${data.code}`);
+  }
+  function renderResults(songs){
+    const box=document.querySelector('#results');box.replaceChildren();
+    for(const song of songs){const row=document.createElement('article');row.className='song';const text=document.createElement('div');text.textContent=song.song_name||song.song||song.title||'未命名歌曲';const artist=document.createElement('small');artist.textContent=song.artist_name||song.artist||'';text.append(artist);const add=document.createElement('button');add.textContent='點歌';add.onclick=()=>socket?.emit('add_to_queue',{songId:song.id});row.append(text,add);box.append(row)}
+  }
+  function renderState(state){
+    const box=document.querySelector('#queue');box.replaceChildren();
+    if(state.current){const item=document.createElement('div');item.className='queue-item';item.textContent=`▶ ${state.current.song_name||state.current.title}（播放中）`;box.append(item)}
+    for(const song of state.queue||[]){const item=document.createElement('div');item.className='queue-item';item.textContent=`${song.song_name||song.title} · ${song.artist_name||''}`;box.append(item)}
+  }
+  document.querySelector('#join').onclick=connect;
+  document.querySelector('#query').oninput=e=>{clearTimeout(debounce);debounce=setTimeout(()=>socket?.emit('search_songs',{query:e.target.value}),180)};
+  document.querySelector('#pause').onclick=()=>socket?.emit('control',{action:'pause'});
+  document.querySelector('#next').onclick=()=>socket?.emit('control',{action:'next'});
+  if(roomField.value)connect();
+</script></body></html>
