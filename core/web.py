@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hmac
 import os
 import re
 import socket
@@ -19,6 +20,8 @@ from .library import find_intro_skip_seconds, update_library_index
 from .unified_nightingale import KTVProcessor
 
 CONTROL_ROLES = {"remote", "queue", "admin", "combo"}
+BACKGROUND_JOBS: dict[str, dict] = {}
+BACKGROUND_JOBS_LOCK = threading.Lock()
 
 
 def get_local_ip() -> str:
@@ -125,6 +128,15 @@ def _playlist_entries(url: str, settings: AppSettings) -> list[dict]:
 def _create_blueprint() -> Blueprint:
     bp = Blueprint("web", __name__)
 
+    @bp.route("/health")
+    def health():
+        settings: AppSettings = current_app.config["APP_SETTINGS"]
+        return json.dumps({
+            "status": "ok",
+            "library_songs": sum(1 for _ in settings.songs_dir.glob("*.mp4")) if settings.songs_dir.exists() else 0,
+            "background_jobs": len(BACKGROUND_JOBS),
+        })
+
     @bp.route("/player")
     def page_player():
         return render_template("player.html")
@@ -195,6 +207,81 @@ def _create_blueprint() -> Blueprint:
         except Exception:
             return json.dumps({"ok": False, "error": "無法解析 YouTube 標題"}), 500
 
+    @bp.route("/api/jobs", methods=["POST"])
+    def create_processing_job():
+        expected_token = os.getenv("KTV_JOB_API_TOKEN", "")
+        supplied_token = (request.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
+        if not expected_token or not hmac.compare_digest(supplied_token, expected_token):
+            return json.dumps({"error": "unauthorized"}), 401
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return json.dumps({"error": "invalid_json"}), 400
+        try:
+            url = _validate_youtube_url(payload.get("url", ""))
+        except ValueError as error:
+            return json.dumps({"error": str(error)}), 400
+        title = str(payload.get("title") or "").strip()[:300]
+        singer = str(payload.get("singer") or "").strip()[:200]
+        lyrics = str(payload.get("lyrics_text") or "")[:100_000]
+        raw_options = payload.get("options") or {}
+        if not isinstance(raw_options, dict):
+            return json.dumps({"error": "invalid_options"}), 400
+        allowed_options = {"stems", "device", "separator_backend", "alignment_backend"}
+        options = {key: value for key, value in raw_options.items() if key in allowed_options}
+        job_id = os.urandom(16).hex()
+        job = {"job_id": job_id, "status": "queued", "progress": 0, "logs": [], "error": ""}
+        with BACKGROUND_JOBS_LOCK:
+            BACKGROUND_JOBS[job_id] = job
+            for old_id in list(BACKGROUND_JOBS)[:-500]:
+                BACKGROUND_JOBS.pop(old_id, None)
+
+        settings: AppSettings = current_app.config["APP_SETTINGS"]
+
+        def log_job(message: str):
+            with BACKGROUND_JOBS_LOCK:
+                job["logs"].append(str(message)[:2000])
+                job["logs"] = job["logs"][-100:]
+
+        def run_job():
+            job["status"] = "running"
+            try:
+                processor = KTVProcessor(settings=settings, log_cb=log_job)
+                attempts = max(0, settings.download_retry_count) + 1
+                for attempt in range(1, attempts + 1):
+                    job["attempt"] = attempt
+                    job["progress"] = min(95, int((attempt - 1) * 95 / attempts))
+                    success = processor.process_song(
+                        url,
+                        title,
+                        {**options, "singer": singer, "lyrics_text": lyrics},
+                    )
+                    if success:
+                        job["status"] = "complete"
+                        job["progress"] = 100
+                        return
+                    if attempt < attempts:
+                        time.sleep(max(0.0, settings.retry_delay_seconds))
+                job["status"] = "failed"
+                job["error"] = (job["logs"][-1] if job["logs"] else "processing failed")
+            except Exception as error:
+                job["status"] = "failed"
+                job["error"] = str(error)[:500]
+
+        threading.Thread(target=run_job, daemon=True).start()
+        return json.dumps({"job_id": job_id, "status": job["status"]}), 202
+
+    @bp.route("/api/jobs/<job_id>")
+    def get_processing_job(job_id: str):
+        expected_token = os.getenv("KTV_JOB_API_TOKEN", "")
+        supplied_token = (request.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
+        if not expected_token or not hmac.compare_digest(supplied_token, expected_token):
+            return json.dumps({"error": "unauthorized"}), 401
+        with BACKGROUND_JOBS_LOCK:
+            job = BACKGROUND_JOBS.get(job_id)
+            if job is None:
+                return json.dumps({"error": "job_not_found"}), 404
+            return json.dumps(job, ensure_ascii=False)
+
     return bp
 
 
@@ -204,7 +291,9 @@ def create_app(settings: AppSettings | None = None) -> tuple[Flask, SocketIO, Ap
     app.config.from_mapping(SECRET_KEY=app_settings.secret_key, APP_SETTINGS=app_settings)
     app.register_blueprint(_create_blueprint())
 
-    socketio = SocketIO(app, cors_allowed_origins="*")
+    cors_origins = [origin.strip() for origin in os.getenv("KTV_CORS_ORIGINS", "").split(",") if origin.strip()]
+    app.config["MAX_CONTENT_LENGTH"] = 1024 * 1024
+    socketio = SocketIO(app, cors_allowed_origins=cors_origins)
     return app, socketio, app_settings
 
 
@@ -360,8 +449,14 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
         state["started_at"] = time.time() if state["is_playing"] else None
 
     @socketio.on("connect")
-    def handle_connect():
-        role = request.args.get("role", "player").lower().strip()
+    def handle_connect(auth=None):
+        auth = auth if isinstance(auth, dict) else {}
+        role = str(auth.get("role") or request.args.get("role", "player")).lower().strip()
+        expected_token = os.getenv("KTV_LEGACY_CONTROL_TOKEN", "")
+        supplied_token = str(auth.get("token") or "")
+        authenticated = bool(expected_token) and hmac.compare_digest(supplied_token, expected_token)
+        if role in CONTROL_ROLES and not authenticated:
+            role = "player"
         state["client_roles"][request.sid] = role if role in (CONTROL_ROLES | {"player"}) else "player"
         emit("playback_snapshot", playback_snapshot())
         emit("playback_state", playback_snapshot())
@@ -573,7 +668,7 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
                         )
                         if success:
                             break
-                        time.sleep(0.8)
+                        time.sleep(max(0.0, settings.retry_delay_seconds))
 
                     if success:
                         succeeded += 1

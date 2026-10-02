@@ -45,6 +45,7 @@ paths:
 download:
   provider: yt_dlp
   metadata_lookup_before_download: true
+  metadata_matching_provider: spotify_web_api
   normalize_song_and_artist_names: true
   preserve_original_title: true
   normalization:
@@ -58,6 +59,8 @@ download:
   background_jobs:
     enabled: true
     max_concurrent_song_jobs: 1
+    retry_count: 2
+    retry_delay_seconds: 2
     report_progress: true
     retain_failed_job_details: true
 
@@ -71,21 +74,22 @@ audio_processing:
   dereverb:
     enabled: true
     scope: vocals_only
-    model_provider: null # Select and verify a suitable dereverb model before implementation.
-    model_name: null
+    model_provider: audio_separator_uvr
+    model_name: UVR-DeEcho-DeReverb.pth
+    dsp_fallback: conservative_spectral_subtraction
     input: "{song}.vocals.wav"
     output: "{song}.vocals.dereverbed.wav"
     use_for_lyrics_alignment: true
     keep_original_vocals: true
     fall_back_to_original_on_failure: true
   alignment:
-    available_backends:
+    backends:
       - ctc
       - whisperx
       - qwen
     generate_result_for_each_backend: true
-    run_in_parallel: true
-    max_parallel_backends: 3
+    run_in_parallel: false
+    max_parallel_backends: 1
     input: "{song}.vocals.dereverbed.wav"
     output_pattern: "{song}.lyrics_alignment_{backend}.lrc"
     on_filename_collision: append_numeric_suffix
@@ -109,9 +113,28 @@ audio_processing:
     clip_protection: true
 
 metadata:
-  source: yt_dlp_extracted_metadata
-  enrichment_provider: null # Optional music metadata API; choose a provider during implementation.
-  manual_fallback_for_unavailable_fields: true
+  source: spotify_web_api
+  spotify:
+    credentials_from_environment:
+      - SPOTIFY_CLIENT_ID
+      - SPOTIFY_CLIENT_SECRET
+    minimum_match_score: 0.72
+    require_high_confidence_before_download: true
+    penalize_cover_live_karaoke_instrumental: true
+    retain_raw_youtube_title_as_search_evidence: true
+  youtube_title:
+    source: yt_dlp
+    purpose: spotify_search_query_only
+    unicode_normalization: NFKC
+    remove_promo_text: true
+    sanitize_filename: true
+  lyrics:
+    primary: lrclib
+    fallback: musixmatch
+    musixmatch_api_key_environment_variable: MUSIXMATCH_API_KEY
+    prefer_timed_lyrics: true
+    record_provider: true
+  manual_fallback_for_unavailable_fields: false
   keep_raw_source_metadata: true
   lyrics_plain_text:
     source: generated_lrc
@@ -121,6 +144,7 @@ metadata:
 library:
   format: csv
   encoding: utf-8
+  path: ./ktv_songs/library.csv
   write_atomically: true
   required_columns:
     - id
@@ -171,7 +195,7 @@ player:
     persist_after_process_restart: false
 
 socket_io:
-  cors_origins: [] # Configure explicit trusted origins; never use wildcard in production.
+  cors_origins: [] # Same-origin by default; explicitly list deployed trusted web origins.
   authenticate_connections: true
   authorize_roles_server_side: true
   roles:
@@ -183,6 +207,17 @@ socket_io:
   reject_unknown_events: true
   rate_limit_control_events: true
   enforce_room_membership: true
+  remote_permissions:
+    playback_actions:
+      - play
+      - pause
+      - next
+      - seek
+      - change_track
+      - set_effects
+    insert_next: true
+    remove_queue: true
+    reorder_queue: false
 
 performance:
   target_playback_platform: raspberry_pi_4b_4gb

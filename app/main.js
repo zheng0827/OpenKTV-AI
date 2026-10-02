@@ -14,8 +14,8 @@ async function createWindow() {
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false,
-      allowRunningInsecureContent: true
+      webSecurity: true,
+      sandbox: true
     },
     autoHideMenuBar: true,
     title: 'KTV Enterprise Host System'
@@ -24,7 +24,7 @@ async function createWindow() {
   mainWindow.maximize();
 
   // 載入本地 Express 提供的電視主螢幕播放介面
-  await mainWindow.loadURL('http://localhost:3000/player.html');
+  await mainWindow.loadURL('http://localhost:3000/player');
 
   mainWindow.on('closed', () => {
     mainWindow = null;

@@ -132,6 +132,7 @@ def match_spotify_track(song: str, artist: str, minimum_score: float = 0.72) -> 
             "url": track.get("external_urls", {}).get("spotify", ""),
             "song_name": track.get("name", ""),
             "artist_name": ", ".join(artist_names),
+            "artist_id": first_artist_id or "",
             "album": album.get("name", ""),
             "release_year": (album.get("release_date") or "")[:4],
             "duration_seconds": round((track.get("duration_ms") or 0) / 1000, 3),

@@ -29,6 +29,19 @@ function idFor(row) {
   return String(row.id || row.spotify_track_id || row.video_filename || row.song || '');
 }
 
+function publicSong(song) {
+  return {
+    id: song.id,
+    song_name: song.song_name || '',
+    artist_name: song.artist_name || '',
+    album: song.album || '',
+    duration_seconds: Number(song.duration_seconds) || 0,
+    video_filename: song.video_filename,
+    accompaniment_filename: song.accompaniment_filename || '',
+    lyrics_filename: song.lyrics_filename || '',
+  };
+}
+
 function createRoom(id) {
   return {
     id,
@@ -79,10 +92,12 @@ export async function startServer(port) {
   const config = loadConfig();
   const mediaDir = path.resolve(rootDir, process.env.KTV_SONGS_DIR || config.paths.songs_directory);
   const csvPath = path.resolve(rootDir, process.env.KTV_LIBRARY_CSV || config.paths.library_csv);
+  fs.mkdirSync(mediaDir, { recursive: true });
   const publicDir = path.join(appDir, 'public');
   const allowedOrigins = config.socket_io?.cors_origins || [];
   const emptyGraceMs = Math.max(0, Number(config.player?.rooms?.empty_room_grace_seconds ?? 30)) * 1000;
   const rooms = new Map();
+  const roomCreationAttempts = new Map();
   let songs = [];
   let searchIndex = new MiniSearch({
     fields: ['song_name', 'artist_name', 'album', 'lyrics_plain_text'],
@@ -126,7 +141,18 @@ export async function startServer(port) {
   app.disable('x-powered-by');
   app.use(express.json({ limit: '32kb' }));
   app.use(express.static(publicDir, { index: false, dotfiles: 'deny' }));
-  app.get('/health', (_req, res) => res.json({ status: 'ok', librarySongs: songs.length, rooms: rooms.size }));
+  app.get('/health', (_req, res) => {
+    const stats = fs.statfsSync(mediaDir);
+    res.json({
+      status: 'ok',
+      librarySongs: songs.length,
+      rooms: rooms.size,
+      sockets: [...rooms.values()].reduce((total, room) => total + room.members.size, 0),
+      uptimeSeconds: Math.round(process.uptime()),
+      memoryBytes: process.memoryUsage().rss,
+      diskFreeBytes: stats.bavail * stats.bsize,
+    });
+  });
   app.get('/api/songs', (_req, res) => res.json(songs));
   app.get('/api/search', (req, res) => {
     const query = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 100) : '';
@@ -148,11 +174,68 @@ export async function startServer(port) {
     }
   });
 
-  app.post('/api/rooms', (_req, res) => {
+  app.post('/api/rooms', (req, res) => {
+    const now = Date.now();
+    const attempts = (roomCreationAttempts.get(req.ip) || []).filter((time) => now - time < 60_000);
+    if (attempts.length >= 5) return res.status(429).json({ error: 'room_creation_rate_limited' });
+    attempts.push(now);
+    roomCreationAttempts.set(req.ip, attempts);
+    if (rooms.size >= 100) return res.status(503).json({ error: 'room_capacity_reached' });
     const roomId = makeRoomId(rooms);
     const room = createRoom(roomId);
     rooms.set(roomId, room);
+    room.emptyTimer = setTimeout(() => {
+      if (room.members.size === 0) rooms.delete(room.id);
+    }, emptyGraceMs);
+    room.emptyTimer.unref?.();
     res.status(201).json({ roomId, adminToken: room.adminToken, playerUrl: `/player?room=${roomId}`, remoteUrl: `/remote?room=${roomId}` });
+  });
+
+  app.post('/api/rooms/:roomId/jobs', async (req, res) => {
+    const room = rooms.get(String(req.params.roomId).toUpperCase());
+    const supplied = req.get('authorization')?.replace(/^Bearer\s+/i, '');
+    if (!room || !safeEqual(supplied, room.adminToken)) return res.status(403).json({ error: 'forbidden' });
+    const url = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+    if (url.length > 2048 || !/^https:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(url)) {
+      return res.status(400).json({ error: 'invalid_youtube_url' });
+    }
+    const processingUrl = process.env.KTV_PROCESSING_API_URL || 'http://127.0.0.1:5000/api/jobs';
+    const processingToken = process.env.KTV_PROCESSING_API_TOKEN;
+    if (!processingToken) return res.status(503).json({ error: 'processing_service_not_configured' });
+    try {
+      const response = await fetch(processingUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + processingToken },
+        body: JSON.stringify({
+          url,
+          title: typeof req.body?.title === 'string' ? req.body.title.slice(0, 300) : '',
+          singer: typeof req.body?.singer === 'string' ? req.body.singer.slice(0, 200) : '',
+        }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      const result = await response.json();
+      res.status(response.status).json(result);
+    } catch (_error) {
+      res.status(502).json({ error: 'processing_service_unavailable' });
+    }
+  });
+
+  app.get('/api/rooms/:roomId/jobs/:jobId', async (req, res) => {
+    const room = rooms.get(String(req.params.roomId).toUpperCase());
+    const supplied = req.get('authorization')?.replace(/^Bearer\s+/i, '');
+    if (!room || !safeEqual(supplied, room.adminToken)) return res.status(403).json({ error: 'forbidden' });
+    const processingUrl = process.env.KTV_PROCESSING_API_URL || 'http://127.0.0.1:5000/api/jobs';
+    const processingToken = process.env.KTV_PROCESSING_API_TOKEN;
+    if (!processingToken || !/^[a-f0-9]{32}$/.test(req.params.jobId)) return res.status(400).json({ error: 'invalid_job_request' });
+    try {
+      const response = await fetch(`${processingUrl}/${req.params.jobId}`, {
+        headers: { Authorization: 'Bearer ' + processingToken },
+        signal: AbortSignal.timeout(10_000),
+      });
+      res.status(response.status).json(await response.json());
+    } catch (_error) {
+      res.status(502).json({ error: 'processing_service_unavailable' });
+    }
   });
 
   app.get('/api/rooms/:roomId/qr', async (req, res) => {
@@ -198,7 +281,7 @@ export async function startServer(port) {
     const role = socket.handshake.auth?.role;
     const room = rooms.get(roomId);
     if (!room || !['player', 'remote', 'admin'].includes(role)) return next(new Error('room_or_role_invalid'));
-    if (role === 'admin' && !safeEqual(socket.handshake.auth?.token, room.adminToken)) {
+    if (['admin', 'player'].includes(role) && !safeEqual(socket.handshake.auth?.token, room.adminToken)) {
       return next(new Error('admin_auth_failed'));
     }
     socket.data.roomId = roomId;
@@ -228,7 +311,9 @@ export async function startServer(port) {
     socket.emit('room_state', serialiseRoom(room));
 
     let recentEvents = [];
-    const canControl = () => socket.data.role === 'admin' || socket.data.role === 'player';
+    const remoteActions = new Set(config.socket_io?.remote_permissions?.playback_actions || []);
+    const canControl = (action) => socket.data.role === 'admin'
+      || (socket.data.role === 'remote' && remoteActions.has(action));
     const rateAllowed = () => {
       const now = Date.now();
       recentEvents = recentEvents.filter((time) => now - time < 10_000);
@@ -237,6 +322,13 @@ export async function startServer(port) {
       return true;
     };
     const emitError = (code) => socket.emit('operation_error', { code });
+    const knownEvents = new Set([
+      'search_songs', 'add_to_queue', 'queue_insert_next', 'queue_remove',
+      'reorder_queue', 'control', 'seek', 'change_track', 'set_effects', 'song_ended',
+    ]);
+    socket.onAny((event) => {
+      if (!knownEvents.has(event)) emitError('unknown_event');
+    });
     const onEvent = (name, handler) => socket.on(name, (payload) => {
       if (!rateAllowed()) return emitError('rate_limited');
       try {
@@ -258,30 +350,43 @@ export async function startServer(port) {
       const songId = String(payload?.songId || '').slice(0, 160);
       const song = songs.find((entry) => entry.id === songId);
       if (!song) return emitError('song_not_found');
-      room.queue.push({ queueId: randomBytes(10).toString('hex'), id: song.id, title: song.song_name || song.song || '', ...song });
+      room.queue.push({ queueId: randomBytes(10).toString('hex'), ...publicSong(song) });
       if (!room.current) startNext(room);
       publish(room);
     });
 
     onEvent('queue_insert_next', (payload) => {
-      if (socket.data.role !== 'admin') return emitError('forbidden');
+      if (socket.data.role !== 'admin' && !(socket.data.role === 'remote' && config.socket_io?.remote_permissions?.insert_next)) return emitError('forbidden');
       const songId = String(payload?.songId || '').slice(0, 160);
       const song = songs.find((entry) => entry.id === songId);
       if (!song) return emitError('song_not_found');
-      room.queue.splice(room.current ? 0 : room.queue.length, 0, { queueId: randomBytes(10).toString('hex'), ...song });
+      room.queue.splice(room.current ? 0 : room.queue.length, 0, { queueId: randomBytes(10).toString('hex'), ...publicSong(song) });
       if (!room.current) startNext(room);
       publish(room);
     });
 
     onEvent('queue_remove', (payload) => {
-      if (socket.data.role !== 'admin') return emitError('forbidden');
+      if (socket.data.role !== 'admin' && !(socket.data.role === 'remote' && config.socket_io?.remote_permissions?.remove_queue)) return emitError('forbidden');
       const queueId = String(payload?.queueId || '');
       room.queue = room.queue.filter((entry) => entry.queueId !== queueId);
       publish(room);
     });
 
+    onEvent('reorder_queue', (payload) => {
+      if ((socket.data.role !== 'admin' && !(socket.data.role === 'remote' && config.socket_io?.remote_permissions?.reorder_queue))
+        || !Array.isArray(payload?.queueIds) || payload.queueIds.length !== room.queue.length) {
+        return emitError('forbidden_or_invalid_queue');
+      }
+      const byId = new Map(room.queue.map((entry) => [entry.queueId, entry]));
+      if (payload.queueIds.some((id) => typeof id !== 'string' || !byId.has(id)) || new Set(payload.queueIds).size !== room.queue.length) {
+        return emitError('invalid_queue_order');
+      }
+      room.queue = payload.queueIds.map((id) => byId.get(id));
+      publish(room);
+    });
+
     onEvent('control', (payload) => {
-      if (!canControl() || !room.current || !['play', 'pause', 'next', 'replay', 'stop'].includes(payload?.action)) {
+      if (!canControl(payload?.action) || !room.current || !['play', 'pause', 'next', 'replay', 'stop'].includes(payload?.action)) {
         return emitError('forbidden_or_invalid_action');
       }
       if (payload.action === 'next') startNext(room);
@@ -302,7 +407,7 @@ export async function startServer(port) {
     });
 
     onEvent('seek', (payload) => {
-      if (!canControl() || !room.current || !Number.isFinite(payload?.position)) return emitError('forbidden_or_invalid_position');
+      if (!canControl('seek') || !room.current || !Number.isFinite(payload?.position)) return emitError('forbidden_or_invalid_position');
       const duration = Math.max(0, Number(room.current.duration_seconds) || 24 * 60 * 60);
       room.position = Math.max(0, Math.min(duration, payload.position));
       room.startedAt = room.playing ? Date.now() : null;
@@ -310,14 +415,14 @@ export async function startServer(port) {
     });
 
     onEvent('change_track', (payload) => {
-      if (!canControl() || !['original', 'instrumental'].includes(payload?.mode)) return emitError('forbidden_or_invalid_mode');
+      if (!canControl('change_track') || !['original', 'instrumental'].includes(payload?.mode)) return emitError('forbidden_or_invalid_mode');
       if (payload.mode === 'original') return emitError('original_audio_disabled');
       room.audioMode = 'instrumental';
       publish(room);
     });
 
     onEvent('set_effects', (payload) => {
-      if (!canControl()) return emitError('forbidden');
+      if (!canControl('set_effects')) return emitError('forbidden');
       if (!payload || typeof payload !== 'object') return emitError('invalid_payload');
       for (const [key, min, max] of [['volume', 0, 1], ['micVolume', 0, 1], ['reverb', 0, 0.8]]) {
         if (payload[key] !== undefined) {
@@ -329,6 +434,7 @@ export async function startServer(port) {
     });
 
     onEvent('song_ended', (payload) => {
+      if (!['admin', 'player'].includes(socket.data.role)) return emitError('forbidden');
       if (!room.current || payload?.songId !== room.current.id) return;
       startNext(room);
       publish(room);
@@ -350,6 +456,20 @@ export async function startServer(port) {
     for (const room of rooms.values()) if (room.members.size) publish(room);
   }, Math.max(250, Number(config.player?.playback?.snapshot_interval_seconds || 1) * 1000));
   syncInterval.unref?.();
+  let observedCsvMtime = fs.existsSync(csvPath) ? fs.statSync(csvPath).mtimeMs : 0;
+  const libraryWatcher = setInterval(async () => {
+    try {
+      const nextMtime = fs.existsSync(csvPath) ? fs.statSync(csvPath).mtimeMs : 0;
+      if (nextMtime !== observedCsvMtime) {
+        observedCsvMtime = nextMtime;
+        const count = await reloadLibrary();
+        io.emit('library_updated', { count });
+      }
+    } catch (error) {
+      console.error('[node-playback] library reload failed:', error.message);
+    }
+  }, 3000);
+  libraryWatcher.unref?.();
 
   const listenPort = port ?? Number(process.env.KTV_NODE_PORT || config.services.node.port);
   return new Promise((resolve, reject) => {

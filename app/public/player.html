@@ -12,6 +12,8 @@
     main{height:calc(100vh - 132px);display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px;padding:14px}
     .stage,.side{background:#111725;border:1px solid #232c3d;border-radius:18px;overflow:hidden}.stage{position:relative;display:grid;place-items:center;background:#000}
     video{width:100%;height:100%;object-fit:contain}.empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;color:#8792a8;padding:20px}
+    .lyrics{position:absolute;left:5%;right:5%;bottom:6%;text-align:center;font-size:clamp(1.1rem,3.5vw,2.8rem);font-weight:800;text-shadow:0 2px 8px #000,0 0 18px #000;pointer-events:none}
+    .lyrics div{padding:4px}.lyrics .active{color:#ffe36e}
     .side{padding:18px;overflow:auto}.side h2{margin:4px 0 14px}.sub{color:#9aa6bd;font-size:.9rem;overflow-wrap:anywhere}
     button,input{font:inherit;border-radius:10px;border:1px solid #343e53;padding:10px;background:#1b2435;color:#f3f4f6}
     button{cursor:pointer;background:#685bff;border:0;font-weight:650}button.secondary{background:#273249}button:disabled{opacity:.4;cursor:not-allowed}
@@ -26,13 +28,19 @@
 <body>
   <header><strong>🎤 OpenKTV <span class="pill" id="roomLabel">尚未加入歌房</span></strong><button id="createRoom">建立歌房</button></header>
   <main>
-    <section class="stage"><video id="video" playsinline></video><audio id="instrumental" preload="auto"></audio><div class="empty" id="empty">建立或加入歌房後即可開始播放</div></section>
+    <section class="stage"><video id="video" playsinline></video><audio id="instrumental" preload="auto"></audio><div class="lyrics" id="lyrics"></div><div class="empty" id="empty">建立或加入歌房後即可開始播放</div></section>
     <aside class="side">
       <h2 id="songTitle">等待點歌</h2><div class="sub" id="songArtist">加入歌房以開始</div>
       <div class="controls"><button id="play">播放</button><button class="secondary" id="pause">暫停</button><button class="secondary" id="next">切歌</button></div>
       <label>播放音量 <input class="meter" id="musicVolume" type="range" min="0" max="1" step=".01" value="1"></label>
       <h3>歌房 QR Code</h3><div class="sub" id="joinUrl">建立歌房後顯示手機加入連結</div><img id="qr" hidden alt="手機加入歌房 QR Code">
       <h3>播放佇列</h3><ul class="queue" id="queue"></ul>
+      <section id="downloadPanel" class="mic" hidden>
+        <h3>新增歌曲</h3>
+        <input id="youtubeUrl" type="url" maxlength="2048" placeholder="YouTube 影片網址">
+        <div class="row"><button id="startJob">背景下載與處理</button></div>
+        <p class="sub" id="jobStatus"></p>
+      </section>
       <section class="mic"><h3>麥克風即時混響</h3><p class="sub">瀏覽器提供回音消除及降噪。建議使用耳機；麥克風監聽預設關閉。</p>
         <button id="micToggle" class="secondary">啟用麥克風監聽</button>
         <label class="sub">混響量 <input class="meter" id="reverb" type="range" min="0" max=".8" step=".01" value=".25"></label>
@@ -45,7 +53,7 @@
     const video=document.querySelector('#video'), instrumental=document.querySelector('#instrumental');
     const roomLabel=document.querySelector('#roomLabel'), errorBox=document.querySelector('#error');
     let socket=null, roomId='', adminToken='', lastSongId='', micStream=null, audioContext=null;
-    let roomState=null, syncBusy=false;
+    let roomState=null, syncBusy=false, lyricLines=[];
     const escapeMedia=name=>`/media/${encodeURIComponent(name||'')}`;
     function report(message){errorBox.textContent=message||''}
     function connectRoom(id,token){
@@ -59,6 +67,7 @@
       document.querySelector('#play').disabled=!adminToken;
       document.querySelector('#pause').disabled=!adminToken;
       document.querySelector('#next').disabled=!adminToken;
+      document.querySelector('#downloadPanel').hidden=!adminToken;
       if(token)localStorage.setItem(`openktv-admin-${id}`,token);
     }
     function render(state){
@@ -76,12 +85,32 @@
         const accompaniment=current.accompaniment_filename||current.instrumental_filename;
         if(!accompaniment){report('此歌曲沒有伴奏音檔，為避免原唱外漏，播放器已停止。');instrumental.removeAttribute('src');return}
         report('');instrumental.src=escapeMedia(accompaniment);video.load();instrumental.load();
+        loadLyrics(current.lyrics_filename);
       }
       const target=Math.max(0,state.position||0);
+      renderLyrics(target);
       if(Math.abs(instrumental.currentTime-target)>.45&&!syncBusy){syncBusy=true;instrumental.currentTime=target;setTimeout(()=>syncBusy=false,250)}
       instrumental.volume=Number(document.querySelector('#musicVolume').value);
       if(state.isPlaying){instrumental.play().catch(()=>report('請先點擊頁面，允許瀏覽器播放音訊。'));video.play().catch(()=>{})}
       else{instrumental.pause();video.pause()}
+    }
+    async function loadLyrics(filename){
+      lyricLines=[];document.querySelector('#lyrics').replaceChildren();
+      if(!filename)return;
+      try{
+        const response=await fetch(escapeMedia(filename));if(!response.ok)return;
+        const text=await response.text();
+        lyricLines=text.split(/\r?\n/).flatMap(line=>{
+          const match=line.match(/^%\s*(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)\s+(.+)$/);
+          return match?[{start:Number(match[1]),end:Number(match[2]),text:match[3]}]:[];
+        });
+      }catch(_){lyricLines=[]}
+    }
+    function renderLyrics(position){
+      let active=-1;
+      for(let i=0;i<lyricLines.length;i++){if(position>=lyricLines[i].start&&position<=lyricLines[i].end){active=i;break}}
+      const shown=active>=0?[lyricLines[active-1]?.text,lyricLines[active].text,lyricLines[active+1]?.text].filter(Boolean):[];
+      const lyrics=document.querySelector('#lyrics');lyrics.replaceChildren(...shown.map((text,index)=>{const line=document.createElement('div');line.textContent=text;if(index===(shown.length>1?1:0))line.className='active';return line}));
     }
     async function newRoom(){
       try{
@@ -99,6 +128,24 @@
     document.querySelector('#next').onclick=()=>socket?.emit('control',{action:'next'});
     document.querySelector('#musicVolume').oninput=e=>{instrumental.volume=Number(e.target.value);socket?.emit('set_effects',{volume:Number(e.target.value)})};
     document.querySelector('#reverb').oninput=e=>socket?.emit('set_effects',{reverb:Number(e.target.value)});
+    document.querySelector('#startJob').onclick=async()=>{
+      const target=document.querySelector('#jobStatus'),url=document.querySelector('#youtubeUrl').value.trim();
+      if(!/^https:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(url)){target.textContent='請輸入有效的 YouTube URL';return}
+      try{
+        const response=await fetch(`/api/rooms/${roomId}/jobs`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+adminToken},body:JSON.stringify({url})});
+        const job=await response.json();
+        if(!response.ok)throw new Error(job.error||'job_submit_failed');
+        target.textContent=`工作已加入佇列：${job.job_id}`;
+        const timer=setInterval(async()=>{
+          try{
+            const statusResponse=await fetch(`/api/rooms/${roomId}/jobs/${job.job_id}`,{headers:{Authorization:'Bearer '+adminToken}});
+            const status=await statusResponse.json();
+            target.textContent=`${status.status} · attempt ${status.attempt||1} · ${status.progress||0}%`;
+            if(['complete','failed'].includes(status.status)){clearInterval(timer);if(status.status==='failed')target.textContent+=` · ${status.error||''}`}
+          }catch(_){clearInterval(timer);target.textContent='無法讀取背景工作狀態'}
+        },2000);
+      }catch(error){target.textContent=`無法提交工作：${error.message}`}
+    };
     video.onended=()=>{if(roomState?.current)socket?.emit('song_ended',{songId:roomState.current.id})};
     window.addEventListener('keydown',e=>{if(e.code==='Space'&&document.activeElement===document.body){e.preventDefault();socket?.emit('control',{action:roomState?.isPlaying?'pause':'play'})}});
     async function toggleMic(){

@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "electron .",
-    "server": "node server.js"
+    "server": "node server.js",
+    "test": "node --test"
   },
   "dependencies": {
     "csv-parser": "^3.0.0",
@@ -14,6 +15,7 @@
     "express": "^4.18.2",
     "minisearch": "^6.3.0",
     "socket.io": "^4.7.4",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "yaml": "^2.8.1"
   }
 }

@@ -58,6 +58,7 @@ class AppSettings:
     lyrics_alignment_backends: tuple[str, ...]
     alignment_parallelism: int
     dereverb_enabled: bool
+    dereverb_model: str
     spotify_match_threshold: float
     musixmatch_api_key: str
 
@@ -134,7 +135,7 @@ def load_settings(base_dir: Path | None = None) -> AppSettings:
             os.getenv("KTV_DOWNLOAD_RETRY_COUNT"),
             _to_int(str(retry_cfg.get("retry_count", download_cfg.get("retry_count", 2))), 2),
         ),
-        library_index_path=Path(os.getenv("KTV_LIBRARY_INDEX_PATH", root / "ktv_songs" / "library_index.csv")),
+        library_index_path=Path(os.getenv("KTV_LIBRARY_INDEX_PATH", root / "ktv_songs" / "library.csv")),
         retry_delay_seconds=_to_float(
             os.getenv("KTV_DOWNLOAD_RETRY_DELAY_SECONDS"),
             _to_float(str(retry_cfg.get("retry_delay_seconds", download_cfg.get("retry_delay_seconds", 2))), 2.0),
@@ -145,6 +146,7 @@ def load_settings(base_dir: Path | None = None) -> AppSettings:
             _to_int(str(alignment_cfg.get("max_parallel_backends", 1)), 1),
         ),
         dereverb_enabled=bool(audio_cfg.get("dereverb", {}).get("enabled", True)),
+        dereverb_model=str(audio_cfg.get("dereverb", {}).get("model_name", "UVR-DeEcho-DeReverb.pth")),
         spotify_match_threshold=_to_float(
             os.getenv("KTV_SPOTIFY_MATCH_THRESHOLD"),
             _to_float(str(metadata_cfg.get("spotify", {}).get("minimum_match_score", 0.72)), 0.72),
