@@ -1,5 +1,8 @@
 import csv
+import os
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -82,6 +85,41 @@ class LibraryTests(unittest.TestCase):
             self.assertEqual(row["accompaniment_filename"], "Artist - Song.instrumental.m4a")
             self.assertTrue(row["id"].startswith("spotify-id-"))
             self.assertEqual(row["separator_mode"], "hybrid")
+
+
+class ProcessingApiTests(unittest.TestCase):
+    def test_job_api_auth_validation_and_concurrency_limit(self):
+        token = "test-token-that-is-long-enough-for-the-job-api"
+        pipeline_stub = types.ModuleType("core.unified_nightingale")
+        pipeline_stub.KTVProcessor = object
+        with patch.dict(os.environ, {"KTV_JOB_API_TOKEN": token}):
+            with patch.dict(sys.modules, {"core.unified_nightingale": pipeline_stub}):
+                from core.web import create_app
+
+                app, _, _ = create_app()
+                client = app.test_client()
+                self.assertEqual(client.get("/api/jobs/not-a-job").status_code, 401)
+                headers = {"Authorization": "Bearer " + token}
+                self.assertEqual(
+                    client.post("/api/jobs", json={"url": "https://example.com/video"}, headers=headers).status_code,
+                    400,
+                )
+                with patch("core.web.threading.Thread") as thread:
+                    accepted = client.post(
+                        "/api/jobs",
+                        json={"url": "https://www.youtube.com/watch?v=video-id"},
+                        headers=headers,
+                    )
+                    self.assertEqual(accepted.status_code, 202)
+                    thread.return_value.start.assert_called_once()
+                    self.assertEqual(
+                        client.post(
+                            "/api/jobs",
+                            json={"url": "https://www.youtube.com/watch?v=another-id"},
+                            headers=headers,
+                        ).status_code,
+                        429,
+                    )
 
 
 if __name__ == "__main__":

@@ -54,6 +54,7 @@ class AppSettings:
     alignment_backend: str
     intro_skip_lead_seconds: float
     download_retry_count: int
+    max_concurrent_song_jobs: int
     library_index_path: Path
     retry_delay_seconds: float
     lyrics_alignment_backends: tuple[str, ...]
@@ -146,6 +147,10 @@ def load_settings(base_dir: Path | None = None) -> AppSettings:
         download_retry_count=_to_int(
             os.getenv("KTV_DOWNLOAD_RETRY_COUNT"),
             _to_int(str(retry_cfg.get("retry_count", download_cfg.get("retry_count", 2))), 2),
+        ),
+        max_concurrent_song_jobs=max(
+            1,
+            _to_int(str(retry_cfg.get("max_concurrent_song_jobs", 1)), 1),
         ),
         library_index_path=configured_path(
             "KTV_LIBRARY_INDEX_PATH",

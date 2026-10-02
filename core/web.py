@@ -248,6 +248,9 @@ def _create_blueprint() -> Blueprint:
             return json.dumps({"error": "invalid_separator_backend"}), 400
         if options.get("alignment_backend") is not None and str(options["alignment_backend"]).lower() not in {"ctc", "whisperx", "qwen"}:
             return json.dumps({"error": "invalid_alignment_backend"}), 400
+        job_slots: threading.BoundedSemaphore = current_app.config["JOB_SLOTS"]
+        if not job_slots.acquire(blocking=False):
+            return json.dumps({"error": "processing_capacity_reached"}), 429
         job_id = os.urandom(16).hex()
         job = {"job_id": job_id, "status": "queued", "progress": 0, "logs": [], "error": ""}
         with BACKGROUND_JOBS_LOCK:
@@ -263,8 +266,8 @@ def _create_blueprint() -> Blueprint:
                 job["logs"] = job["logs"][-100:]
 
         def run_job():
-            job["status"] = "running"
             try:
+                job["status"] = "running"
                 processor = KTVProcessor(settings=settings, log_cb=log_job)
                 attempts = max(0, settings.download_retry_count) + 1
                 for attempt in range(1, attempts + 1):
@@ -295,6 +298,8 @@ def _create_blueprint() -> Blueprint:
             except Exception as error:
                 job["status"] = "failed"
                 job["error"] = str(error)[:500]
+            finally:
+                job_slots.release()
 
         threading.Thread(target=run_job, daemon=True).start()
         return json.dumps({"job_id": job_id, "status": job["status"]}), 202
@@ -318,6 +323,7 @@ def create_app(settings: AppSettings | None = None) -> tuple[Flask, SocketIO, Ap
     app_settings = settings or load_settings()
     app = Flask(__name__, template_folder=str(app_settings.templates_dir))
     app.config.from_mapping(SECRET_KEY=app_settings.secret_key, APP_SETTINGS=app_settings)
+    app.config["JOB_SLOTS"] = threading.BoundedSemaphore(app_settings.max_concurrent_song_jobs)
     app.register_blueprint(_create_blueprint())
 
     cors_origins = [origin.strip() for origin in os.getenv("KTV_CORS_ORIGINS", "").split(",") if origin.strip()]

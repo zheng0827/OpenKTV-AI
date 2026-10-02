@@ -1,4 +1,4 @@
-# Desired system configuration. The current application does not load this file yet.
+# Shared runtime configuration for the Python and Node.js services.
 config_version: 1
 
 architecture:
