@@ -1,66 +1,70 @@
 # OpenKTV-AI
 
-目前主程式仍由 `main.py` 啟動，但執行時套件已切到 `core/`，並把音訊分離、歌詞來源、對齊、語言辨識、混音與網頁流程拆成可維護的模組。
+OpenKTV-AI 使用 Python／Flask 下載與處理歌曲，Node.js 負責 KTV 播放器、歌房與即時播放同步。兩個服務共用 `ktv_songs/`，由 Python 維護 `ktv_songs/library.csv`，Node.js 直接讀取曲庫，不在 `app/public` 複製資料。
 
 ## 核心架構
 
-- `core/web.py`：Flask / Socket.IO 網頁與管理流程
-- `core/config.py`：`KTV_*` 環境變數設定
-- `core/downloader.py`：`yt-dlp` 下載影片
-- `core/demucs_separator.py`：Demucs 分離與權重檢查
-- `core/uvr_separator.py`：UVR 分離（透過 `audio-separator`）
-- `core/separators.py`：Demucs / UVR / Hybrid 後端選擇
-- `core/language_detection.py`：歌曲語言辨識
-- `core/whisper_alignment.py`：WhisperX / CTC 對齊入口
-- `core/ctc_alignment.py`：torchaudio CTC 強制對齊
-- `core/qwen_alignment.py`：Qwen 強制對齊
-- `core/transcription.py`：WhisperX 轉錄並套用對齊後端
-- `core/lyrics_alignment.py`：lrclib 歌詞匹配、對白偵測、`.lrc` 輸出
-- `core/processing.py`：保留既有 pseudo-spatial 音訊效果，並新增 lyrics/dialogue vocals 切分與混音工具
-- `core/unified_nightingale.py`：整體流程總調度
+- `core/web.py`：Flask API、背景處理工作與既有管理流程
+- `core/server.py`：不依賴 Tk GUI 的 Flask 服務入口
+- `core/config.py`：載入 `config.yaml`，並支援 `KTV_*` 環境變數覆寫
+- `core/metadata.py`：YouTube 標題整理、Spotify 曲目比對、LRCLIB／Musixmatch 歌詞查詢
+- `core/downloader.py`：`yt-dlp` 下載媒體
+- `core/separators.py`：保留 Demucs／UVR／Hybrid 分離流程
+- `core/uvr_separator.py`：UVR 分離與 vocals-only 去混響模型
+- `core/unified_nightingale.py`：音訊後製、去混響、對齊模型、對白與輸出檔案總調度
+- `app/server.js`：Node.js 播放、歌房、Socket.IO、QR Code、HTTP Range 媒體傳送
 
-## 新流程
+## 歌曲處理
 
-1. `yt-dlp` 下載影片
-2. 依 `KTV_SEPARATOR_BACKEND` 執行 `demucs` / `uvr` / `hybrid`
-3. 從 `lrclib.net` 取得歌詞（或使用手動提供歌詞）
-4. WhisperX 轉錄 + `ctc` / `whisperx` / `qwen` 對齊
-5. 偵測對白時間並一起寫入 `ktv-lrc` `.lrc`
-6. 依時間切出 `lyrics.vocals.wav` 與 `dialogue.vocals.wav`
-7. 將 `dialogue.vocals.wav` 混入伴奏，輸出 `instrumental.m4a`
-8. 將 `lyrics.vocals.wav + dialogue + backing track` 混回 `mp4`
+1. yt-dlp 擷取 YouTube 標題，僅作為 Spotify 搜尋線索，並正規化歌名、歌手與檔名。
+2. Spotify Web API 比對正規曲目並提供歌曲 metadata；比對分數未達門檻時不會下載，需檢查 API 設定或人工確認。
+3. 依 Spotify 曲目向 LRCLIB 查詢歌詞，失敗時可使用 Musixmatch 備援；歌詞服務都無結果時才使用 Whisper 轉錄。
+4. 保留既有 Hybrid 分離邏輯，原始 vocals 檔不會被覆寫。
+5. vocals-only UVR DeEcho/DeReverb 處理產生 `.vocals.dereverbed.wav`；模型不可用時記錄錯誤並回退保守 DSP。
+6. 以去混響 vocals 執行 `ctc`、`whisperx`、`qwen` 對齊，分別保存每個成功結果；平行度可設定。
+7. 產生 KTV 歌詞、對白與伴奏檔案，更新單一正式曲庫 `library.csv`。
 
-## 產出檔案
+常見輸出包含 `.mp4`、`.instrumental.m4a`、`.vocals.wav`、`.vocals.dereverbed.wav`、`.dialogue.vocals.wav`、`.lrc` 及各對齊後端的 `.lyrics_alignment_<backend>.lrc`。
 
-每首歌會輸出：
-
-- `<song>.mp4`
-- `<song>.instrumental.m4a`（伴奏 + dialogue.vocals）
-- `<song>.lyrics.vocals.wav`
-- `<song>.dialogue.vocals.wav`
-- `<song>.lrc`
-- `<song>.dialogue_audit.json`
-
-## 主要環境變數
-
-- `KTV_SEPARATOR_BACKEND=demucs|uvr|hybrid`
-- `KTV_SEPARATOR_STEMS=4|2`
-- `KTV_DEMUCS_MODEL=htdemucs_ft`
-- `KTV_UVR_MODEL=UVR-MDX-NET-Voc_FT.onnx`
-- `KTV_UVR_MODEL_DIR`
-- `KTV_DEVICE=auto|cuda|cpu`
-- `KTV_WHISPER_MODEL=large-v3`
-- `KTV_WHISPER_LANGUAGE=`（留空時自動辨識）
-- `KTV_ALIGNMENT_BACKEND=ctc|whisperx|qwen`
-- `KTV_WHISPER_COMPUTE_TYPE=auto`
-- `KTV_INTRO_SKIP_LEAD_SECONDS=5`
-- `KTV_DOWNLOAD_RETRY_COUNT=2`
+CSV 會記錄 Spotify 歌曲／歌手／專輯 metadata、來源、對齊模型與輸出路徑、純文字歌詞、處理狀態等欄位。Spotify 未提供的歌手性別等資料保留空白。純文字歌詞會去除時間戳及 KTV 格式標記，再將換行轉成空格。
 
 ## 啟動
 
+安裝 Python 依賴後，分別啟動 Flask 與 Node：
+
 ```bash
 pip install -r requirements.txt
-python main.py
+python -m core.server
 ```
 
-若預設分離後端使用 `demucs` 或 `hybrid`，啟動前會先檢查 Demucs 權重；若在管理頁單次切換到 `demucs` / `hybrid`，處理該首歌前也會補做權重檢查。
+另一個終端：
+
+```bash
+cd app
+npm ci
+npm run server
+```
+
+桌面 GUI 仍可使用 `python main.py`。Node 播放服務位於 `http://localhost:3000`；Flask 背景工作 API 預設位於 `http://localhost:5000`。
+
+## 設定與金鑰
+
+- `config.yaml` 是兩個服務共用的非機密設定檔；可用 `KTV_CONFIG_PATH` 指定其他位置。
+- 複製 `.env.example` 為 `.env`，設定 Spotify Developer Dashboard 的 Client ID/Secret。Musixmatch 是選用備援，需自行提供合法 API key。
+- `KTV_JOB_API_TOKEN` 與 `KTV_PROCESSING_API_TOKEN` 必須設為相同的隨機長 token，且不可保留範例 placeholder。金鑰僅放在環境變數／權限受限的環境檔，不要提交至版本庫。
+- 對齊模型預設逐一執行以限制記憶體和 GPU 佔用；可設定 `audio_processing.alignment.max_parallel_backends`。Raspberry Pi 4B 建議維持 1。
+- audio-separator 會在首次執行時嘗試取得 `UVR-DeEcho-DeReverb.pth` 模型；若不可用，流程使用保守 DSP 備援。
+
+## 部署與監控
+
+- systemd 範本：`deploy/openktv-flask.service`、`deploy/openktv-node.service`。範本預期安裝於 `/opt/openktv-ai`，環境變數檔位於權限受限的 `/etc/openktv-ai/openktv.env`。
+- Nginx TLS 範例：`deploy/nginx-openktv.conf`，代理 Node Socket.IO、HTTP Range 媒體及 Flask processing API。瀏覽器麥克風權限需要 HTTPS（或 localhost）。
+- Node `GET /health` 提供曲庫、歌房、Socket、CPU、記憶體和磁碟摘要；Flask `GET /health` 提供背景工作數、CPU、記憶體和歌曲數。
+- systemd 會將服務 stdout/stderr 交由 journald 管理；Node 每 3 秒偵測 CSV 修改並重載曲庫。
+
+## 驗證
+
+```bash
+python -m unittest discover -s tests
+cd app && npm test
+```

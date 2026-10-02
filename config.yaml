@@ -41,6 +41,12 @@ paths:
   temporary_directory: ./temp_processing
   library_csv: ./ktv_songs/library.csv
   logs_directory: ./logs
+  ffmpeg_directory: ./ffmpeg/bin
+
+models:
+  whisper:
+    model: large-v3
+    compute_type: auto
 
 download:
   provider: yt_dlp
@@ -67,6 +73,9 @@ download:
 audio_processing:
   separator:
     backend: hybrid
+    stems: 4
+    demucs_model: htdemucs_ft
+    uvr_model: UVR-MDX-NET-Voc_FT.onnx
     preserve_existing_hybrid_implementation: true
     outputs:
       vocals: "{song}.vocals.wav"
@@ -83,6 +92,7 @@ audio_processing:
     keep_original_vocals: true
     fall_back_to_original_on_failure: true
   alignment:
+    primary_backend: ctc
     backends:
       - ctc
       - whisperx
@@ -168,6 +178,7 @@ library:
     - vocals_filename
     - dereverbed_vocals_filename
     - alignment_result_filenames
+    - alignment_metrics
     - processing_status
     - created_at
   unknown_metadata_value: ""
@@ -233,6 +244,7 @@ operations:
     restart_on_failure: true
     persistent_media_volume: true
     health_check_interval_seconds: 30
+    tls_required_for_microphone: true
   monitoring:
     health_endpoints: true
     structured_logs: true

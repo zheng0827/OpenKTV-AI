@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
 import csv from 'csv-parser';
 import MiniSearch from 'minisearch';
 import QRCode from 'qrcode';
@@ -94,7 +95,8 @@ export async function startServer(port) {
   const csvPath = path.resolve(rootDir, process.env.KTV_LIBRARY_CSV || config.paths.library_csv);
   fs.mkdirSync(mediaDir, { recursive: true });
   const publicDir = path.join(appDir, 'public');
-  const allowedOrigins = config.socket_io?.cors_origins || [];
+  const configuredOrigins = (process.env.KTV_CORS_ORIGINS || '').split(',').map((value) => value.trim()).filter(Boolean);
+  const allowedOrigins = configuredOrigins.length ? configuredOrigins : (config.socket_io?.cors_origins || []);
   const emptyGraceMs = Math.max(0, Number(config.player?.rooms?.empty_room_grace_seconds ?? 30)) * 1000;
   const rooms = new Map();
   const roomCreationAttempts = new Map();
@@ -131,6 +133,7 @@ export async function startServer(port) {
   }
 
   await reloadLibrary();
+  const app = express();
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
     cors: { origin: allowedOrigins, methods: ['GET', 'POST'] },
@@ -150,6 +153,8 @@ export async function startServer(port) {
       sockets: [...rooms.values()].reduce((total, room) => total + room.members.size, 0),
       uptimeSeconds: Math.round(process.uptime()),
       memoryBytes: process.memoryUsage().rss,
+      cpuMicros: process.cpuUsage(),
+      loadAverage: os.loadavg(),
       diskFreeBytes: stats.bavail * stats.bsize,
     });
   });
@@ -201,7 +206,9 @@ export async function startServer(port) {
     }
     const processingUrl = process.env.KTV_PROCESSING_API_URL || 'http://127.0.0.1:5000/api/jobs';
     const processingToken = process.env.KTV_PROCESSING_API_TOKEN;
-    if (!processingToken) return res.status(503).json({ error: 'processing_service_not_configured' });
+    if (!processingToken || processingToken.length < 32 || processingToken.startsWith('replace-')) {
+      return res.status(503).json({ error: 'processing_service_not_configured' });
+    }
     try {
       const response = await fetch(processingUrl, {
         method: 'POST',
@@ -226,7 +233,8 @@ export async function startServer(port) {
     if (!room || !safeEqual(supplied, room.adminToken)) return res.status(403).json({ error: 'forbidden' });
     const processingUrl = process.env.KTV_PROCESSING_API_URL || 'http://127.0.0.1:5000/api/jobs';
     const processingToken = process.env.KTV_PROCESSING_API_TOKEN;
-    if (!processingToken || !/^[a-f0-9]{32}$/.test(req.params.jobId)) return res.status(400).json({ error: 'invalid_job_request' });
+    if (!processingToken || processingToken.length < 32 || processingToken.startsWith('replace-')
+      || !/^[a-f0-9]{32}$/.test(req.params.jobId)) return res.status(400).json({ error: 'invalid_job_request' });
     try {
       const response = await fetch(`${processingUrl}/${req.params.jobId}`, {
         headers: { Authorization: 'Bearer ' + processingToken },
@@ -263,8 +271,14 @@ export async function startServer(port) {
     if (path.basename(filename) !== filename || !allowedMedia().has(filename)) {
       return res.status(404).end();
     }
-    const filePath = path.resolve(mediaDir, filename);
-    if (!filePath.startsWith(`${mediaDir}${path.sep}`) || !fs.existsSync(filePath)) return res.status(404).end();
+    let filePath;
+    try {
+      const realMediaDir = fs.realpathSync(mediaDir);
+      filePath = fs.realpathSync(path.resolve(mediaDir, filename));
+      if (!filePath.startsWith(`${realMediaDir}${path.sep}`)) return res.status(404).end();
+    } catch (_error) {
+      return res.status(404).end();
+    }
     res.setHeader('Cache-Control', 'private, max-age=60');
     res.setHeader('Accept-Ranges', 'bytes');
     res.sendFile(filePath, { acceptRanges: true }, (error) => {

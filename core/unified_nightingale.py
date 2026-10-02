@@ -552,7 +552,8 @@ class KTVProcessor:
             if spotify["status"] != "matched":
                 raise RuntimeError(
                     f"Spotify 曲目比對狀態為 {spotify['status']} "
-                    f"(confidence={spotify['confidence']:.2f})；請確認 Spotify API 憑證或人工核對歌曲，未開始下載。"
+                    f"(confidence={spotify['confidence']:.2f})；請確認 Spotify API 憑證或人工核對歌曲，"
+                    f"未開始下載。候選={json.dumps(spotify.get('candidates', []), ensure_ascii=False)}"
                 )
             spotify_track = spotify["track"]
             song_name = spotify_track["song_name"]
@@ -647,7 +648,11 @@ class KTVProcessor:
             shutil.move(str(temp_dialogue_vocals), str(final_dialogue_vocals))
             shutil.move(str(temp_lrc), str(final_lrc))
 
-            alignment_names = {alignment_backend: final_lrc.name}
+            primary_alignment_backend = next(
+                (backend for backend, filename in artifacts.alignment_results.items() if filename == temp_lrc.name),
+                alignment_backend,
+            )
+            alignment_names = {primary_alignment_backend: final_lrc.name}
             for backend, temp_path in temp_alignment_paths.items():
                 if temp_path.is_file():
                     final_alignment = final.with_name(f"{final.stem}.lyrics_alignment_{backend}.lrc")
@@ -670,7 +675,7 @@ class KTVProcessor:
                 "spotify_track_url": spotify_track.get("url", ""),
                 "separator_model": self.settings.demucs_model if separator_backend in {"demucs", "hybrid"} else self.settings.uvr_model,
                 "separator_mode": separator_backend,
-                "lyrics_alignment_model": alignment_backend,
+                "lyrics_alignment_model": primary_alignment_backend,
                 "alignment_result_filenames": json.dumps(alignment_names, ensure_ascii=False),
                 "alignment_metrics": artifacts.alignment_results.get("_metrics", ""),
                 "video_filename": final.name,

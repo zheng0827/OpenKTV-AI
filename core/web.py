@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 import hmac
 import os
+import time
 import re
 import socket
 import subprocess
 import threading
-import time
 from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, urlparse
@@ -131,10 +131,17 @@ def _create_blueprint() -> Blueprint:
     @bp.route("/health")
     def health():
         settings: AppSettings = current_app.config["APP_SETTINGS"]
+        try:
+            import resource
+            memory_bytes = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (1024 if os.name != "darwin" else 1)
+        except Exception:
+            memory_bytes = 0
         return json.dumps({
             "status": "ok",
             "library_songs": sum(1 for _ in settings.songs_dir.glob("*.mp4")) if settings.songs_dir.exists() else 0,
             "background_jobs": len(BACKGROUND_JOBS),
+            "process_cpu_seconds": time.process_time(),
+            "peak_memory_bytes": memory_bytes,
         })
 
     @bp.route("/player")
@@ -211,23 +218,36 @@ def _create_blueprint() -> Blueprint:
     def create_processing_job():
         expected_token = os.getenv("KTV_JOB_API_TOKEN", "")
         supplied_token = (request.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
-        if not expected_token or not hmac.compare_digest(supplied_token, expected_token):
+        if len(expected_token) < 32 or expected_token.startswith("replace-") or not hmac.compare_digest(supplied_token, expected_token):
             return json.dumps({"error": "unauthorized"}), 401
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):
             return json.dumps({"error": "invalid_json"}), 400
+        for field in ("url", "title", "singer", "lyrics_text"):
+            if field in payload and not isinstance(payload[field], str):
+                return json.dumps({"error": f"invalid_{field}"}), 400
         try:
             url = _validate_youtube_url(payload.get("url", ""))
         except ValueError as error:
             return json.dumps({"error": str(error)}), 400
-        title = str(payload.get("title") or "").strip()[:300]
-        singer = str(payload.get("singer") or "").strip()[:200]
-        lyrics = str(payload.get("lyrics_text") or "")[:100_000]
+        title = (payload.get("title") or "").strip()[:300]
+        singer = (payload.get("singer") or "").strip()[:200]
+        lyrics = (payload.get("lyrics_text") or "")[:100_000]
         raw_options = payload.get("options") or {}
         if not isinstance(raw_options, dict):
             return json.dumps({"error": "invalid_options"}), 400
         allowed_options = {"stems", "device", "separator_backend", "alignment_backend"}
+        if set(raw_options) - allowed_options:
+            return json.dumps({"error": "unknown_options"}), 400
         options = {key: value for key, value in raw_options.items() if key in allowed_options}
+        if options.get("stems") is not None and str(options["stems"]) not in {"2", "4"}:
+            return json.dumps({"error": "invalid_stems"}), 400
+        if options.get("device") is not None and str(options["device"]).lower() not in {"auto", "cuda", "cpu", "mps"}:
+            return json.dumps({"error": "invalid_device"}), 400
+        if options.get("separator_backend") is not None and str(options["separator_backend"]).lower() not in {"demucs", "uvr", "hybrid"}:
+            return json.dumps({"error": "invalid_separator_backend"}), 400
+        if options.get("alignment_backend") is not None and str(options["alignment_backend"]).lower() not in {"ctc", "whisperx", "qwen"}:
+            return json.dumps({"error": "invalid_alignment_backend"}), 400
         job_id = os.urandom(16).hex()
         job = {"job_id": job_id, "status": "queued", "progress": 0, "logs": [], "error": ""}
         with BACKGROUND_JOBS_LOCK:
@@ -259,6 +279,15 @@ def _create_blueprint() -> Blueprint:
                         job["status"] = "complete"
                         job["progress"] = 100
                         return
+                    last_message = job["logs"][-1] if job["logs"] else ""
+                    if "Spotify 曲目比對狀態為 needs_review" in last_message:
+                        job["status"] = "needs_review"
+                        job["error"] = last_message
+                        return
+                    if "Spotify API credentials are not configured" in last_message:
+                        job["status"] = "failed"
+                        job["error"] = last_message
+                        return
                     if attempt < attempts:
                         time.sleep(max(0.0, settings.retry_delay_seconds))
                 job["status"] = "failed"
@@ -274,13 +303,13 @@ def _create_blueprint() -> Blueprint:
     def get_processing_job(job_id: str):
         expected_token = os.getenv("KTV_JOB_API_TOKEN", "")
         supplied_token = (request.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
-        if not expected_token or not hmac.compare_digest(supplied_token, expected_token):
+        if len(expected_token) < 32 or expected_token.startswith("replace-") or not hmac.compare_digest(supplied_token, expected_token):
             return json.dumps({"error": "unauthorized"}), 401
         with BACKGROUND_JOBS_LOCK:
             job = BACKGROUND_JOBS.get(job_id)
             if job is None:
                 return json.dumps({"error": "job_not_found"}), 404
-            return json.dumps(job, ensure_ascii=False)
+            return json.dumps({**job, "logs": list(job.get("logs", []))}, ensure_ascii=False)
 
     return bp
 

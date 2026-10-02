@@ -33,7 +33,7 @@
     if(!/^[A-F0-9]{12}$/.test(roomId)){document.querySelector('#error').textContent='歌房 ID 格式錯誤';return}
     if(socket)socket.disconnect();
     socket=io({auth:{roomId,role:'remote'}});
-    socket.on('connect',()=>{document.querySelector('#connection').textContent=`已加入歌房 ${roomId}`;document.querySelector('#error').textContent='';history.replaceState(null,'',`/remote?room=${roomId}`)});
+    socket.on('connect',()=>{document.querySelector('#connection').textContent=`已加入歌房 ${roomId}`;document.querySelector('#error').textContent='';history.replaceState(null,'',`/remote?room=${roomId}`);socket.emit('search_songs',{query:''})});
     socket.on('connect_error',()=>{document.querySelector('#connection').textContent='連線失敗';document.querySelector('#error').textContent='找不到歌房或歌房已關閉'});
     socket.on('search_results',renderResults);
     socket.on('room_state',renderState);

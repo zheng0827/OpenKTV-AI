@@ -141,7 +141,7 @@
             const statusResponse=await fetch(`/api/rooms/${roomId}/jobs/${job.job_id}`,{headers:{Authorization:'Bearer '+adminToken}});
             const status=await statusResponse.json();
             target.textContent=`${status.status} · attempt ${status.attempt||1} · ${status.progress||0}%`;
-            if(['complete','failed'].includes(status.status)){clearInterval(timer);if(status.status==='failed')target.textContent+=` · ${status.error||''}`}
+            if(['complete','failed','needs_review'].includes(status.status)){clearInterval(timer);if(status.status!=='complete')target.textContent+=` · ${status.error||''}`}
           }catch(_){clearInterval(timer);target.textContent='無法讀取背景工作狀態'}
         },2000);
       }catch(error){target.textContent=`無法提交工作：${error.message}`}

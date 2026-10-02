@@ -111,6 +111,19 @@ def match_spotify_track(song: str, artist: str, minimum_score: float = 0.72) -> 
 
     candidates.sort(key=lambda item: item[0], reverse=True)
     score, track = candidates[0]
+    review_candidates = [
+        {
+            "id": candidate.get("id", ""),
+            "url": candidate.get("external_urls", {}).get("spotify", ""),
+            "song_name": candidate.get("name", ""),
+            "artist_name": ", ".join(entry.get("name", "") for entry in candidate.get("artists", [])),
+            "album": (candidate.get("album") or {}).get("name", ""),
+            "release_year": ((candidate.get("album") or {}).get("release_date") or "")[:4],
+            "duration_seconds": round((candidate.get("duration_ms") or 0) / 1000, 3),
+            "score": round(max(0.0, min(1.0, candidate_score)), 4),
+        }
+        for candidate_score, candidate in candidates[:5]
+    ]
     artist_names = [entry.get("name", "") for entry in track.get("artists", [])]
     album = track.get("album") or {}
     artist_genres = []
@@ -138,6 +151,7 @@ def match_spotify_track(song: str, artist: str, minimum_score: float = 0.72) -> 
             "duration_seconds": round((track.get("duration_ms") or 0) / 1000, 3),
             "genre": ", ".join(artist_genres),
         },
+        "candidates": review_candidates,
     }
 
 
