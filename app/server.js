@@ -218,7 +218,8 @@ export async function startServer(port) {
   app.post('/api/rooms/:roomId/jobs', async (req, res) => {
     const room = rooms.get(String(req.params.roomId).toUpperCase());
     const supplied = req.get('authorization')?.replace(/^Bearer\s+/i, '');
-    if (!room || !safeEqual(supplied, room.adminToken)) return res.status(403).json({ error: 'forbidden' });
+    if (!room) return res.status(404).json({ error: 'room_not_found' });
+    if (!safeEqual(supplied, room.adminToken)) return res.status(403).json({ error: 'forbidden' });
     const url = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
     if (url.length > 2048 || !/^https:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(url)) {
       return res.status(400).json({ error: 'invalid_youtube_url' });
@@ -257,7 +258,8 @@ export async function startServer(port) {
   app.get('/api/rooms/:roomId/jobs/:jobId', async (req, res) => {
     const room = rooms.get(String(req.params.roomId).toUpperCase());
     const supplied = req.get('authorization')?.replace(/^Bearer\s+/i, '');
-    if (!room || !safeEqual(supplied, room.adminToken)) return res.status(403).json({ error: 'forbidden' });
+    if (!room) return res.status(404).json({ error: 'room_not_found' });
+    if (!safeEqual(supplied, room.adminToken)) return res.status(403).json({ error: 'forbidden' });
     const processingUrl = process.env.KTV_PROCESSING_API_URL || 'http://127.0.0.1:5000/api/jobs';
     const processingToken = process.env.KTV_PROCESSING_API_TOKEN;
     if (!processingToken || processingToken.length < 32 || processingToken.startsWith('replace-')

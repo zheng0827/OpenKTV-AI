@@ -60,7 +60,43 @@ test('standalone download page is routed separately from the player', async () =
   const playerPage = await fetch(`${baseUrl}/player`).then((response) => response.text());
   assert.match(downloadPage, /新增一首好歌/);
   assert.match(downloadPage, /localStorage/);
+  assert.doesNotMatch(downloadPage, /管理歌房|roomSelect/);
   assert.doesNotMatch(playerPage, /youtubeUrl|separatorBackend|alignmentBackend/);
+  assert.match(playerPage, /target="_blank"/);
+});
+
+test('processing proxy distinguishes expired rooms from invalid admin credentials', async () => {
+  const room = await fetch(`${baseUrl}/api/rooms`, { method: 'POST' }).then((response) => response.json());
+  const oldToken = process.env.KTV_PROCESSING_API_TOKEN;
+  delete process.env.KTV_PROCESSING_API_TOKEN;
+  try {
+    const missingRoom = await fetch(`${baseUrl}/api/rooms/DOESNOTEXIST/jobs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: 'https://youtu.be/abc123' }),
+    });
+    assert.equal(missingRoom.status, 404);
+    assert.equal((await missingRoom.json()).error, 'room_not_found');
+
+    const forbidden = await fetch(`${baseUrl}/api/rooms/${room.roomId}/jobs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: ['Bearer', 'wrong'].join(' ') },
+      body: JSON.stringify({ url: 'https://youtu.be/abc123' }),
+    });
+    assert.equal(forbidden.status, 403);
+    assert.equal((await forbidden.json()).error, 'forbidden');
+
+    const unconfigured = await fetch(`${baseUrl}/api/rooms/${room.roomId}/jobs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + room.adminToken },
+      body: JSON.stringify({ url: 'https://youtu.be/abc123' }),
+    });
+    assert.equal(unconfigured.status, 503);
+    assert.equal((await unconfigured.json()).error, 'processing_service_not_configured');
+  } finally {
+    if (oldToken === undefined) delete process.env.KTV_PROCESSING_API_TOKEN;
+    else process.env.KTV_PROCESSING_API_TOKEN = oldToken;
+  }
 });
 
 test('authorized processing proxy forwards separation and alignment options', async () => {

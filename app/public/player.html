@@ -56,7 +56,7 @@
       <p class="sub" id="error"></p>
     </aside>
   </main>
-  <nav id="bottom"><a href="/">⌂ 首頁</a><a href="/download" id="downloadLink">🎧 新增歌曲</a><a href="/remote">📱 手機點歌</a><span id="status">未連線</span></nav>
+  <nav id="bottom"><a href="/">⌂ 首頁</a><a href="/download" id="downloadLink" target="_blank" rel="noopener">🎧 新增歌曲</a><a href="/remote">📱 手機點歌</a><span id="status">未連線</span></nav>
   <script type="module">
     const video=document.querySelector('#video'), instrumental=document.querySelector('#instrumental');
     const roomLabel=document.querySelector('#roomLabel'), errorBox=document.querySelector('#error');
@@ -76,7 +76,7 @@
       document.querySelector('#pause').disabled=!adminToken;
       document.querySelector('#next').disabled=!adminToken;
       document.querySelector('#downloadLink').href=`/download?room=${encodeURIComponent(id)}`;
-      if(token)localStorage.setItem(`openktv-admin-${id}`,token);
+      if(token){localStorage.setItem(`openktv-admin-${id}`,token);localStorage.setItem('openktv-last-admin-room',id)}
     }
     function render(state){
       const current=state.current;

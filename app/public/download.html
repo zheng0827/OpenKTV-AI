@@ -30,11 +30,9 @@
     <h1>新增一首好歌</h1>
     <p class="intro">貼上 YouTube 影片連結，背景完成歌曲下載、伴奏分離與歌詞處理。工作狀態會顯示在這個頁面，不會打斷播放。</p>
     <section class="card">
-      <div id="noRoom" class="notice" hidden>請先從主播放器建立歌房，取得管理權限後再回到此頁面。<p><a href="/player" style="color:#d7d0ff">前往主播放器 →</a></p></div>
+      <div id="noRoom" class="notice" hidden>請先從主播放器建立歌房，再開啟新增歌曲頁面。<p><a href="/player" style="color:#d7d0ff">前往主播放器 →</a></p></div>
       <form id="form" hidden>
-        <label class="field">🔐 管理歌房
-          <select id="roomSelect" required></select>
-        </label>
+        <p class="hint" id="roomStatus"></p>
         <div class="grid">
           <label class="field wide">🔗 YouTube 影片網址
             <input id="youtubeUrl" type="url" maxlength="2048" placeholder="https://www.youtube.com/watch?v=…" required>
@@ -69,17 +67,21 @@
   <nav><a href="/">⌂ 首頁</a><a href="/player">🎬 主播放器</a><a href="/remote">📱 手機點歌</a></nav>
   <script type="module">
     const prefix='openktv-admin-';
-    const select=document.querySelector('#roomSelect');
-    const rooms=Object.keys(localStorage).filter(key=>key.startsWith(prefix)).map(key=>({id:key.slice(prefix.length),token:localStorage.getItem(key)})).filter(room=>room.token);
+    const storedRooms=Object.keys(localStorage).filter(key=>key.startsWith(prefix)).map(key=>({id:key.slice(prefix.length),token:localStorage.getItem(key)})).filter(room=>room.token);
     const requested=new URLSearchParams(location.search).get('room')?.toUpperCase();
-    rooms.sort((left,right)=>left.id===requested?-1:right.id===requested?1:0);
-    for(const room of rooms){const option=document.createElement('option');option.value=room.id;option.textContent=`歌房 ${room.id}`;select.append(option)}
+    const lastRoom=localStorage.getItem('openktv-last-admin-room');
+    const room=storedRooms.find(item=>item.id===requested)||storedRooms.find(item=>item.id===lastRoom)||storedRooms.at(-1);
     const form=document.querySelector('#form'),noRoom=document.querySelector('#noRoom'),status=document.querySelector('#status');
-    form.hidden=rooms.length===0;noRoom.hidden=rooms.length>0;
-    function credentials(){const roomId=select.value;return {roomId,token:localStorage.getItem(prefix+roomId)}}
+    form.hidden=!room;noRoom.hidden=Boolean(room);
+    if(room)document.querySelector('#roomStatus').textContent=`🔐 已使用歌房 ${room.id} 的主機授權`;
+    function explainError(code){
+      if(code==='forbidden'||code==='room_not_found')return '歌房授權已失效或歌房已關閉。請回主播放器重新建立歌房，再從播放器開啟此下載頁。';
+      if(code==='processing_service_not_configured')return '歌曲處理服務尚未設定。若分別啟動 Flask 與 Node，請在 .env 設定相同且至少 32 字元的 KTV_JOB_API_TOKEN 與 KTV_PROCESSING_API_TOKEN；或使用 python main.py 一鍵啟動。';
+      return code||'發生未知錯誤';
+    }
     form.addEventListener('submit',async event=>{
       event.preventDefault();
-      const {roomId,token}=credentials(),url=document.querySelector('#youtubeUrl').value.trim(),button=document.querySelector('#submit');
+      const {id:roomId,token}=room,url=document.querySelector('#youtubeUrl').value.trim(),button=document.querySelector('#submit');
       if(!token){status.textContent='找不到這個歌房的管理權限，請由主播放器重新建立歌房。';status.className='error';return}
       if(!/^https:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(url)){status.textContent='請輸入有效的 YouTube HTTPS 網址。';status.className='error';return}
       button.disabled=true;status.textContent='正在提交歌曲處理工作…';status.className='';
@@ -87,15 +89,14 @@
         const response=await fetch(`/api/rooms/${roomId}/jobs`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({url,title:document.querySelector('#manualTitle').value.trim(),singer:document.querySelector('#singer').value.trim(),options:{separator_backend:document.querySelector('#separatorBackend').value,alignment_backend:document.querySelector('#alignmentBackend').value}})});
         const job=await response.json();
         if(!response.ok){
-          if(job.error==='processing_service_not_configured')throw new Error('處理服務未設定。請以 python main.py 啟動，或確認 Flask 與 Node 的服務 token 相同且至少 32 字元。');
-          throw new Error(job.error||'無法提交工作');
+          throw new Error(explainError(job.error));
         }
         status.textContent=`工作已加入佇列：${job.job_id}`;
         const timer=setInterval(async()=>{
           try{
             const check=await fetch(`/api/rooms/${roomId}/jobs/${job.job_id}`,{headers:{Authorization:'Bearer '+token}});
             const result=await check.json();
-            if(!check.ok)throw new Error(result.error||'無法查詢工作狀態');
+            if(!check.ok)throw new Error(explainError(result.error));
             status.textContent=`${result.status} · ${result.progress||0}%${result.error?` · ${result.error}`:''}`;
             if(['complete','failed','needs_review'].includes(result.status)){clearInterval(timer);button.disabled=false;if(result.status==='complete')status.textContent+=' · 歌曲已加入曲庫';else status.className='error'}
           }catch(error){clearInterval(timer);button.disabled=false;status.textContent=`狀態查詢失敗：${error.message}`;status.className='error'}
