@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from core.config import load_settings
 from core.library import update_library_index
 from core.metadata import match_spotify_track, normalize_youtube_title, parse_youtube_title, safe_filename
 from scripts.process_urls import read_rows
@@ -148,6 +149,26 @@ class BatchListTests(unittest.TestCase):
             urls_file.write_text("https://youtu.be/abc123,bad,ctc\n", encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "分離模式"):
                     list(read_rows(urls_file))
+
+    def test_rejects_lookalike_youtube_hostname(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            urls_file = Path(temporary) / "urls.txt"
+            urls_file.write_text("https://www.youtube.com.evil.test/watch?v=x,hybrid,ctc\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "YouTube HTTPS URL"):
+                    list(read_rows(urls_file))
+
+
+class ConfigurationTests(unittest.TestCase):
+    def test_normalizes_hybird_environment_typo(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch.dict(
+                    os.environ,
+                    {
+                        "KTV_CONFIG_PATH": str(Path(temporary) / "missing-config.yaml"),
+                        "KTV_SEPARATOR_BACKEND": "hybird",
+                    },
+            ):
+                    self.assertEqual(load_settings(Path(temporary)).separator_backend, "hybrid")
 
 
 if __name__ == "__main__":

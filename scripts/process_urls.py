@@ -7,11 +7,16 @@ import os
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Iterator
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - installed by requirements.txt
+    def load_dotenv(*_args, **_kwargs):
+        return False
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -27,7 +32,7 @@ def read_rows(path: Path) -> Iterator[tuple[int, str, str, str]]:
                 continue
             if row[0].lstrip().startswith("#"):
                 continue
-            if line_number == 1 and row[0].strip().lower() in {"url", "youtube_url"}:
+            if row[0].strip().lower() in {"url", "youtube_url"}:
                 continue
             if len(row) != 3:
                 raise ValueError(
@@ -40,7 +45,8 @@ def read_rows(path: Path) -> Iterator[tuple[int, str, str, str]]:
             if separator == "hybird":
                 print(f"警告：第 {line_number} 行的 hybird 拼字已自動修正為 hybrid")
                 separator = "hybrid"
-            if not url.startswith(("https://www.youtube.com/", "https://youtube.com/", "https://youtu.be/")):
+            host = urllib.parse.urlparse(url).hostname
+            if host not in {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "www.youtu.be"}:
                 raise ValueError(f"第 {line_number} 行不是支援的 YouTube HTTPS URL")
             if separator not in SEPARATION_BACKENDS:
                 raise ValueError(

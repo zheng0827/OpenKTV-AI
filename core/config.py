@@ -131,7 +131,9 @@ def load_settings(base_dir: Path | None = None) -> AppSettings:
         demucs_model=os.getenv("KTV_DEMUCS_MODEL", separator_cfg.get("demucs_model", "htdemucs_ft")),
         uvr_model_dir=Path(os.getenv("KTV_UVR_MODEL_DIR", root / "model_cache" / "uvr")),
         uvr_model=os.getenv("KTV_UVR_MODEL", separator_cfg.get("uvr_model", "UVR-MDX-NET-Voc_FT.onnx")),
-        separator_backend=os.getenv("KTV_SEPARATOR_BACKEND", separator_cfg.get("backend", "demucs")).strip().lower(),
+        separator_backend=os.getenv(
+            "KTV_SEPARATOR_BACKEND", separator_cfg.get("backend", "demucs")
+        ).strip().lower().replace("hybird", "hybrid"),
         separator_stems=separator_stems,
         device_preference=os.getenv("KTV_DEVICE", "auto").strip().lower(),
         pseudo_delay_ms=_to_int(os.getenv("KTV_PSEUDO_DELAY_MS"), 12),
