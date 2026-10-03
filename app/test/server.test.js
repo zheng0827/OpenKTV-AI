@@ -92,3 +92,12 @@ test('authorized processing proxy forwards separation and alignment options', as
     else process.env.KTV_PROCESSING_API_URL = previousUrl;
   }
 });
+
+test('health endpoint applies a per-client request limit', async () => {
+  let rateLimited = false;
+  for (let index = 0; index < 65 && !rateLimited; index += 1) {
+    const response = await fetch(`${baseUrl}/health`);
+    rateLimited = response.status === 429;
+  }
+  assert.equal(rateLimited, true);
+});

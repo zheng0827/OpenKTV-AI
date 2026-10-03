@@ -228,8 +228,8 @@ def _create_blueprint() -> Blueprint:
                 return json.dumps({"error": f"invalid_{field}"}), 400
         try:
             url = _validate_youtube_url(payload.get("url", ""))
-        except ValueError as error:
-            return json.dumps({"error": str(error)}), 400
+        except ValueError:
+            return json.dumps({"error": "invalid_youtube_url"}), 400
         title = (payload.get("title") or "").strip()[:300]
         singer = (payload.get("singer") or "").strip()[:200]
         lyrics = (payload.get("lyrics_text") or "")[:100_000]

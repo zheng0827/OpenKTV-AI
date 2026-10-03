@@ -10,6 +10,7 @@ import csv from 'csv-parser';
 import MiniSearch from 'minisearch';
 import QRCode from 'qrcode';
 import YAML from 'yaml';
+import { rateLimit } from 'express-rate-limit';
 
 const appDir = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(appDir, '..');
@@ -144,7 +145,25 @@ export async function startServer(port) {
   app.disable('x-powered-by');
   app.use(express.json({ limit: '32kb' }));
   app.use(express.static(publicDir, { index: false, dotfiles: 'deny' }));
-  app.get('/health', (_req, res) => {
+  const healthRateLimit = rateLimit({
+    windowMs: 60_000,
+    limit: 60,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  });
+  const mediaRateLimit = rateLimit({
+    windowMs: 60_000,
+    limit: 180,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  });
+  const pageRateLimit = rateLimit({
+    windowMs: 60_000,
+    limit: 120,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  });
+  app.get('/health', healthRateLimit, (_req, res) => {
     const stats = fs.statfsSync(mediaDir);
     res.json({
       status: 'ok',
@@ -274,7 +293,7 @@ export async function startServer(port) {
     song.lyrics_filename,
     song.lyrics_lrc,
   ]).filter(Boolean));
-  app.get('/media/:filename', (req, res) => {
+  app.get('/media/:filename', mediaRateLimit, (req, res) => {
     const filename = req.params.filename;
     if (path.basename(filename) !== filename || !allowedMedia().has(filename)) {
       return res.status(404).end();
@@ -294,9 +313,9 @@ export async function startServer(port) {
     });
   });
 
-  app.get('/', (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));
-  app.get('/player', (_req, res) => res.sendFile(path.join(publicDir, 'player.html')));
-  app.get('/remote', (_req, res) => res.sendFile(path.join(publicDir, 'remote.html')));
+  app.get('/', pageRateLimit, (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));
+  app.get('/player', pageRateLimit, (_req, res) => res.sendFile(path.join(publicDir, 'player.html')));
+  app.get('/remote', pageRateLimit, (_req, res) => res.sendFile(path.join(publicDir, 'remote.html')));
 
   io.use((socket, next) => {
     const roomId = String(socket.handshake.auth?.roomId || '').toUpperCase();
