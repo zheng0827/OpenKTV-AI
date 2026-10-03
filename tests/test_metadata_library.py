@@ -4,13 +4,15 @@ import sys
 import tempfile
 import types
 import unittest
+import urllib.parse
 from pathlib import Path
 from unittest.mock import patch
 
 from core.config import ensure_processing_api_tokens, load_settings
 from core.environment import load_project_environment
 from core.library import update_library_index
-from core.metadata import match_spotify_track, normalize_youtube_title, parse_youtube_title, safe_filename
+from core.downloader import download_youtube_video
+from core.metadata import extract_youtube_metadata, match_spotify_track, normalize_youtube_title, parse_youtube_title, safe_filename
 from core.node_runtime import missing_node_dependencies
 from scripts.process_urls import read_rows
 
@@ -51,6 +53,62 @@ class MetadataTests(unittest.TestCase):
         self.assertEqual(result["status"], "matched")
         self.assertEqual(result["track"]["id"], "track-id")
         self.assertEqual(result["track"]["release_year"], "1999")
+
+    def test_spotify_search_retries_with_broader_query_when_structured_search_is_empty(self):
+        requests = []
+        track = {
+            "name": "Song",
+            "artists": [{"name": "Artist"}],
+            "album": {"name": "Album", "release_date": "2024"},
+            "duration_ms": 180000,
+            "id": "track-id",
+            "external_urls": {"spotify": "https://open.spotify.com/track/track-id"},
+        }
+
+        def spotify_request(url, headers=None, data=None):
+            requests.append(urllib.parse.parse_qs(urllib.parse.urlparse(url).query).get("q", [None])[0])
+            if len(requests) == 1:
+                return {"tracks": {"items": []}}
+            return {"tracks": {"items": [track]}}
+
+        with patch("core.metadata._spotify_access_token", return_value="test-token"), patch(
+            "core.metadata._spotify_request", side_effect=spotify_request
+        ):
+            result = match_spotify_track("Song", "Artist")
+        self.assertEqual(requests, ['track:"Song" artist:"Artist"', "Song Artist"])
+        self.assertEqual(result["status"], "matched")
+        self.assertEqual(result["track"]["id"], "track-id")
+
+    def test_youtube_metadata_enables_node_javascript_runtime(self):
+        options_seen = []
+
+        class FakeYoutubeDL:
+            def __init__(self, options):
+                self.options = options
+                options_seen.append(options)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def extract_info(self, _url, download=False):
+                return {"title": "Artist - Song", "uploader": "Artist", "id": "video"}
+
+        with patch.dict(sys.modules, {"yt_dlp": types.SimpleNamespace(YoutubeDL=FakeYoutubeDL)}):
+            result = extract_youtube_metadata("https://youtu.be/video")
+        self.assertEqual(result["song"], "Song")
+        self.assertEqual(options_seen[0]["js_runtimes"], {"node": {}})
+
+    def test_downloader_passes_node_javascript_runtime_to_yt_dlp(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch("core.downloader.subprocess.run") as run:
+                download_youtube_video("https://youtu.be/video", root / "song.mp4", root, root / "missing-yt-dlp")
+            command = run.call_args.args[0]
+        self.assertIn("--js-runtimes", command)
+        self.assertEqual(command[command.index("--js-runtimes") + 1], "node")
 
 
 class LibraryTests(unittest.TestCase):

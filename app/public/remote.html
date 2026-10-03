@@ -4,24 +4,26 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>OpenKTV 手機點歌</title><script src="/socket.io/socket.io.js"></script>
   <style>
-    *{box-sizing:border-box}body{margin:0;background:#0b1020;color:#edf1ff;font:16px system-ui,sans-serif}
-    main{max-width:720px;margin:auto;padding:24px 18px 90px}h1{margin:4px 0}.hint{color:#9ba7c0;line-height:1.6}
-    input,button{width:100%;border:0;border-radius:12px;padding:13px;font:inherit}input{background:#1a2437;color:white;border:1px solid #35415a}
-    button{background:#695cff;color:white;font-weight:700;cursor:pointer}.bar{display:flex;gap:9px;margin:16px 0}.bar>*{flex:1}
-    .song,.queue-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 4px;border-bottom:1px solid #263149}
-    .song small{display:block;color:#9ba7c0;margin-top:3px}.song button{width:auto;padding:9px 14px}
-    .queue-item{display:block;color:#bac5db}.error{color:#ff9d9d}.tabs{display:flex;gap:8px;margin:18px 0}.tabs a{color:white;text-decoration:none;padding:10px;border-radius:9px;background:#202b40}
+    :root{color-scheme:dark;--bg:#090b13;--panel:#151929;--line:#292f45;--text:#f6f5ff;--muted:#a5abc0;--accent:#8874ff;--mint:#72e1c1}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 20% -20%,#272044 0,transparent 44%),var(--bg);color:var(--text);font:15px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
+    main{max-width:760px;margin:auto;padding:clamp(22px,6vw,54px) 18px 90px}h1{margin:4px 0;font-size:clamp(2rem,7vw,3.4rem);letter-spacing:-.04em}.hint{color:var(--muted);line-height:1.65}
+    input,button{width:100%;border:1px solid #ffffff18;border-radius:13px;padding:13px;font:inherit}input{background:#1a2032;color:white}
+    button{background:linear-gradient(135deg,#907bff,#6754df);color:white;border:0;font-weight:750;cursor:pointer}.bar{display:flex;gap:9px;margin:16px 0}.bar>*{flex:1;min-width:0}
+    .song,.queue-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px;margin:8px 0;border:1px solid #ffffff12;border-radius:15px;background:linear-gradient(145deg,#171b2a,#10131e)}
+    .song small{display:block;color:var(--muted);margin-top:3px}.song button{width:auto;padding:9px 14px;white-space:nowrap}
+    .queue-item{display:block;color:#d5d7e5}.error{color:#ff9d9d}.tabs{display:flex;gap:8px;margin:18px 0;flex-wrap:wrap}.tabs a{color:white;text-decoration:none;padding:10px 13px;border-radius:11px;background:#20263a;border:1px solid #ffffff0c}
+    section{margin-top:25px;padding:16px;border-radius:18px;border:1px solid #ffffff10;background:#ffffff04}h2{font-size:1rem}
   </style>
 </head>
 <body><main>
-  <h1>📱 手機點歌</h1><p class="hint">輸入歌房 ID，或使用主播放器的 QR Code 掃描加入。</p>
-  <div class="bar"><input id="roomId" maxlength="12" placeholder="歌房 ID"><button id="join">加入歌房</button></div>
+  <div style="color:#b9aaff;font-weight:750;letter-spacing:.1em">🎵 OPENKTV REMOTE</div><h1>📱 手機點歌</h1><p class="hint">輸入歌房 ID，或使用主播放器的 QR Code 掃描加入。</p>
+  <div class="bar"><input id="roomId" maxlength="12" placeholder="🔑 歌房 ID"><button id="join">🚪 加入歌房</button></div>
   <p class="hint" id="connection">尚未連線</p><p class="error" id="error"></p>
-  <div class="tabs"><a href="/">系統首頁</a><a href="/player">主播放器</a></div>
-  <input id="query" placeholder="搜尋歌名或歌手">
-  <section><h2>搜尋結果</h2><div id="results"></div></section>
-  <section><h2>播放佇列</h2><div id="queue"></div></section>
-  <div class="bar"><button id="pause">暫停</button><button id="next">切歌</button></div>
+  <div class="tabs"><a href="/">⌂ 系統首頁</a><a href="/player">🎬 主播放器</a><a href="/download">🎧 新增歌曲</a></div>
+  <input id="query" placeholder="🔎 搜尋歌名或歌手">
+  <section><h2>🎼 搜尋結果</h2><div id="results"></div></section>
+  <section><h2>📃 播放佇列</h2><div id="queue"></div></section>
+  <div class="bar"><button id="pause">⏸️ 暫停</button><button id="next">⏭️ 切歌</button></div>
   <p class="hint">遙控端可點歌；播放控制需由已授權的主播放器執行。</p>
 </main>
 <script type="module">

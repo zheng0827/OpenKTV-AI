@@ -315,6 +315,7 @@ export async function startServer(port) {
 
   app.get('/', pageRateLimit, (_req, res) => res.sendFile(path.join(publicDir, 'index.html')));
   app.get('/player', pageRateLimit, (_req, res) => res.sendFile(path.join(publicDir, 'player.html')));
+  app.get('/download', pageRateLimit, (_req, res) => res.sendFile(path.join(publicDir, 'download.html')));
   app.get('/remote', pageRateLimit, (_req, res) => res.sendFile(path.join(publicDir, 'remote.html')));
 
   io.use((socket, next) => {

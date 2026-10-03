@@ -89,11 +89,24 @@ def _spotify_access_token() -> str:
 
 def match_spotify_track(song: str, artist: str, minimum_score: float = 0.72) -> dict:
     token = _spotify_access_token()
-    query = " ".join(part for part in (f'track:"{song}"' if song else "", f'artist:"{artist}"' if artist else "") if part)
-    url = "https://api.spotify.com/v1/search?" + urllib.parse.urlencode({"q": query or song, "type": "track", "limit": 10})
     authorization = {"Authorization": "Bearer " + token}
-    payload = _spotify_request(url, headers=authorization)
-    tracks = payload.get("tracks", {}).get("items", [])
+    queries = list(dict.fromkeys(
+        query for query in (
+            " ".join(part for part in (f'track:"{song}"' if song else "", f'artist:"{artist}"' if artist else "") if part),
+            " ".join(part for part in (song, artist) if part),
+            song,
+        ) if query
+    ))
+    tracks_by_id = {}
+    for query in queries:
+        url = "https://api.spotify.com/v1/search?" + urllib.parse.urlencode({"q": query, "type": "track", "limit": 10})
+        payload = _spotify_request(url, headers=authorization)
+        for track in payload.get("tracks", {}).get("items", []):
+            identity = track.get("id") or (track.get("name", ""), tuple(entry.get("name", "") for entry in track.get("artists", [])))
+            tracks_by_id[identity] = track
+        if tracks_by_id:
+            break
+    tracks = list(tracks_by_id.values())
     candidates = []
     for track in tracks:
         track_name = track.get("name", "")
@@ -107,7 +120,7 @@ def match_spotify_track(song: str, artist: str, minimum_score: float = 0.72) -> 
             score -= 0.35
         candidates.append((score, track))
     if not candidates:
-        return {"status": "not_found", "confidence": 0.0, "track": None}
+        return {"status": "not_found", "confidence": 0.0, "track": None, "search_queries": queries}
 
     candidates.sort(key=lambda item: item[0], reverse=True)
     score, track = candidates[0]
@@ -158,7 +171,7 @@ def match_spotify_track(song: str, artist: str, minimum_score: float = 0.72) -> 
 def extract_youtube_metadata(url: str) -> dict:
     from yt_dlp import YoutubeDL
 
-    with YoutubeDL({"quiet": True, "skip_download": True, "noplaylist": True}) as ydl:
+    with YoutubeDL({"quiet": True, "skip_download": True, "noplaylist": True, "js_runtimes": {"node": {}}}) as ydl:
         info = ydl.extract_info(url, download=False)
     if not isinstance(info, dict):
         raise RuntimeError("yt-dlp did not return video metadata")

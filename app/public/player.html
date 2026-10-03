@@ -29,9 +29,8 @@
     input[type=url],select{width:100%;min-width:0;outline:none}input:focus,select:focus{border-color:#a18cff;box-shadow:0 0 0 3px #8874ff25}
     .meter{width:100%;accent-color:var(--accent)}#qr{width:min(180px,100%);display:block;border-radius:14px;background:white;margin:14px auto 0;padding:8px}#qr[hidden]{display:none}
     .queue{padding:0;margin:0;list-style:none}.queue li{padding:10px 0;border-bottom:1px solid #ffffff12}.queue li:last-child{border-bottom:0}
-    #downloadPanel{border-color:#8c78ff45;background:linear-gradient(150deg,#8874ff12,#ffffff04)}
-    #startJob{width:100%;min-height:46px}.mic{border-color:#72e1c124;background:linear-gradient(150deg,#72e1c10b,#ffffff04)}
-    #micToggle{width:100%}#jobStatus{min-height:1.3em;margin:9px 0 0;color:#d1caff}
+    .mic{border-color:#72e1c124;background:linear-gradient(150deg,#72e1c10b,#ffffff04)}
+    #micToggle{width:100%}
     #error{margin:0;padding:0;color:var(--danger);font-size:.86rem}
     #bottom{min-height:70px;display:flex;align-items:center;gap:8px;padding:10px clamp(18px,4vw,52px);border-top:1px solid #ffffff12;background:#0d101beF}
     #bottom a{color:#bdc2d7;text-decoration:none;padding:9px 12px;border-radius:10px}#bottom a:hover{background:#ffffff0c;color:white}#status{margin-left:auto;color:var(--mint);font-size:.86rem}
@@ -40,44 +39,24 @@
   </style>
 </head>
 <body>
-  <header><div class="brand"><span class="brand-mark">♫</span><span>OpenKTV</span><span class="pill" id="roomLabel">尚未加入歌房</span></div><button id="createRoom">建立歌房</button></header>
+  <header><div class="brand"><span class="brand-mark">🎤</span><span>OpenKTV</span><span class="pill" id="roomLabel">尚未加入歌房</span></div><button id="createRoom">＋ 建立歌房</button></header>
   <main>
     <section class="stage"><video id="video" playsinline></video><audio id="instrumental" preload="auto"></audio><div class="lyrics" id="lyrics"></div><div class="empty" id="empty">建立或加入歌房後即可開始播放</div></section>
     <aside class="side">
-      <section class="song-card"><h2 id="songTitle">等待點歌</h2><div class="sub" id="songArtist">加入歌房以開始</div>
-        <div class="controls"><button id="play">播放</button><button class="secondary" id="pause">暫停</button><button class="secondary" id="next">切歌</button></div>
-        <label>播放音量 <input class="meter" id="musicVolume" type="range" min="0" max="1" step=".01" value="1"></label>
+      <section class="song-card"><h2 id="songTitle">🎵 等待點歌</h2><div class="sub" id="songArtist">加入歌房以開始</div>
+        <div class="controls"><button id="play">▶️ 播放</button><button class="secondary" id="pause">⏸️ 暫停</button><button class="secondary" id="next">⏭️ 切歌</button></div>
+        <label>🔊 播放音量 <input class="meter" id="musicVolume" type="range" min="0" max="1" step=".01" value="1"></label>
       </section>
-      <section class="section-card"><h3>手機加入歌房</h3><div class="sub" id="joinUrl">建立歌房後顯示手機加入連結</div><img id="qr" hidden alt="手機加入歌房 QR Code"></section>
-      <section class="section-card"><h3>播放佇列</h3><ul class="queue" id="queue"></ul></section>
-      <section id="downloadPanel" class="section-card" hidden>
-        <h3>新增歌曲</h3>
-        <input id="youtubeUrl" type="url" maxlength="2048" placeholder="YouTube 影片網址">
-        <label class="sub">分離模式
-          <select id="separatorBackend" class="meter">
-            <option value="hybrid">Hybrid（UVR 人聲 + Demucs 伴奏）</option>
-            <option value="demucs">Demucs</option>
-            <option value="uvr">UVR</option>
-          </select>
-        </label>
-        <label class="sub">歌詞對齊模式
-          <select id="alignmentBackend" class="meter">
-            <option value="ctc">CTC</option>
-            <option value="whisperx">WhisperX</option>
-            <option value="qwen">Qwen</option>
-          </select>
-        </label>
-        <div class="row"><button id="startJob">背景下載與處理</button></div>
-        <p class="sub" id="jobStatus"></p>
-      </section>
-      <section class="section-card mic"><h3>麥克風監聽</h3><p class="sub">使用低延遲本機處理；建議配戴耳機以避免喇叭回授。</p>
-        <button id="micToggle" class="secondary">啟用麥克風監聽</button>
-        <label class="sub">混響量 <input class="meter" id="reverb" type="range" min="0" max=".8" step=".01" value=".25"></label>
+      <section class="section-card"><h3>📲 手機掃碼加入</h3><div class="sub" id="joinUrl">建立歌房後顯示手機加入連結</div><img id="qr" hidden alt="手機加入歌房 QR Code"></section>
+      <section class="section-card"><h3>📃 播放佇列</h3><ul class="queue" id="queue"></ul></section>
+      <section class="section-card mic"><h3>🎙️ 麥克風監聽</h3><p class="sub">使用低延遲本機處理；建議配戴耳機以避免喇叭回授。</p>
+        <button id="micToggle" class="secondary">🎙️ 啟用麥克風監聽</button>
+        <label class="sub">✨ 混響量 <input class="meter" id="reverb" type="range" min="0" max=".8" step=".01" value=".25"></label>
       </section>
       <p class="sub" id="error"></p>
     </aside>
   </main>
-  <nav id="bottom"><a href="/">首頁</a><a href="/remote">手機點歌</a><span id="status">未連線</span></nav>
+  <nav id="bottom"><a href="/">⌂ 首頁</a><a href="/download" id="downloadLink">🎧 新增歌曲</a><a href="/remote">📱 手機點歌</a><span id="status">未連線</span></nav>
   <script type="module">
     const video=document.querySelector('#video'), instrumental=document.querySelector('#instrumental');
     const roomLabel=document.querySelector('#roomLabel'), errorBox=document.querySelector('#error');
@@ -96,7 +75,7 @@
       document.querySelector('#play').disabled=!adminToken;
       document.querySelector('#pause').disabled=!adminToken;
       document.querySelector('#next').disabled=!adminToken;
-      document.querySelector('#downloadPanel').hidden=!adminToken;
+      document.querySelector('#downloadLink').href=`/download?room=${encodeURIComponent(id)}`;
       if(token)localStorage.setItem(`openktv-admin-${id}`,token);
     }
     function render(state){
@@ -159,29 +138,6 @@
     document.querySelector('#reverb').oninput=e=>{
       if(audioContext&&micWetGain)micWetGain.gain.setTargetAtTime(Number(e.target.value)*.35,audioContext.currentTime,.04);
       socket?.emit('set_effects',{reverb:Number(e.target.value)});
-    };
-    document.querySelector('#startJob').onclick=async()=>{
-      const target=document.querySelector('#jobStatus'),url=document.querySelector('#youtubeUrl').value.trim();
-      if(!/^https:\/\/(www\.)?(youtube\.com|youtu\.be)\//i.test(url)){target.textContent='請輸入有效的 YouTube URL';return}
-      const submitButton=document.querySelector('#startJob');submitButton.disabled=true;target.textContent='正在提交背景工作…';
-      try{
-        const response=await fetch(`/api/rooms/${roomId}/jobs`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+adminToken},body:JSON.stringify({url,options:{separator_backend:document.querySelector('#separatorBackend').value,alignment_backend:document.querySelector('#alignmentBackend').value}})});
-        const job=await response.json();
-        if(!response.ok){
-          if(job.error==='processing_service_not_configured')throw new Error('處理服務憑證無效。用 python main.py 重新啟動，或檢查兩個服務的 token 設定（需相同且至少 32 字元）。');
-          throw new Error(job.error||'job_submit_failed');
-        }
-        target.textContent=`工作已加入佇列：${job.job_id}`;
-        const timer=setInterval(async()=>{
-          try{
-            const statusResponse=await fetch(`/api/rooms/${roomId}/jobs/${job.job_id}`,{headers:{Authorization:'Bearer '+adminToken}});
-            const status=await statusResponse.json();
-            if(!statusResponse.ok)throw new Error(status.error||'無法查詢背景工作');
-            target.textContent=`${status.status} · attempt ${status.attempt||1} · ${status.progress||0}%`;
-            if(['complete','failed','needs_review'].includes(status.status)){clearInterval(timer);submitButton.disabled=false;if(status.status!=='complete')target.textContent+=` · ${status.error||''}`}
-          }catch(error){clearInterval(timer);submitButton.disabled=false;target.textContent=`無法讀取背景工作狀態：${error.message}`}
-        },2000);
-      }catch(error){target.textContent=`無法提交工作：${error.message}`;submitButton.disabled=false}
     };
     video.onended=()=>{if(roomState?.current)socket?.emit('song_ended',{songId:roomState.current.id})};
     window.addEventListener('keydown',e=>{if(e.code==='Space'&&document.activeElement===document.body){e.preventDefault();socket?.emit('control',{action:roomState?.isPlaying?'pause':'play'})}});

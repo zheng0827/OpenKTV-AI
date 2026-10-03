@@ -55,6 +55,14 @@ test('health, room QR, and library media range requests work', async () => {
   assert.equal((await fetch(`${baseUrl}/media/unknown.mp4`)).status, 404);
 });
 
+test('standalone download page is routed separately from the player', async () => {
+  const downloadPage = await fetch(`${baseUrl}/download`).then((response) => response.text());
+  const playerPage = await fetch(`${baseUrl}/player`).then((response) => response.text());
+  assert.match(downloadPage, /新增一首好歌/);
+  assert.match(downloadPage, /localStorage/);
+  assert.doesNotMatch(playerPage, /youtubeUrl|separatorBackend|alignmentBackend/);
+});
+
 test('authorized processing proxy forwards separation and alignment options', async () => {
   const room = await fetch(`${baseUrl}/api/rooms`, { method: 'POST' }).then((response) => response.json());
   const previousToken = process.env.KTV_PROCESSING_API_TOKEN;
@@ -76,6 +84,8 @@ test('authorized processing proxy forwards separation and alignment options', as
       },
       body: JSON.stringify({
         url: 'https://youtu.be/abc123',
+        title: 'Manual song',
+        singer: 'Manual artist',
         options: { separator_backend: 'hybrid', alignment_backend: 'whisperx' },
       }),
     });
@@ -84,6 +94,8 @@ test('authorized processing proxy forwards separation and alignment options', as
       separator_backend: 'hybrid',
       alignment_backend: 'whisperx',
     });
+    assert.equal(forwardedPayload.title, 'Manual song');
+    assert.equal(forwardedPayload.singer, 'Manual artist');
   } finally {
     globalThis.fetch = originalFetch;
     if (previousToken === undefined) delete process.env.KTV_PROCESSING_API_TOKEN;

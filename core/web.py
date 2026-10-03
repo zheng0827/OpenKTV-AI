@@ -90,7 +90,7 @@ def _extract_youtube_title(url: str) -> dict[str, str]:
     except Exception as error:
         raise RuntimeError(f"無法載入 yt-dlp 模組: {error}") from error
 
-    with YoutubeDL({"quiet": True, "skip_download": True, "extract_flat": True}) as ydl:
+    with YoutubeDL({"quiet": True, "skip_download": True, "extract_flat": True, "js_runtimes": {"node": {}}}) as ydl:
         payload = ydl.extract_info(safe_url, download=False)
     title = (payload or {}).get("title") or ""
     uploader = (payload or {}).get("uploader") or ""
@@ -107,7 +107,7 @@ def _playlist_entries(url: str, settings: AppSettings) -> list[dict]:
     except Exception as error:
         raise RuntimeError(f"無法載入 yt-dlp 模組: {error}") from error
 
-    with YoutubeDL({"quiet": True, "extract_flat": True, "skip_download": True}) as ydl:
+    with YoutubeDL({"quiet": True, "extract_flat": True, "skip_download": True, "js_runtimes": {"node": {}}}) as ydl:
         payload = ydl.extract_info(safe_url, download=False)
     entries = []
     for item in payload.get("entries", []) or []:
@@ -283,7 +283,10 @@ def _create_blueprint() -> Blueprint:
                         job["progress"] = 100
                         return
                     last_message = job["logs"][-1] if job["logs"] else ""
-                    if "Spotify 曲目比對狀態為 needs_review" in last_message:
+                    if any(
+                        f"Spotify 曲目比對狀態為 {status}" in last_message
+                        for status in ("needs_review", "not_found")
+                    ):
                         job["status"] = "needs_review"
                         job["error"] = last_message
                         return

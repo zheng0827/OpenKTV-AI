@@ -30,9 +30,10 @@ CSV 會記錄 Spotify 歌曲／歌手／專輯 metadata、來源、對齊模型�
 
 ## 啟動
 
-先安裝 Python／Node.js 依賴並完成 `.env` 設定：
+使用 Python 3.11 以上版本與 Node.js 18 以上版本，先安裝依賴並完成 `.env` 設定。yt-dlp 已設定使用 Node.js 作為 YouTube JavaScript runtime；請確保 Node.js 已安裝且能從終端機執行：
 
 ```bash
+python --version
 pip install -r requirements.txt
 npm --prefix app install
 ```
@@ -55,7 +56,7 @@ python main.py
 
 ## 新增／批次下載歌曲
 
-- 桌面啟動後，在新版播放器右側建立歌房，下載區會出現「分離模式」及「歌詞對齊模式」選單。選好模式、貼上 YouTube 影片網址，再按「背景下載與處理」。
+- 桌面啟動後，先在主播放器建立歌房，再使用導覽列或首頁的「新增歌曲」開啟獨立下載頁。選擇分離／對齊模式、貼上 YouTube 網址後送出；播放器畫面不包含下載表單。
 - 也可以在專案根目錄建立 `urls.txt`，每列使用 CSV 格式：`YouTube URL,分離模式,對齊模式`。模式支援 `hybrid`／`demucs`／`uvr` 及 `ctc`／`whisperx`／`qwen`。可有標題列及 `#` 註解；Hybrid 拼字請用 `hybrid`（腳本也會自動修正常見的 `hybird` typo）。
 - 複製 `urls.txt.example` 作為格式範本，並在 Flask 與 Node 服務啟動後執行：
 

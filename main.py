@@ -177,6 +177,8 @@ class ServerApp(tk.Tk):
                 self.log_message(f"以下系統環境變數優先於 .env：{keys}")
         else:
             self.log_message(f"找不到環境設定檔：{ROOT_DIR / '.env'}；將使用系統環境變數與預設值。")
+        if sys.version_info < (3, 11):
+            self.log_message("警告：目前 Python 版本低於 3.11；請更新虛擬環境，避免 yt-dlp 停止支援 Python 3.10。")
         self.update_stats()
         self.check_log_queue()
         self.start_services()

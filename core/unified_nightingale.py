@@ -545,14 +545,24 @@ class KTVProcessor:
         try:
             youtube = extract_youtube_metadata(url)
             parsed_title = youtube.get("title") or manual_title
-            song_name = youtube.get("song") or manual_title
-            inferred_artist = youtube.get("artist") or singer
-            self.log(f"YouTube 標題解析：{parsed_title}")
+            song_name = manual_title or youtube.get("song") or ""
+            inferred_artist = singer or youtube.get("artist") or ""
+            self.log(
+                f"YouTube 標題解析：{parsed_title} "
+                f"(歌名={song_name or '未辨識'}, 歌手={inferred_artist or '未辨識'})"
+            )
             spotify = match_spotify_track(song_name, inferred_artist, self.settings.spotify_match_threshold)
             if spotify["status"] != "matched":
+                if spotify["status"] == "not_found":
+                    self.log(
+                        f"Spotify 搜尋無結果：song={song_name!r}, artist={inferred_artist!r}, "
+                        f"queries={spotify.get('search_queries', [])!r}"
+                    )
                 raise RuntimeError(
                     f"Spotify 曲目比對狀態為 {spotify['status']} "
-                    f"(confidence={spotify['confidence']:.2f})；請確認 Spotify API 憑證或人工核對歌曲，"
+                    f"(confidence={spotify['confidence']:.2f})；"
+                    f"{'Spotify 搜尋沒有找到候選曲目，請核對 YouTube 標題解析出的歌名／歌手或人工輸入正確資訊。' if spotify['status'] == 'not_found' else '請人工核對歌曲，'}"
+                    f"搜尋詞={json.dumps(spotify.get('search_queries', []), ensure_ascii=False)}；"
                     f"未開始下載。候選={json.dumps(spotify.get('candidates', []), ensure_ascii=False)}"
                 )
             spotify_track = spotify["track"]

@@ -3,18 +3,50 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>OpenKTV</title>
+  <meta name="theme-color" content="#090b13">
+  <title>OpenKTV · 今晚唱什麼？</title>
   <style>
-    *{box-sizing:border-box}body{margin:0;background:#090d18;color:#eef2ff;font:16px system-ui,sans-serif;min-height:100vh;display:grid;place-items:center}
-    main{width:min(680px,92vw);padding:40px;border:1px solid #28324a;border-radius:24px;background:#111827;box-shadow:0 24px 90px #0008}
-    h1{font-size:clamp(2.2rem,8vw,4rem);margin:0 0 8px}p{color:#aab4cc;line-height:1.65}.actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:28px}
-    a,button{display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:12px;padding:14px 20px;background:#695cff;color:white;font:inherit;font-weight:700;text-decoration:none;cursor:pointer}
-    a.secondary{background:#26324a}footer{margin-top:32px;color:#7985a1;font-size:.85rem}
+    :root{color-scheme:dark;--bg:#090b13;--panel:#151929;--line:#292f45;--text:#f6f5ff;--muted:#a5abc0;--accent:#8874ff;--mint:#72e1c1}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;color:var(--text);font:15px/1.55 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;background:radial-gradient(ellipse at 15% -15%,#35245d 0,transparent 42%),radial-gradient(ellipse at 100% 50%,#16333144 0,transparent 38%),var(--bg)}
+    header{height:76px;display:flex;align-items:center;justify-content:space-between;padding:12px clamp(18px,6vw,86px);border-bottom:1px solid #ffffff12;background:#0d101beF}
+    .brand{display:flex;align-items:center;gap:11px;font-weight:850;font-size:1.18rem}.mark{display:grid;place-items:center;width:40px;height:40px;border-radius:14px;background:linear-gradient(140deg,#a18cff,#6753e8);box-shadow:0 9px 25px #7760ff44;font-size:1.3rem}
+    .live{display:flex;align-items:center;gap:8px;color:var(--mint);font-size:.84rem}.dot{width:8px;height:8px;border-radius:50%;background:var(--mint);box-shadow:0 0 12px var(--mint)}
+    main{width:min(1180px,100%);margin:auto;padding:clamp(38px,8vw,100px) clamp(20px,6vw,70px) 56px}
+    .hero{max-width:760px}.eyebrow{color:#b9aaff;font-weight:750;letter-spacing:.11em;text-transform:uppercase;font-size:.78rem}
+    h1{font-size:clamp(3rem,9vw,6.8rem);line-height:.96;letter-spacing:-.06em;margin:18px 0 22px}.shine{background:linear-gradient(100deg,#f3edff,#b9acff 60%,#72e1c1);-webkit-background-clip:text;background-clip:text;color:transparent}
+    .lead{max-width:590px;color:#b4bad0;font-size:clamp(1rem,2.3vw,1.2rem);line-height:1.8}
+    .actions{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-top:42px}
+    .action{position:relative;min-height:210px;display:flex;flex-direction:column;justify-content:space-between;padding:24px;border:1px solid #ffffff14;border-radius:22px;background:linear-gradient(145deg,#1a1e30,#111522);text-decoration:none;color:var(--text);transition:transform .2s,border .2s,background .2s}
+    .action:hover{transform:translateY(-5px);border-color:#9a88ff80;background:linear-gradient(145deg,#24213b,#121624)}
+    .icon{font-size:2rem}.arrow{font-size:1.2rem;color:#b9acff}.action h2{margin:14px 0 4px;font-size:1.2rem}.action p{margin:0;color:var(--muted);line-height:1.6;font-size:.9rem}
+    .action.primary{border-color:#8874ff55;background:linear-gradient(145deg,#302656,#17182a)}
+    .foot{margin-top:30px;color:#858da6;font-size:.86rem}#health{color:var(--mint)}
+    @media(max-width:760px){header{height:66px;padding:10px 18px}.actions{grid-template-columns:1fr}.action{min-height:150px;padding:20px}.hero{max-width:570px}h1{margin:15px 0}}
   </style>
 </head>
-<body><main>
-  <h1>OpenKTV</h1><p>建立歌房並在主螢幕播放，或使用手機加入歌房點歌。</p>
-  <div class="actions"><a href="/player">開啟主播放器</a><a class="secondary" href="/remote">手機遙控／加入歌房</a></div>
-  <footer><span id="health">正在檢查服務…</span></footer>
-  <script>fetch('/health').then(r=>r.json()).then(s=>document.querySelector('#health').textContent=`播放服務正常 · 曲庫 ${s.librarySongs} 首 · ${s.rooms} 個歌房`).catch(()=>document.querySelector('#health').textContent='播放服務狀態無法取得');</script>
-</main></body></html>
+<body>
+  <header><div class="brand"><span class="mark">♫</span>OpenKTV</div><div class="live"><span class="dot"></span><span id="health">正在連線</span></div></header>
+  <main>
+    <section class="hero">
+      <div class="eyebrow">🎤 你的私人歡唱時光</div>
+      <h1>今晚，<br><span class="shine">唱你喜歡的。</span></h1>
+      <p class="lead">建立歌房、搜尋曲庫、邀請朋友一起唱。讓每個人都能輕鬆加入，下一首好歌隨時準備好。</p>
+    </section>
+    <section class="actions" aria-label="OpenKTV 功能">
+      <a class="action primary" href="/player"><span class="icon">🎬</span><div><h2>開啟 KTV 歌房</h2><p>建立歌房、播放歌曲、查看歌詞與佇列。</p></div><span class="arrow">↗</span></a>
+      <a class="action" href="/remote"><span class="icon">📱</span><div><h2>手機點歌遙控</h2><p>加入朋友的歌房，搜尋曲庫並把喜歡的歌排進佇列。</p></div><span class="arrow">↗</span></a>
+      <a class="action" href="/download"><span class="icon">🎧</span><div><h2>新增歌曲到曲庫</h2><p>獨立管理下載與處理工作，不影響播放畫面。</p></div><span class="arrow">↗</span></a>
+    </section>
+    <p class="foot">準備就緒 · <span id="stats">正在取得曲庫資訊…</span></p>
+  </main>
+  <script>
+    fetch('/health').then(response=>response.json()).then(state=>{
+      document.querySelector('#health').textContent='服務正常';
+      document.querySelector('#stats').textContent=`${state.librarySongs} 首歌曲 · ${state.rooms} 個進行中的歌房`;
+    }).catch(()=>{
+      document.querySelector('#health').textContent='服務狀態未知';
+      document.querySelector('#stats').textContent='目前無法取得播放服務狀態';
+    });
+  </script>
+</body>
+</html>
