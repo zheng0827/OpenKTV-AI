@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from core.config import ensure_processing_api_tokens, load_settings
+from core.environment import load_project_environment
 from core.library import update_library_index
 from core.metadata import match_spotify_track, normalize_youtube_title, parse_youtube_title, safe_filename
 from scripts.process_urls import read_rows
@@ -179,6 +180,34 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(environment["KTV_JOB_API_TOKEN"], environment["KTV_PROCESSING_API_TOKEN"])
         self.assertGreaterEqual(len(environment["KTV_JOB_API_TOKEN"]), 32)
         self.assertFalse(ensure_processing_api_tokens(environment))
+
+    def test_loads_project_env_and_preserves_existing_system_environment(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / ".env").write_text(
+                "KTV_TEST_FROM_DOTENV=loaded\nKTV_TEST_PRECEDENCE=from-file\n",
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {
+                    "KTV_TEST_PRECEDENCE": "from-system",
+                    "KTV_TEST_FROM_DOTENV": "",
+                },
+                clear=True,
+            ):
+                result = load_project_environment(root)
+                self.assertEqual(result.path, (root / ".env").resolve())
+                self.assertEqual(os.getenv("KTV_TEST_PRECEDENCE"), "from-system")
+                self.assertEqual(os.getenv("KTV_TEST_FROM_DOTENV"), "")
+                self.assertIn("KTV_TEST_PRECEDENCE", result.shadowed_keys)
+                self.assertIn("KTV_TEST_FROM_DOTENV", result.shadowed_keys)
+
+    def test_reports_missing_project_env_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            result = load_project_environment(Path(temporary))
+            self.assertIsNone(result.path)
+            self.assertEqual(result.shadowed_keys, ())
 
 
 if __name__ == "__main__":

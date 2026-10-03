@@ -1,3 +1,8 @@
+from .environment import load_project_environment
+
+ENVIRONMENT_LOAD_RESULT = load_project_environment()
+
+
 def _patch_torch_load_weights_only_default() -> None:
     """PyTorch >=2.6 defaults torch.load(weights_only=True), which breaks loading
     pyannote/whisperx checkpoints that pickle omegaconf config objects (e.g. the VAD

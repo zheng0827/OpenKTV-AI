@@ -18,7 +18,7 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox
 
-from core import load_settings
+from core import ENVIRONMENT_LOAD_RESULT, load_settings
 from core.config import ensure_processing_api_tokens
 from core.web import create_app, get_local_ip, register_socket_handlers
 
@@ -169,6 +169,13 @@ class ServerApp(tk.Tk):
             self, height=10, state="disabled", bg="#222", fg="#0f0", font=("Consolas", 9)
         )
         self.log_txt.pack(fill="both", expand=True, padx=20, pady=10)
+        if ENVIRONMENT_LOAD_RESULT.path:
+            self.log_message(f"已載入環境設定檔：{ENVIRONMENT_LOAD_RESULT.path}")
+            if ENVIRONMENT_LOAD_RESULT.shadowed_keys:
+                keys = ", ".join(ENVIRONMENT_LOAD_RESULT.shadowed_keys)
+                self.log_message(f"以下系統環境變數優先於 .env：{keys}")
+        else:
+            self.log_message(f"找不到環境設定檔：{ROOT_DIR / '.env'}；將使用系統環境變數與預設值。")
         self.update_stats()
         self.check_log_queue()
         self.start_services()

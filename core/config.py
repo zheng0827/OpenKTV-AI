@@ -5,11 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import MutableMapping
 
-try:
-    from dotenv import load_dotenv
-except Exception:  # pragma: no cover
-    def load_dotenv(*_args, **_kwargs):
-        return False
+from .environment import load_project_environment
 
 
 def _to_float(value: str, default: float) -> float:
@@ -103,7 +99,7 @@ def resolve_base_dir() -> Path:
 
 def load_settings(base_dir: Path | None = None) -> AppSettings:
     root = base_dir or resolve_base_dir()
-    load_dotenv(dotenv_path=root / ".env", override=False)
+    load_project_environment(root)
     config_values = {}
     config_path = Path(os.getenv("KTV_CONFIG_PATH", root / "config.yaml"))
     if config_path.is_file():
