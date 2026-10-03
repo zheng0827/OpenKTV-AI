@@ -49,14 +49,14 @@ python main.py
 ## 設定與金鑰
 
 - `config.yaml` 是兩個服務共用的非機密設定檔；可用 `KTV_CONFIG_PATH` 指定其他位置。啟動時會依專案根目錄的絕對路徑載入 `.env`，不受目前終端機工作目錄影響；同名的系統環境變數優先，啟動器日誌會列出被系統環境變數遮蔽的變數名稱（不顯示值）。
-- 複製 `.env.example` 為 `.env`，設定 Spotify Developer Dashboard 的 Client ID/Secret。Musixmatch 是選用備援，需自行提供合法 API key。
+- 複製 `.env.example` 為 `.env`，設定 Spotify Developer Dashboard 的 Client ID/Secret。可另外設定 Google AI Studio 的 `GOOGLE_GEMINI_API_KEY`，讓 Gemini 解析 YouTube 標題中的歌手與歌名；未設定或 API 暫時失敗時會回退到本機標題解析。模型可透過 `KTV_TITLE_AI_MODEL` 調整。Musixmatch 是選用備援，需自行提供合法 API key。
 - 使用 `python main.py` 桌面一鍵啟動時，若背景工作 token 遺漏、過短或不一致，啟動器會為該次執行產生一組暫存 token，不會寫回 `.env`。若分別啟動 Flask／Node，則 `KTV_JOB_API_TOKEN` 與 `KTV_PROCESSING_API_TOKEN` 必須是相同且至少 32 字元的隨機 token。
 - 對齊模型預設逐一執行以限制記憶體和 GPU 佔用；可設定 `audio_processing.alignment.max_parallel_backends`。Raspberry Pi 4B 建議維持 1。
 - audio-separator 會在首次執行時嘗試取得 `UVR-DeEcho-DeReverb.pth` 模型；若不可用，流程使用保守 DSP 備援。
 
 ## 新增／批次下載歌曲
 
-- 桌面啟動後，先在主播放器建立歌房，再使用導覽列或首頁的「新增歌曲」開啟獨立下載頁。下載頁會自動沿用主播放器的歌房授權，不需手動選擇歌房；從播放器開啟時會另開分頁，避免歌房因播放器離線而關閉。選擇分離／對齊模式、貼上 YouTube 網址後送出；播放器畫面不包含下載表單。
+- 桌面啟動後，先在主播放器建立歌房，再使用導覽列或首頁的「新增歌曲」開啟獨立下載頁。下載頁會自動沿用主播放器的授權，不需手動選擇歌房；從播放器開啟時會另開分頁，避免歌房因播放器離線而關閉。歌曲與曲庫是伺服器全域共用，不屬於特定歌房；所有房間連到同一 Node 服務時都能搜尋與播放。選擇分離／對齊模式、貼上 YouTube 網址後送出；播放器畫面不包含下載表單。
 - 也可以在專案根目錄建立 `urls.txt`，每列使用 CSV 格式：`YouTube URL,分離模式,對齊模式`。模式支援 `hybrid`／`demucs`／`uvr` 及 `ctc`／`whisperx`／`qwen`。可有標題列及 `#` 註解；Hybrid 拼字請用 `hybrid`（腳本也會自動修正常見的 `hybird` typo）。
 - 複製 `urls.txt.example` 作為格式範本，並在 Flask 與 Node 服務啟動後執行：
 

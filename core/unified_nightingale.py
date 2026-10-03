@@ -549,7 +549,8 @@ class KTVProcessor:
             inferred_artist = singer or youtube.get("artist") or ""
             self.log(
                 f"YouTube 標題解析：{parsed_title} "
-                f"(歌名={song_name or '未辨識'}, 歌手={inferred_artist or '未辨識'})"
+                f"(歌名={song_name or '未辨識'}, 歌手={inferred_artist or '未辨識'}, "
+                f"解析器={youtube.get('parser', 'heuristic')})"
             )
             spotify = match_spotify_track(song_name, inferred_artist, self.settings.spotify_match_threshold)
             if spotify["status"] != "matched":

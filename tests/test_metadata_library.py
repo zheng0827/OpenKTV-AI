@@ -12,7 +12,14 @@ from core.config import ensure_processing_api_tokens, load_settings
 from core.environment import load_project_environment
 from core.library import update_library_index
 from core.downloader import download_youtube_video
-from core.metadata import extract_youtube_metadata, match_spotify_track, normalize_youtube_title, parse_youtube_title, safe_filename
+from core.metadata import (
+    extract_youtube_metadata,
+    match_spotify_track,
+    normalize_youtube_title,
+    parse_youtube_title,
+    parse_youtube_title_with_ai,
+    safe_filename,
+)
 from core.node_runtime import missing_node_dependencies
 from scripts.process_urls import read_rows
 
@@ -24,6 +31,36 @@ class MetadataTests(unittest.TestCase):
         self.assertEqual(parsed["song"], "Song")
         self.assertEqual(normalize_youtube_title("Song (Karaoke Version)"), "Song")
         self.assertEqual(safe_filename('Artist: Song/Title?'), "Artist SongTitle")
+
+    def test_parses_reported_fullwidth_promo_title_without_ai(self):
+        with patch.dict(os.environ, {}, clear=True):
+            parsed = parse_youtube_title_with_ai(
+                "美秀集團 Amazing Show-愛情的大壞蛋 Bastards of Love【Official Music Video】",
+                "美秀集團 Official",
+            )
+        self.assertEqual(parsed["artist"], "美秀集團 Amazing Show")
+        self.assertEqual(parsed["song"], "愛情的大壞蛋 Bastards of Love")
+        self.assertEqual(parsed["parser"], "heuristic")
+
+    def test_uses_google_gemini_result_when_api_key_is_configured(self):
+        with patch.dict(os.environ, {"GOOGLE_GEMINI_API_KEY": "test-key"}, clear=True), patch(
+            "core.metadata._google_title_parse",
+            return_value={"artist": "美秀集團", "song": "愛情的大壞蛋 Bastards of Love"},
+        ) as parse:
+            result = parse_youtube_title_with_ai("ambiguous source title", "channel")
+        parse.assert_called_once_with("ambiguous source title", "channel")
+        self.assertEqual(result["artist"], "美秀集團")
+        self.assertEqual(result["song"], "愛情的大壞蛋 Bastards of Love")
+        self.assertEqual(result["parser"], "google_gemini")
+
+    def test_falls_back_to_heuristic_when_google_gemini_fails(self):
+        with patch.dict(os.environ, {"GOOGLE_GEMINI_API_KEY": "test-key"}, clear=True), patch(
+            "core.metadata._google_title_parse", side_effect=RuntimeError("unavailable")
+        ):
+            result = parse_youtube_title_with_ai("Artist - Song [Official MV]")
+        self.assertEqual(result["artist"], "Artist")
+        self.assertEqual(result["song"], "Song")
+        self.assertEqual(result["parser"], "heuristic")
 
     def test_spotify_match_prefers_original_over_cover(self):
         tracks = [

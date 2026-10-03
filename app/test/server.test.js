@@ -39,6 +39,9 @@ test('health, room QR, and library media range requests work', async () => {
   const health = await fetch(`${baseUrl}/health`).then((response) => response.json());
   assert.equal(health.status, 'ok');
   assert.equal(health.librarySongs, 1);
+  const sharedLibrary = await fetch(`${baseUrl}/api/songs`).then((response) => response.json());
+  assert.equal(sharedLibrary.length, 1);
+  assert.equal(sharedLibrary[0].id, 'test-id');
 
   const roomResponse = await fetch(`${baseUrl}/api/rooms`, { method: 'POST' });
   assert.equal(roomResponse.status, 201);
