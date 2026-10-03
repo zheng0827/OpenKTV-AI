@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from core.config import load_settings
+from core.config import ensure_processing_api_tokens, load_settings
 from core.library import update_library_index
 from core.metadata import match_spotify_track, normalize_youtube_title, parse_youtube_title, safe_filename
 from scripts.process_urls import read_rows
@@ -169,6 +169,16 @@ class ConfigurationTests(unittest.TestCase):
                     },
             ):
                     self.assertEqual(load_settings(Path(temporary)).separator_backend, "hybrid")
+
+    def test_creates_ephemeral_matching_processing_tokens_when_invalid(self):
+        environment = {
+            "KTV_JOB_API_TOKEN": "too-short",
+            "KTV_PROCESSING_API_TOKEN": "also-too-short",
+        }
+        self.assertTrue(ensure_processing_api_tokens(environment))
+        self.assertEqual(environment["KTV_JOB_API_TOKEN"], environment["KTV_PROCESSING_API_TOKEN"])
+        self.assertGreaterEqual(len(environment["KTV_JOB_API_TOKEN"]), 32)
+        self.assertFalse(ensure_processing_api_tokens(environment))
 
 
 if __name__ == "__main__":

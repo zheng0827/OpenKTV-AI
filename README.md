@@ -49,7 +49,7 @@ python main.py
 
 - `config.yaml` 是兩個服務共用的非機密設定檔；可用 `KTV_CONFIG_PATH` 指定其他位置。
 - 複製 `.env.example` 為 `.env`，設定 Spotify Developer Dashboard 的 Client ID/Secret。Musixmatch 是選用備援，需自行提供合法 API key。
-- `KTV_JOB_API_TOKEN` 與 `KTV_PROCESSING_API_TOKEN` 必須設為相同的隨機長 token，且不可保留範例 placeholder。金鑰僅放在環境變數／權限受限的環境檔，不要提交至版本庫。
+- 使用 `python main.py` 桌面一鍵啟動時，若背景工作 token 遺漏、過短或不一致，啟動器會為該次執行產生一組暫存 token，不會寫回 `.env`。若分別啟動 Flask／Node，則 `KTV_JOB_API_TOKEN` 與 `KTV_PROCESSING_API_TOKEN` 必須是相同且至少 32 字元的隨機 token。
 - 對齊模型預設逐一執行以限制記憶體和 GPU 佔用；可設定 `audio_processing.alignment.max_parallel_backends`。Raspberry Pi 4B 建議維持 1。
 - audio-separator 會在首次執行時嘗試取得 `UVR-DeEcho-DeReverb.pth` 模型；若不可用，流程使用保守 DSP 備援。
 

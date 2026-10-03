@@ -19,6 +19,7 @@ import tkinter as tk
 from tkinter import messagebox
 
 from core import load_settings
+from core.config import ensure_processing_api_tokens
 from core.web import create_app, get_local_ip, register_socket_handlers
 
 
@@ -56,6 +57,10 @@ if getattr(sys, "frozen", False):
 settings = load_settings()
 ROOT_DIR = settings.base_dir
 APP_DIR = ROOT_DIR / "app"
+
+
+PROCESSING_TOKENS_GENERATED = ensure_processing_api_tokens()
+
 os.environ["PATH"] = os.environ.get("PATH", "") + os.pathsep + str(ROOT_DIR)
 if settings.ffmpeg_dir.exists():
     os.environ["PATH"] += os.pathsep + str(settings.ffmpeg_dir)
@@ -273,6 +278,8 @@ class ServerApp(tk.Tk):
 
     def node_ready(self):
         self.status.config(text=f"服務已啟動 · 新版介面：{node_url}", fg="#2e7d32")
+        if PROCESSING_TOKENS_GENERATED:
+            self.log_message("已為本次桌面啟動產生安全的背景工作連線憑證（僅存在記憶體，不會寫入 .env）。")
         warning = processing_token_warning()
         if warning:
             self.log_message("設定提醒：" + warning)

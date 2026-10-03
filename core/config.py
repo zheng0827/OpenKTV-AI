@@ -3,6 +3,7 @@ import secrets
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import MutableMapping
 
 try:
     from dotenv import load_dotenv
@@ -23,6 +24,23 @@ def _to_int(value: str, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def ensure_processing_api_tokens(environment: MutableMapping[str, str] | None = None) -> bool:
+    target = os.environ if environment is None else environment
+    flask_token = target.get("KTV_JOB_API_TOKEN", "")
+    node_token = target.get("KTV_PROCESSING_API_TOKEN", "")
+    valid = (
+        len(flask_token) >= 32
+        and not flask_token.startswith("replace-")
+        and flask_token == node_token
+    )
+    if valid:
+        return False
+    session_token = secrets.token_urlsafe(32)
+    target["KTV_JOB_API_TOKEN"] = session_token
+    target["KTV_PROCESSING_API_TOKEN"] = session_token
+    return True
 
 
 @dataclass(frozen=True)
