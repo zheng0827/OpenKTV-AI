@@ -1,6 +1,7 @@
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import { rateLimit } from 'express-rate-limit';
 import fs from 'fs';
 import csv from 'csv-parser';
 import MiniSearch from 'minisearch';
@@ -109,11 +110,17 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       const app = express();
       const httpServer = createServer(app);
       const io = new Server(httpServer, { cors: { origin: "*", methods: ["GET", "POST"] } });
+      const mediaRequestLimiter = rateLimit({
+        windowMs: 60 * 1000,
+        limit: 600,
+        standardHeaders: 'draft-8',
+        legacyHeaders: false,
+      });
 
       app.use(express.static(path.join(__dirname, 'public')));
       app.get('/player', (_req, res) => res.redirect('/player.html'));
       app.get(['/remote', '/queue'], (_req, res) => res.redirect('/remote.html'));
-      app.get('/media/:filename', (req, res) => {
+      app.get('/media/:filename', mediaRequestLimiter, (req, res) => {
         const fullPath = mediaPath(req.params.filename);
         if (!fullPath || !fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) {
           return res.sendStatus(404);
