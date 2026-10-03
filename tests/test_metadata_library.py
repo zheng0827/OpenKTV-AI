@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from core.library import update_library_index
 from core.metadata import match_spotify_track, normalize_youtube_title, parse_youtube_title, safe_filename
+from scripts.process_urls import read_rows
 
 
 class MetadataTests(unittest.TestCase):
@@ -120,6 +121,33 @@ class ProcessingApiTests(unittest.TestCase):
                         ).status_code,
                         429,
                     )
+
+
+class BatchListTests(unittest.TestCase):
+    def test_reads_rows_and_corrects_common_hybrid_typo(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            urls_file = Path(temporary) / "urls.txt"
+            urls_file.write_text(
+                    "url,separation_mode,alignment_mode\n"
+                    "https://youtu.be/abc123,hybird,whisperx\n"
+                    "# ignored comment\n"
+                    "https://www.youtube.com/watch?v=def456,uvr,qwen\n",
+                    encoding="utf-8",
+            )
+            self.assertEqual(
+                    list(read_rows(urls_file)),
+                    [
+                        (2, "https://youtu.be/abc123", "hybrid", "whisperx"),
+                        (4, "https://www.youtube.com/watch?v=def456", "uvr", "qwen"),
+                    ],
+            )
+
+    def test_rejects_invalid_mode(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            urls_file = Path(temporary) / "urls.txt"
+            urls_file.write_text("https://youtu.be/abc123,bad,ctc\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "分離模式"):
+                    list(read_rows(urls_file))
 
 
 if __name__ == "__main__":

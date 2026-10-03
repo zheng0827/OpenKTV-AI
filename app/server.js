@@ -217,6 +217,14 @@ export async function startServer(port) {
           url,
           title: typeof req.body?.title === 'string' ? req.body.title.slice(0, 300) : '',
           singer: typeof req.body?.singer === 'string' ? req.body.singer.slice(0, 200) : '',
+          options: {
+            ...(typeof req.body?.options?.separator_backend === 'string'
+              ? { separator_backend: req.body.options.separator_backend }
+              : {}),
+            ...(typeof req.body?.options?.alignment_backend === 'string'
+              ? { alignment_backend: req.body.options.alignment_backend }
+              : {}),
+          },
         }),
         signal: AbortSignal.timeout(10_000),
       });

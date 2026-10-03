@@ -53,6 +53,19 @@ python main.py
 - 對齊模型預設逐一執行以限制記憶體和 GPU 佔用；可設定 `audio_processing.alignment.max_parallel_backends`。Raspberry Pi 4B 建議維持 1。
 - audio-separator 會在首次執行時嘗試取得 `UVR-DeEcho-DeReverb.pth` 模型；若不可用，流程使用保守 DSP 備援。
 
+## 新增／批次下載歌曲
+
+- 桌面啟動後，在新版播放器右側建立歌房，下載區會出現「分離模式」及「歌詞對齊模式」選單。選好模式、貼上 YouTube 影片網址，再按「背景下載與處理」。
+- 也可以在專案根目錄建立 `urls.txt`，每列使用 CSV 格式：`YouTube URL,分離模式,對齊模式`。模式支援 `hybrid`／`demucs`／`uvr` 及 `ctc`／`whisperx`／`qwen`。可有標題列及 `#` 註解；Hybrid 拼字請用 `hybrid`（腳本也會自動修正常見的 `hybird` typo）。
+- 複製 `urls.txt.example` 作為格式範本，並在 Flask 與 Node 服務啟動後執行：
+
+  ```bash
+  python scripts/process_urls.py
+  ```
+
+  或指定清單：`python scripts/process_urls.py D:\OpenKTV\urls.txt`。腳本會按順序提交每首歌、輪詢工作狀態，避免同時塞滿背景處理容量；Flask `.env` 中的 `KTV_JOB_API_TOKEN` 必須是至少 32 字元的隨機值。
+- 若播放器顯示 processing token 設定提醒，請將 `.env` 的 `KTV_JOB_API_TOKEN` 和 `KTV_PROCESSING_API_TOKEN` 設為相同且至少 32 字元的隨機值，然後重新啟動兩個服務。`KTV_SEPARATOR_BACKEND` 若設在 `.env`，請使用有效值 `hybrid`，不要寫成 `hybird`。
+
 ## 部署與監控
 
 - systemd 範本：`deploy/openktv-flask.service`、`deploy/openktv-node.service`。範本預期安裝於 `/opt/openktv-ai`，環境變數檔位於權限受限的 `/etc/openktv-ai/openktv.env`。

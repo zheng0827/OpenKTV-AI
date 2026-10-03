@@ -54,3 +54,41 @@ test('health, room QR, and library media range requests work', async () => {
   assert.equal(await media.text(), '0123');
   assert.equal((await fetch(`${baseUrl}/media/unknown.mp4`)).status, 404);
 });
+
+test('authorized processing proxy forwards separation and alignment options', async () => {
+  const room = await fetch(`${baseUrl}/api/rooms`, { method: 'POST' }).then((response) => response.json());
+  const previousToken = process.env.KTV_PROCESSING_API_TOKEN;
+  const previousUrl = process.env.KTV_PROCESSING_API_URL;
+  const originalFetch = globalThis.fetch;
+  process.env.KTV_PROCESSING_API_TOKEN = 'test-service-token-long-enough-to-pass-validation';
+  process.env.KTV_PROCESSING_API_URL = 'http://processing.test/api/jobs';
+  let forwardedPayload;
+  globalThis.fetch = async (_url, options) => {
+    forwardedPayload = JSON.parse(options.body);
+    return { status: 202, json: async () => ({ job_id: 'a'.repeat(32), status: 'queued' }) };
+  };
+  try {
+    const response = await originalFetch(`${baseUrl}/api/rooms/${room.roomId}/jobs`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + room.adminToken,
+      },
+      body: JSON.stringify({
+        url: 'https://youtu.be/abc123',
+        options: { separator_backend: 'hybrid', alignment_backend: 'whisperx' },
+      }),
+    });
+    assert.equal(response.status, 202);
+    assert.deepEqual(forwardedPayload.options, {
+      separator_backend: 'hybrid',
+      alignment_backend: 'whisperx',
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousToken === undefined) delete process.env.KTV_PROCESSING_API_TOKEN;
+    else process.env.KTV_PROCESSING_API_TOKEN = previousToken;
+    if (previousUrl === undefined) delete process.env.KTV_PROCESSING_API_URL;
+    else process.env.KTV_PROCESSING_API_URL = previousUrl;
+  }
+});
