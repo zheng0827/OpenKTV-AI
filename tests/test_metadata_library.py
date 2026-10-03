@@ -11,6 +11,7 @@ from core.config import ensure_processing_api_tokens, load_settings
 from core.environment import load_project_environment
 from core.library import update_library_index
 from core.metadata import match_spotify_track, normalize_youtube_title, parse_youtube_title, safe_filename
+from core.node_runtime import missing_node_dependencies
 from scripts.process_urls import read_rows
 
 
@@ -208,6 +209,25 @@ class ConfigurationTests(unittest.TestCase):
             result = load_project_environment(Path(temporary))
             self.assertIsNone(result.path)
             self.assertEqual(result.shadowed_keys, ())
+
+
+class NodeRuntimeTests(unittest.TestCase):
+    def test_detects_missing_runtime_packages_even_when_node_modules_exists(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            app_dir = Path(temporary) / "app"
+            modules_dir = app_dir / "node_modules"
+            modules_dir.mkdir(parents=True)
+            (app_dir / "package.json").write_text(
+                '{"dependencies":{"express":"^4","express-rate-limit":"^8"}}',
+                encoding="utf-8",
+            )
+            (modules_dir / "express").mkdir()
+            (modules_dir / "express" / "package.json").write_text("{}", encoding="utf-8")
+            self.assertEqual(missing_node_dependencies(app_dir), ["express-rate-limit"])
+
+    def test_reports_missing_package_manifest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            self.assertEqual(missing_node_dependencies(Path(temporary)), ["app/package.json"])
 
 
 if __name__ == "__main__":

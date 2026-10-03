@@ -20,6 +20,7 @@ from tkinter import messagebox
 
 from core import ENVIRONMENT_LOAD_RESULT, load_settings
 from core.config import ensure_processing_api_tokens
+from core.node_runtime import missing_node_dependencies
 from core.web import create_app, get_local_ip, register_socket_handlers
 
 
@@ -212,9 +213,14 @@ class ServerApp(tk.Tk):
         except (OSError, subprocess.SubprocessError):
             self.fail_startup("無法確認 Node.js 版本，請檢查 Node.js 安裝。")
             return
-        if not (APP_DIR / "node_modules").is_dir():
+        missing_dependencies = missing_node_dependencies(APP_DIR)
+        if missing_dependencies:
+            missing_list = ", ".join(missing_dependencies)
             self.fail_startup(
-                "Node.js 套件尚未安裝。請在專案目錄執行 `npm --prefix app install`，再重新啟動。"
+                f"Node.js 套件未安裝完整：{missing_list}\n"
+                "請在專案根目錄開啟終端機並執行：\n"
+                "npm --prefix app install\n"
+                "安裝成功後重新執行 python main.py。"
             )
             return
 

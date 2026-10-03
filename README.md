@@ -43,7 +43,7 @@ npm --prefix app install
 python main.py
 ```
 
-沒有桌面 GUI 時，可在兩個終端分別執行 `python -m core.server` 與 `npm --prefix app run server`。Node 播放服務預設位於 `http://localhost:3000`；Flask 背景工作 API 預設位於 `http://localhost:5000`。若 Node.js 或 npm 套件尚未安裝，啟動器會顯示安裝提示；Node 服務日誌寫入 `logs/node.log`。
+沒有桌面 GUI 時，可在兩個終端分別執行 `python -m core.server` 與 `npm --prefix app run server`。Node 播放服務預設位於 `http://localhost:3000`；Flask 背景工作 API 預設位於 `http://localhost:5000`。啟動器會逐一檢查 `app/package.json` 宣告的 Node runtime dependencies；若有缺漏（例如 `express-rate-limit`），會顯示套件名稱及修復命令 `npm --prefix app install`，不會再只因 `node_modules` 資料夾存在就誤判依賴完整。Node 服務日誌寫入 `logs/node.log`。
 
 ## 設定與金鑰
 
