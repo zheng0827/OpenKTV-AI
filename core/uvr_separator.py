@@ -51,3 +51,40 @@ def separate_with_uvr(input_path: Path, output_dir: Path, model_dir: Path, model
     if vocals is None or instrumental is None:
         raise FileNotFoundError("UVR output missing vocals or instrumental stem")
     return vocals, instrumental
+
+
+def dereverb_vocals_with_uvr(
+    input_path: Path,
+    output_dir: Path,
+    model_dir: Path,
+    model_name: str,
+    log_cb=print,
+) -> Path:
+    try:
+        from audio_separator.separator import Separator
+    except Exception as error:
+        raise RuntimeError(f"無法載入 UVR 去混響依賴: {error}") from error
+
+    model_dir.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    separator = Separator(
+        log_level=logging.WARNING,
+        model_file_dir=str(model_dir),
+        output_dir=str(output_dir),
+        output_format="WAV",
+        use_soundfile=True,
+    )
+    log_cb(f"UVR 人聲去混響中 (model={model_name})...")
+    separator.load_model(model_name)
+    separator.separate(
+        str(input_path),
+        custom_output_names={"Vocals": "dereverbed_vocals.wav", "Instrumental": "dereverb_residual.wav"},
+    )
+    result = _find_output(
+        output_dir,
+        ("dereverbed_vocals.wav",),
+        ("dereverbed_vocals", "vocals"),
+    )
+    if result is None:
+        raise FileNotFoundError("UVR dereverb model did not produce a vocals output")
+    return result

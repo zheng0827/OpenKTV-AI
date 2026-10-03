@@ -1,0 +1,4 @@
+url,separation_mode,alignment_mode
+https://www.youtube.com/watch?v=VIDEO_ID,hybrid,ctc
+# Supported separation modes: hybrid, demucs, uvr
+# Supported alignment modes: ctc, whisperx, qwen

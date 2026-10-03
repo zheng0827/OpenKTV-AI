@@ -1,0 +1,23 @@
+[Unit]
+Description=OpenKTV Node.js playback and room service
+After=network-online.target openktv-flask.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ktv
+Group=ktv
+WorkingDirectory=/opt/openktv-ai/app
+EnvironmentFile=/etc/openktv-ai/openktv.env
+Environment=KTV_NODE_HOST=127.0.0.1
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadOnlyPaths=/opt/openktv-ai/ktv_songs
+
+[Install]
+WantedBy=multi-user.target
