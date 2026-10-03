@@ -497,8 +497,15 @@ function updateAudioMode(mode) {
         originalGain.gain.setTargetAtTime(0.0, now, 0.05);
         instGain.gain.setTargetAtTime(1.0, now, 0.05);
         if (!video.paused) {
-            instrumental.currentTime = video.currentTime;
-            instrumental.play().catch(() => {});
+            const startInstrumental = () => {
+                if (activeMode !== 'accompaniment' || video.paused || !instrumental.src) return;
+                if (instrumental.readyState >= 1 && Math.abs(instrumental.currentTime - video.currentTime) > 0.25) {
+                    instrumental.currentTime = video.currentTime;
+                }
+                if (instrumental.paused) instrumental.play().catch(() => {});
+            };
+            if (instrumental.readyState >= 1) startInstrumental();
+            else instrumentalMetadataReady.then(startInstrumental);
         }
     } else {
         originalGain.gain.setTargetAtTime(1.0, now, 0.05);
@@ -681,19 +688,26 @@ async function playSong(song) {
 
     video.src = song.path;
     instrumental.src = song.instrumental_path || song.path.replace(/\.mp4$/i, '.instrumental.m4a');
+    mediaMetadataReady = waitForMetadata(video);
+    instrumentalMetadataReady = waitForMetadata(instrumental);
 
     await loadLyrics(song.path);
-
-    await new Promise(resolve => {
-        if (video.readyState >= 1) return resolve();
-        video.addEventListener('loadedmetadata', resolve, { once: true });
-        video.addEventListener('error', resolve, { once: true });
-    });
+    await mediaMetadataReady;
     updateAudioMode(activeMode);
+}
+
+function waitForMetadata(media) {
+    if (media.readyState >= 1) return Promise.resolve();
+    return new Promise(resolve => {
+        media.addEventListener('loadedmetadata', resolve, { once: true });
+        media.addEventListener('error', resolve, { once: true });
+    });
 }
 
 let serverClockOffsetMs = 0;
 let latestPlaybackSnapshot = null;
+let mediaMetadataReady = Promise.resolve();
+let instrumentalMetadataReady = Promise.resolve();
 
 async function applyPlaybackSnapshot(payload) {
     if (!payload?.state) return;
@@ -704,6 +718,7 @@ async function applyPlaybackSnapshot(payload) {
     if (song && (!currentSong || currentSong.queueId !== song.queueId)) {
         await playSong(song);
     }
+    if (song) await mediaMetadataReady;
     if (!song) {
         waiting.style.display = 'flex';
         currentTitle.innerText = '等待點歌...';
@@ -720,12 +735,15 @@ async function applyPlaybackSnapshot(payload) {
     applyMicVolume(state.micVol ?? currentMicVol);
     applyReverbVolume(state.reverbVol ?? currentReverbVol);
     updateAudioMode(activeMode);
+    if (activeMode === 'accompaniment') await instrumentalMetadataReady;
     const nowOnServer = Date.now() + serverClockOffsetMs;
     const target = Math.max(0, Number(state.position) + (
         state.isPlaying ? Math.max(0, (nowOnServer - Number(state.serverTime || nowOnServer)) / 1000) : 0
     ));
-    if (Number.isFinite(target) && Math.abs(video.currentTime - target) > 0.35) {
+    if (Number.isFinite(target) && video.readyState >= 1 && Math.abs(video.currentTime - target) > 0.35) {
         video.currentTime = target;
+    }
+    if (Number.isFinite(target) && instrumental.readyState >= 1 && Math.abs(instrumental.currentTime - target) > 0.35) {
         instrumental.currentTime = target;
     }
     if (state.isPlaying) {
@@ -833,6 +851,14 @@ socket.on('execute_command', (cmd) => {
 socket.on('playback_snapshot', applyPlaybackSnapshot);
 socket.on('playback_error', payload => {
     modeBadge.innerText = payload?.message || '播放錯誤';
+    connStatus.style.color = '#fb7185';
+    connStatus.innerText = '● 播放錯誤';
+});
+instrumental.addEventListener('error', () => {
+    if (activeMode !== 'accompaniment') return;
+    connStatus.style.color = '#fb7185';
+    connStatus.innerText = '● 伴奏檔無法播放，已切回原唱';
+    socket.emit('player_command', { audioMode: 'original' });
 });
 socket.on('time_pong', ({ clientSentAt, serverTime }) => {
     serverClockOffsetMs = serverTime - (clientSentAt + Date.now()) / 2;

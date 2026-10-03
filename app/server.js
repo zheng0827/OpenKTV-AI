@@ -9,17 +9,22 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
-const songsDir = path.resolve(process.env.KTV_SONGS_DIR || path.join(projectRoot, 'ktv_songs'));
-const catalogPath = path.resolve(process.env.KTV_LIBRARY_INDEX_PATH || path.join(songsDir, 'library_index.csv'));
+const songsDir = path.resolve(projectRoot, process.env.KTV_SONGS_DIR || path.join(projectRoot, 'ktv_songs'));
+const catalogPath = path.resolve(projectRoot, process.env.KTV_LIBRARY_INDEX_PATH || path.join(songsDir, 'library_index.csv'));
 const legacyCatalogPath = path.join(__dirname, 'songs.csv');
 
 function mediaPath(filename) {
-  if (!filename || path.basename(filename) !== filename) return null;
-  const resolved = path.resolve(songsDir, filename);
-  if (!resolved.startsWith(`${songsDir}${path.sep}`) || !fs.existsSync(resolved)) return null;
-  const realSongsDir = fs.realpathSync(songsDir);
-  const realMediaPath = fs.realpathSync(resolved);
-  return realMediaPath.startsWith(`${realSongsDir}${path.sep}`) ? realMediaPath : null;
+  if (!filename || path.basename(filename) !== filename
+    || !['.mp4', '.m4a', '.wav', '.lrc'].includes(path.extname(filename).toLowerCase())) return null;
+  try {
+    const resolved = path.resolve(songsDir, filename);
+    if (!resolved.startsWith(`${songsDir}${path.sep}`) || !fs.existsSync(resolved)) return null;
+    const realSongsDir = fs.realpathSync(songsDir);
+    const realMediaPath = fs.realpathSync(resolved);
+    return realMediaPath.startsWith(`${realSongsDir}${path.sep}`) ? realMediaPath : null;
+  } catch {
+    return null;
+  }
 }
 
 function mediaUrl(filename) {
@@ -97,7 +102,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
   return new Promise(async (resolve, reject) => {
     try {
       let songs = await readCatalog(catalogPath);
-      if (!songs.length && catalogPath !== legacyCatalogPath) {
+      if (!fs.existsSync(catalogPath) && catalogPath !== legacyCatalogPath) {
         songs = await readCatalog(legacyCatalogPath);
       }
       let miniSearch = createSearchIndex(songs);
@@ -158,6 +163,15 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           : 0
       );
       const currentSong = () => queue[0] || null;
+      const canPlayInstrumental = song => {
+        try {
+          const fullPath = mediaPath(song?.instrumental_filename || '');
+          const stat = fullPath && fs.statSync(fullPath);
+          return Boolean(stat?.isFile() && stat.size > 0);
+        } catch {
+          return false;
+        }
+      };
       const snapshot = () => ({
         queue: [...queue],
         currentSong: currentSong(),
@@ -181,6 +195,10 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         playerState.position = 0;
         if (!currentSong()) playerState.isPlaying = false;
         else if (queue.length === 1) playerState.isPlaying = true;
+        if (currentSong() && playerState.audioMode === 'accompaniment' && !canPlayInstrumental(currentSong())) {
+          playerState.audioMode = 'original';
+          io.emit('playback_error', { message: '新歌曲沒有有效伴奏檔，已切回原唱模式。' });
+        }
         playerState.startedAt = playerState.isPlaying ? Date.now() : null;
       };
       const findSong = song => songs.find(item => item.id === String(song?.id));
@@ -246,7 +264,8 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         socket.on('seek', value => {
           const position = Number(value?.position ?? value);
           if (!Number.isFinite(position) || position < 0) return;
-          playerState.position = position;
+          const duration = Number(currentSong()?.duration_seconds);
+          playerState.position = duration > 0 ? Math.min(position, duration) : position;
           playerState.startedAt = playerState.isPlaying ? Date.now() : null;
           emitState();
         });
@@ -261,9 +280,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           if (command.audioMode === 'original') playerState.audioMode = 'original';
           if (command.audioMode === 'accompaniment') {
             const song = currentSong();
-            const filename = song?.instrumental_filename || '';
-            const fullPath = mediaPath(filename);
-            if (!fullPath || !fs.existsSync(fullPath)) {
+            if (!canPlayInstrumental(song)) {
               io.emit('playback_error', { message: '伴奏檔缺失或無效，已保留原唱模式。' });
               command = { ...command, audioMode: undefined };
             } else playerState.audioMode = 'accompaniment';

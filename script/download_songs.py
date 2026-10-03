@@ -9,10 +9,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.config import load_settings
-from core.unified_nightingale import KTVProcessor
-
-
 def read_urls(args: argparse.Namespace) -> list[str]:
     urls = list(args.urls)
     if args.input:
@@ -41,10 +37,14 @@ def main() -> int:
     if (args.title or args.artist or args.lyrics) and len(urls) != 1:
         parser.error("--title、--artist、--lyrics 僅能用於單一網址")
 
+    from core.config import load_settings
+    from core.unified_nightingale import KTVProcessor
+
     settings = load_settings()
     processor = KTVProcessor(settings, print)
     options = {
         "singer": args.artist,
+        "singer_is_manual": bool(args.artist),
         "lyrics_text": args.lyrics,
         "separator_backend": args.separator or settings.separator_backend,
         "alignment_backend": args.alignment or settings.alignment_backend,

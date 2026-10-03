@@ -24,7 +24,7 @@ from .language_detection import detect_language_multiwindow
 from .whisper_alignment import align_with_backend
 from .cjk import is_cjk, tokenize_for_alignment, align_lang_code, attribute_chars_to_tokens, merge_punct, attach_reading, qwen_kept_len, is_supported_lang, align_model_for, clean_for_alignment
 from .library import upsert_catalog_entry
-from .metadata import extract_youtube_metadata, spotify_track_metadata
+from .metadata import ai_parse_youtube_title, extract_youtube_metadata, parse_youtube_title, search_metadata, spotify_track_metadata
 
 @dataclass(frozen=True)
 class PipelineArtifacts:
@@ -326,6 +326,11 @@ def run_unified_nightingale(
     full_audio = highpass_filter(full_audio)
     full_audio = suppress_reverb(full_audio)
     full_audio = normalize_rms(full_audio)
+    import numpy as np
+    full_audio = np.nan_to_num(full_audio, nan=0.0, posinf=1.0, neginf=-1.0)
+    peak = float(np.max(np.abs(full_audio), initial=0.0))
+    if peak > 0.98:
+        full_audio *= 0.98 / peak
     import soundfile as sf
     sf.write(str(output_dereverbed_vocals), full_audio, 16000)
     vocal_start, vocal_end = detect_vocal_region(full_audio)
@@ -493,12 +498,24 @@ class KTVProcessor:
         job_temp_dir: Path | None = None
         try:
             try:
-                youtube_metadata = extract_youtube_metadata(source_url)
-                youtube_title = youtube_metadata.get("youtube_title", "")
-                if not manual_title.strip():
+                if options.get("youtube_title"):
+                    youtube_title = str(options["youtube_title"])
+                    if options.get("title_is_auto"):
+                        youtube_metadata = ai_parse_youtube_title(youtube_title, singer) or parse_youtube_title(youtube_title, singer)
+                    else:
+                        youtube_metadata = parse_youtube_title(youtube_title, singer)
+                else:
+                    youtube_metadata = extract_youtube_metadata(source_url)
+                    youtube_title = youtube_metadata.get("youtube_title", "")
+                if options.get("title_is_auto") and youtube_metadata.get("title"):
+                    artist = youtube_metadata.get("artist", "")
+                    manual_title = f"{artist} - {youtube_metadata['title']}" if artist else youtube_metadata["title"]
+                    if not singer:
+                        singer = artist
+                elif not manual_title.strip():
                     manual_title = youtube_metadata.get("title", "")
-                if not singer:
-                    singer = youtube_metadata.get("artist", "")
+                    if not singer:
+                        singer = youtube_metadata.get("artist", "")
             except Exception as error:
                 self.log(f"⚠️ YouTube 標題解析失敗：{error}")
                 youtube_metadata = {}
@@ -518,7 +535,7 @@ class KTVProcessor:
                 spotify_metadata = {}
             if spotify_metadata.get("title"):
                 song_name = spotify_metadata["title"]
-            if spotify_metadata.get("artist") and not options.get("singer"):
+            if spotify_metadata.get("artist") and not options.get("singer_is_manual"):
                 singer = spotify_metadata["artist"]
             metadata = {**metadata, **spotify_metadata}
             if not youtube_title:
@@ -560,7 +577,7 @@ class KTVProcessor:
                 self.log("步驟 3/8: 使用手動提供歌詞...")
 
             self.log(f"步驟 4-7/8: 去除人聲混響後辨識／對齊歌詞、音訊空間化與對白分離...")
-            run_unified_nightingale(
+            artifacts = run_unified_nightingale(
                 settings=self.settings, vocals_wav=separated.vocals_path, accompaniment_wav=separated.accompaniment_path,
                 temp_input_mp4=temp_input, output_orig_instrumental=temp_orig_instrumental,
                 output_dialogue_instrumental=temp_dialogue_instrumental, output_vocals=temp_vocals,
@@ -583,13 +600,13 @@ class KTVProcessor:
 
             self.settings.songs_dir.mkdir(parents=True, exist_ok=True)
             artifact_pairs = [
-                (temp_output_mp4, final),
                 (temp_orig_instrumental, final_orig_instrumental),
                 (temp_dialogue_instrumental, final_dialogue_instrumental),
                 (temp_vocals, final_vocals),
                 (temp_dialogue_vocals, final_dialogue_vocals),
                 (temp_dereverbed_vocals, final_dereverbed_vocals),
                 (temp_lrc, final_lrc),
+                (temp_output_mp4, final),
             ]
             for source, destination in artifact_pairs:
                 if destination.exists():
@@ -598,6 +615,12 @@ class KTVProcessor:
                 moved_files.append(destination)
 
             from .library import plain_lyrics_from_lrc
+            search_fields = search_metadata(song_name, artifacts.detected_language)
+            separator_model = {
+                "demucs": self.settings.demucs_model,
+                "uvr": self.settings.uvr_model,
+                "hybrid": f"{self.settings.demucs_model}+{self.settings.uvr_model}",
+            }.get(separator_backend, separator_backend)
             upsert_catalog_entry(
                 self.settings.library_index_path,
                 {
@@ -608,7 +631,7 @@ class KTVProcessor:
                     "duration_seconds": self._probe_duration(final) or metadata.get("duration_seconds", ""),
                     "genre": metadata.get("genre", ""),
                     "lyrics": plain_lyrics_from_lrc(final_lrc),
-                    "separator_model": self.settings.demucs_model if separator_backend in {"demucs", "hybrid"} else self.settings.uvr_model,
+                    "separator_model": separator_model,
                     "separator_mode": f"{separator_backend}:{stems}-stem",
                     "alignment_model": alignment_backend,
                     "video_filename": final.name,
@@ -620,6 +643,7 @@ class KTVProcessor:
                     "dereverbed_vocals_filename": final_dereverbed_vocals.name,
                     "alignment_results_filename": final_lrc.name,
                     "processing_status": "complete",
+                    **search_fields,
                 },
             )
 

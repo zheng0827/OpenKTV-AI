@@ -24,6 +24,12 @@ def _to_int(value: str, default: int) -> int:
         return default
 
 
+def _path_value(name: str, default: Path, root: Path) -> Path:
+    configured = os.getenv(name)
+    value = Path(configured).expanduser() if configured else default
+    return value if value.is_absolute() else root / value
+
+
 @dataclass(frozen=True)
 class AppSettings:
     base_dir: Path
@@ -84,18 +90,18 @@ def load_settings(base_dir: Path | None = None) -> AppSettings:
 
     return AppSettings(
         base_dir=root,
-        templates_dir=Path(os.getenv("KTV_TEMPLATES_DIR", root / "templates")),
-        songs_dir=Path(os.getenv("KTV_SONGS_DIR", root / "ktv_songs")),
-        temp_base_dir=Path(os.getenv("KTV_TEMP_DIR", root / "temp_processing")),
-        ffmpeg_dir=Path(os.getenv("KTV_FFMPEG_DIR", root / "ffmpeg" / "bin")),
-        yt_dlp_path=Path(os.getenv("KTV_YTDLP_PATH", root / "yt-dlp.exe")),
+        templates_dir=_path_value("KTV_TEMPLATES_DIR", root / "templates", root),
+        songs_dir=_path_value("KTV_SONGS_DIR", root / "ktv_songs", root),
+        temp_base_dir=_path_value("KTV_TEMP_DIR", root / "temp_processing", root),
+        ffmpeg_dir=_path_value("KTV_FFMPEG_DIR", root / "ffmpeg" / "bin", root),
+        yt_dlp_path=_path_value("KTV_YTDLP_PATH", root / "yt-dlp.exe", root),
         host=os.getenv("KTV_HOST", "0.0.0.0"),
         port=_to_int(os.getenv("KTV_PORT"), 5000),
         node_port=_to_int(os.getenv("KTV_NODE_PORT"), 3000),
         secret_key=os.getenv("KTV_SECRET_KEY", "ktv_secret"),
-        demucs_cache_dir=Path(os.getenv("KTV_DEMUCS_CACHE_DIR", root / "model_cache" / "demucs")),
+        demucs_cache_dir=_path_value("KTV_DEMUCS_CACHE_DIR", root / "model_cache" / "demucs", root),
         demucs_model=os.getenv("KTV_DEMUCS_MODEL", "htdemucs_ft"),
-        uvr_model_dir=Path(os.getenv("KTV_UVR_MODEL_DIR", root / "model_cache" / "uvr")),
+        uvr_model_dir=_path_value("KTV_UVR_MODEL_DIR", root / "model_cache" / "uvr", root),
         uvr_model=os.getenv("KTV_UVR_MODEL", "UVR-MDX-NET-Voc_FT.onnx"),
         separator_backend=os.getenv("KTV_SEPARATOR_BACKEND", "demucs").strip().lower(),
         separator_stems=separator_stems,
@@ -111,5 +117,5 @@ def load_settings(base_dir: Path | None = None) -> AppSettings:
         alignment_backend=os.getenv("KTV_ALIGNMENT_BACKEND", "ctc").strip().lower(),
         intro_skip_lead_seconds=_to_float(os.getenv("KTV_INTRO_SKIP_LEAD_SECONDS"), 5.0),
         download_retry_count=_to_int(os.getenv("KTV_DOWNLOAD_RETRY_COUNT"), 2),
-        library_index_path=Path(os.getenv("KTV_LIBRARY_INDEX_PATH", root / "ktv_songs" / "library_index.csv")),
+        library_index_path=_path_value("KTV_LIBRARY_INDEX_PATH", root / "ktv_songs" / "library_index.csv", root),
     )

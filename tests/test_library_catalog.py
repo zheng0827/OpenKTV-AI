@@ -4,12 +4,22 @@ import unittest
 from pathlib import Path
 
 from core.library import plain_lyrics_from_lrc, stable_song_id, upsert_catalog_entry
+from core.metadata import extract_youtube_metadata, parse_youtube_title
 
 
 class CatalogTests(unittest.TestCase):
     def test_song_id_is_stable_and_normalized(self):
         self.assertEqual(stable_song_id("Artist", "Song"), stable_song_id(" artist ", "song"))
         self.assertNotEqual(stable_song_id("Artist A", "Song"), stable_song_id("Artist B", "Song"))
+
+    def test_youtube_title_parser_removes_release_noise(self):
+        parsed = parse_youtube_title("歌手 - 歌名 (Official Music Video)", "頻道")
+        self.assertEqual(parsed["artist"], "歌手")
+        self.assertEqual(parsed["title"], "歌名")
+
+    def test_youtube_metadata_rejects_non_youtube_urls(self):
+        with self.assertRaises(ValueError):
+            extract_youtube_metadata("http://127.0.0.1/file.mp4")
 
     def test_plain_lyrics_drops_ktv_markers_without_repeating_words(self):
         with tempfile.TemporaryDirectory() as directory:

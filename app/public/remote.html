@@ -97,6 +97,7 @@
         <div v-show="tab === 'settings'" class="space-y-4">
             <div class="glass-card rounded-2xl p-5 space-y-5">
                 <h3 class="font-black text-sm text-sky-400 flex items-center gap-2"><span>🎛️</span> 專業混音與音量控制</h3>
+                <p class="text-[11px] text-zinc-400">歌曲／伴奏不會直接回送麥克風輸入；麥克風效果獨立混音。喇叭仍可能造成空氣回授，建議使用耳機。</p>
                 
                 <!-- 音樂/伴奏音量 -->
                 <div class="space-y-2">
@@ -133,6 +134,23 @@
                 </div>
                 <span class="text-3xl font-black text-amber-400">{{ currentScore }} 分</span>
             </div>
+        </div>
+    </div>
+
+    <div v-if="durationSeconds > 0" class="fixed bottom-[112px] left-0 right-0 z-20 px-5">
+        <div class="glass-header rounded-xl px-3 py-2 flex items-center gap-3 text-[10px] font-mono text-zinc-300">
+            <span>{{ formatTime(playbackPosition) }}</span>
+            <input
+                type="range"
+                min="0"
+                :max="durationSeconds"
+                step="0.1"
+                :value="Math.min(playbackPosition, durationSeconds)"
+                @change="seekTo"
+                class="flex-1 accent-sky-500"
+                aria-label="播放位置"
+            >
+            <span>{{ formatTime(durationSeconds) }}</span>
         </div>
     </div>
 
@@ -201,7 +219,9 @@
                     micVol: 1.2,
                     reverbVol: 0.45,
                     currentScore: 85,
-                    playbackError: ''
+                    playbackError: '',
+                    playbackPosition: 0,
+                    durationSeconds: 0
                 }
             },
             mounted() {
@@ -210,6 +230,8 @@
                     if (state) {
                         this.isPlaying = state.isPlaying;
                         this.audioMode = state.audioMode;
+                    this.playbackPosition = Number(state.position) || 0;
+                    this.durationSeconds = Number(queue?.[0]?.duration_seconds) || 0;
                         if (state.musicVol !== undefined) this.musicVol = state.musicVol;
                         if (state.micVol !== undefined) this.micVol = state.micVol;
                         if (state.reverbVol !== undefined) this.reverbVol = state.reverbVol;
@@ -250,6 +272,13 @@
                 },
                 replaySong() {
                     socket.emit('replay_current');
+                },
+                seekTo(event) {
+                    socket.emit('seek', { position: Number(event.target.value) });
+                },
+                formatTime(seconds) {
+                    const value = Math.max(0, Math.floor(Number(seconds) || 0));
+                    return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, '0')}`;
                 },
                 togglePlay() {
                     this.isPlaying = !this.isPlaying;

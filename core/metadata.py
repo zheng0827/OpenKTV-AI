@@ -14,10 +14,15 @@ NOISE_RE = re.compile(
     r"karaoke|中字|歌詞|高音質|4k)[^\])）】]*[\])）】]",
     re.IGNORECASE,
 )
+TRAILING_NOISE_RE = re.compile(
+    r"(?:\s*[-|｜]\s*)?(?:official(?:\s+(?:music\s+)?video)?|lyrics?|mv|music\s*video|"
+    r"karaoke|中字|歌詞|高音質|4k)\s*$",
+    re.IGNORECASE,
+)
 
 
 def parse_youtube_title(raw_title: str, uploader: str = "") -> dict[str, str]:
-    clean_title = re.sub(r"\s+", " ", NOISE_RE.sub("", raw_title or "")).strip(" -|｜_")
+    clean_title = re.sub(r"\s+", " ", TRAILING_NOISE_RE.sub("", NOISE_RE.sub("", raw_title or ""))).strip(" -|｜_")
     for separator in (" - ", " – ", " — ", " | ", " ｜ ", " / "):
         if separator in clean_title:
             artist, title = (part.strip() for part in clean_title.split(separator, 1))
@@ -34,9 +39,10 @@ def ai_parse_youtube_title(raw_title: str, uploader: str = "") -> dict[str, str]
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key or not raw_title:
         return {}
+    model = urllib.parse.quote(os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip())
     endpoint = (
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        "gemini-2.0-flash:generateContent"
+        f"{model}:generateContent"
     )
     payload = {
         "contents": [{
@@ -144,3 +150,37 @@ def spotify_track_metadata(title: str, artist: str) -> dict[str, str]:
         "duration_seconds": str(round((preferred.get("duration_ms") or 0) / 1000)),
         "genre": genre,
     }
+
+
+def search_metadata(title: str, language: str) -> dict[str, str]:
+    language = (language or "").lower().split("-", 1)[0]
+    language_names = {
+        "zh": "國語",
+        "yue": "粵語",
+        "nan": "台語",
+        "en": "英語",
+        "ja": "日語",
+        "ko": "韓語",
+    }
+    result = {
+        "language": language_names.get(language, ""),
+        "char_count": str(len("".join(title.split()))),
+        "pinyin_abbr": "",
+        "zhuyin_abbr": "",
+    }
+    if language not in {"zh", "yue", "nan"} or not title:
+        return result
+    try:
+        from pypinyin import Style, pinyin
+
+        result["pinyin_abbr"] = "".join(
+            syllable[0].upper() for syllable in pinyin(title, style=Style.FIRST_LETTER, errors=lambda chars: chars)
+            if syllable and syllable[0].isalnum()
+        )
+        result["zhuyin_abbr"] = "".join(
+            syllable[0] for syllable in pinyin(title, style=Style.BOPOMOFO, errors=lambda chars: chars)
+            if syllable and syllable[0] >= "\u3100" and syllable[0] <= "\u312f"
+        )
+    except Exception:
+        pass
+    return result

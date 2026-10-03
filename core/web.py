@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import socket
 import subprocess
 import threading
@@ -16,6 +15,7 @@ from flask_socketio import SocketIO, emit
 
 from .config import AppSettings, load_settings
 from .library import find_intro_skip_seconds, update_library_index
+from .metadata import ai_parse_youtube_title, parse_youtube_title
 from .unified_nightingale import KTVProcessor
 
 CONTROL_ROLES = {"remote", "queue", "admin", "combo"}
@@ -49,37 +49,6 @@ def _validate_youtube_url(url: str) -> str:
     return url.strip()
 
 
-def _extract_title_artist(raw_title: str) -> tuple[str, str]:
-    parsed = _parse_title_model(raw_title)
-    return parsed["song"], parsed["singer"]
-
-
-def _normalize_yt_title(raw_title: str) -> str:
-    text = (raw_title or "").strip()
-    noise_patterns = [
-        r"\[[^\]]*(official|lyrics|mv|music\s*video|karaoke|中字|歌詞)[^\]]*\]",
-        r"\([^\)]*(official|lyrics|mv|music\s*video|karaoke|中字|歌詞)[^\)]*\)",
-    ]
-    for pattern in noise_patterns:
-        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\s+", " ", text).strip(" -|｜_")
-    return text
-
-
-def _parse_title_model(raw_title: str, uploader: str = "") -> dict[str, str]:
-    normalized = _normalize_yt_title(raw_title)
-    separators = [" - ", " – ", " — ", " | ", " ｜ ", " / "]
-    for separator in separators:
-        if separator in normalized:
-            left, right = [part.strip() for part in normalized.split(separator, 1)]
-            if left and right:
-                return {"title": normalized, "song": right, "singer": left}
-
-    if uploader.strip():
-        return {"title": normalized or raw_title.strip(), "song": normalized or raw_title.strip(), "singer": uploader.strip()}
-    return {"title": normalized or raw_title.strip(), "song": normalized or raw_title.strip(), "singer": ""}
-
-
 def _extract_youtube_title(url: str) -> dict[str, str]:
     safe_url = _validate_youtube_url(url)
     try:
@@ -91,7 +60,12 @@ def _extract_youtube_title(url: str) -> dict[str, str]:
         payload = ydl.extract_info(safe_url, download=False)
     title = (payload or {}).get("title") or ""
     uploader = (payload or {}).get("uploader") or ""
-    parsed = _parse_title_model(title, uploader=uploader)
+    parsed = ai_parse_youtube_title(title, uploader)
+    if parsed:
+        parsed = {"title": title, "song": parsed["title"], "singer": parsed["artist"]}
+    else:
+        metadata = parse_youtube_title(title, uploader)
+        parsed = {"title": title, "song": metadata["title"], "singer": metadata["artist"]}
     parsed["raw_title"] = title
     parsed["uploader"] = uploader
     return parsed
@@ -523,11 +497,22 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
                             "url": _validate_youtube_url(item_url),
                             "title": item.get("title") or item.get("id") or manual_title,
                             "singer": (item.get("singer") or "").strip(),
+                            "singer_is_manual": False,
+                            "youtube_title": (item.get("title") or "").strip(),
+                            "title_is_auto": True,
                             "lyrics_text": "",
                         }
                     )
             else:
-                tasks = [{"url": url, "title": manual_title, "singer": manual_singer, "lyrics_text": manual_lyrics}]
+                tasks = [{
+                    "url": url,
+                    "title": manual_title,
+                    "singer": manual_singer,
+                    "singer_is_manual": bool(data.get("singer_is_manual")),
+                    "youtube_title": str(data.get("youtube_title") or ""),
+                    "title_is_auto": False,
+                    "lyrics_text": manual_lyrics,
+                }]
         except Exception as error:
             broadcast_log(f"❌ playlist 讀取失敗: {error}")
             return
@@ -544,8 +529,7 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
 
                 for index, task in enumerate(tasks, start=1):
                     title = task["title"]
-                    _song_name, singer = _extract_title_artist(title)
-                    provided_singer = (task.get("singer") or singer or "").strip()
+                    provided_singer = (task.get("singer") or "").strip()
                     provided_lyrics = (task.get("lyrics_text") or "").strip()
                     socketio.emit(
                         "task_progress",
@@ -575,6 +559,9 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
                             options={
                                 **options,
                                 "singer": provided_singer,
+                                "singer_is_manual": task.get("singer_is_manual", False),
+                                "youtube_title": task.get("youtube_title", ""),
+                                "title_is_auto": task.get("title_is_auto", False),
                                 "lyrics_text": provided_lyrics,
                             },
                         )
