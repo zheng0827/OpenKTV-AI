@@ -106,12 +106,21 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       const io = new Server(httpServer, { cors: { origin: "*", methods: ["GET", "POST"] } });
 
       app.use(express.static(path.join(__dirname, 'public')));
+      app.get('/player', (_req, res) => res.redirect('/player.html'));
+      app.get(['/remote', '/queue'], (_req, res) => res.redirect('/remote.html'));
       app.get('/media/:filename', (req, res) => {
         const fullPath = mediaPath(req.params.filename);
         if (!fullPath || !fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) {
           return res.sendStatus(404);
         }
         const size = fs.statSync(fullPath).size;
+        const mimeTypes = {
+          '.mp4': 'video/mp4',
+          '.m4a': 'audio/mp4',
+          '.wav': 'audio/wav',
+          '.lrc': 'text/plain; charset=utf-8',
+        };
+        res.setHeader('Content-Type', mimeTypes[path.extname(fullPath).toLowerCase()] || 'application/octet-stream');
         const rangeHeader = req.headers.range;
         res.setHeader('Accept-Ranges', 'bytes');
         if (!rangeHeader) {

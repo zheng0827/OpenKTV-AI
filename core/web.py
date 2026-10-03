@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, urlparse
 
-from flask import Blueprint, Flask, current_app, render_template, request, send_from_directory
+from flask import Blueprint, Flask, current_app, redirect, render_template, request, send_from_directory
 from flask_socketio import SocketIO, emit
 
 from .config import AppSettings, load_settings
@@ -125,9 +125,16 @@ def _playlist_entries(url: str, settings: AppSettings) -> list[dict]:
 def _create_blueprint() -> Blueprint:
     bp = Blueprint("web", __name__)
 
+    def node_page(page: str):
+        settings: AppSettings = current_app.config["APP_SETTINGS"]
+        host = urlparse(request.host_url).hostname or "127.0.0.1"
+        if ":" in host:
+            host = f"[{host}]"
+        return redirect(f"http://{host}:{settings.node_port}/{page}")
+
     @bp.route("/player")
     def page_player():
-        return render_template("player.html")
+        return node_page("player.html")
 
     @bp.route("/lyrics-editor")
     def page_lyrics_editor():
@@ -135,11 +142,11 @@ def _create_blueprint() -> Blueprint:
 
     @bp.route("/remote")
     def page_remote():
-        return render_template("remote.html")
+        return node_page("remote.html")
 
     @bp.route("/queue")
     def page_queue():
-        return render_template("queue.html")
+        return node_page("remote.html")
 
     @bp.route("/admin")
     def page_admin():
@@ -147,7 +154,7 @@ def _create_blueprint() -> Blueprint:
 
     @bp.route("/combo")
     def page_combo():
-        return render_template("combo.html")
+        return node_page("remote.html")
 
     @bp.route("/")
     def page_index():

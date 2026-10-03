@@ -34,6 +34,7 @@ class AppSettings:
     yt_dlp_path: Path
     host: str
     port: int
+    node_port: int
     secret_key: str
     demucs_cache_dir: Path
     demucs_model: str
@@ -90,6 +91,7 @@ def load_settings(base_dir: Path | None = None) -> AppSettings:
         yt_dlp_path=Path(os.getenv("KTV_YTDLP_PATH", root / "yt-dlp.exe")),
         host=os.getenv("KTV_HOST", "0.0.0.0"),
         port=_to_int(os.getenv("KTV_PORT"), 5000),
+        node_port=_to_int(os.getenv("KTV_NODE_PORT"), 3000),
         secret_key=os.getenv("KTV_SECRET_KEY", "ktv_secret"),
         demucs_cache_dir=Path(os.getenv("KTV_DEMUCS_CACHE_DIR", root / "model_cache" / "demucs")),
         demucs_model=os.getenv("KTV_DEMUCS_MODEL", "htdemucs_ft"),

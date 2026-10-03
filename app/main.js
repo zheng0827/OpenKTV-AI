@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { startServer } from './server.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const serverPort = Number(process.env.KTV_NODE_PORT) || 3000;
 let mainWindow = null;
 
 async function createWindow() {
@@ -24,7 +25,7 @@ async function createWindow() {
   mainWindow.maximize();
 
   // 載入本地 Express 提供的電視主螢幕播放介面
-  await mainWindow.loadURL('http://localhost:3000/player.html');
+  await mainWindow.loadURL(`http://localhost:${serverPort}/player.html`);
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -33,7 +34,7 @@ async function createWindow() {
 
 app.whenReady().then(async () => {
   // 先於背景啟動 Express 與 WebSocket 伺服器
-  await startServer(3000);
+  await startServer(serverPort);
   createWindow();
 
   app.on('activate', () => {
