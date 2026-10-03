@@ -1,18 +1,115 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
+import os
 import re
+import tempfile
 import time
 import unicodedata
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 TIMESTAMP_RE = re.compile(r"\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]|^[%$&](\d+(?:\.\d+)?)")
 LRC_INLINE_TIMESTAMP_RE = re.compile(r"\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\]")
 SYMBOL_NOISE_LINE_RE = re.compile(r"^[^0-9A-Za-z\u3400-\u9fff]+$")
 REPEATED_SYMBOL_RE = re.compile(r"([^\w\s\u3400-\u9fff])\1{2,}")
+CATALOG_FIELDS = [
+    "id", "artist", "title", "album", "release_year", "duration_seconds",
+    "artist_gender", "genre", "lyrics", "separator_model", "separator_mode",
+    "alignment_model", "video_filename", "instrumental_filename", "lyrics_filename",
+    "source_url", "youtube_title", "vocals_filename", "dereverbed_vocals_filename",
+    "alignment_results_filename", "processing_status", "created_at",
+    "language", "char_count", "pinyin_abbr", "zhuyin_abbr",
+]
+
+
+def stable_song_id(artist: str, title: str, source_url: str = "") -> str:
+    identity = "|".join((artist.strip().casefold(), title.strip().casefold()))
+    if not artist.strip() or not title.strip():
+        identity = source_url.strip()
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def plain_lyrics_from_lrc(lrc_path: Path) -> str:
+    if not lrc_path.is_file():
+        return ""
+    contents = lrc_path.read_text(encoding="utf-8", errors="ignore")
+    is_ktv_lrc = "@format ktv-lrc" in contents
+    lines = []
+    for raw_line in contents.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("@"):
+            continue
+        if is_ktv_lrc and not line.startswith("%"):
+            continue
+        line = re.sub(r"^%\d+(?:\.\d+)?\s+\d+(?:\.\d+)?\s+", "", line)
+        line = re.sub(r"^\$\d+(?:\.\d+)?\s+\d+(?:\.\d+)?\s+", "", line)
+        line = LRC_INLINE_TIMESTAMP_RE.sub("", line)
+        line = re.sub(r"\[(?:ar|al|ti|by|re|ve|offset):[^\]]*\]", "", line, flags=re.IGNORECASE)
+        line = _strip_weird_unicode(line).strip()
+        if line:
+            lines.append(line)
+    return " ".join(lines)
+
+
+def _read_catalog(path: Path) -> list[dict[str, str]]:
+    if not path.is_file():
+        return []
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def _write_catalog(path: Path, rows: list[dict[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", newline="", dir=path.parent,
+            prefix=f".{path.name}.", suffix=".tmp", delete=False,
+        ) as handle:
+            temp_path = Path(handle.name)
+            writer = csv.DictWriter(handle, fieldnames=CATALOG_FIELDS, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows({field: row.get(field, "") or "" for field in CATALOG_FIELDS} for row in rows)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    finally:
+        if temp_path and temp_path.exists():
+            temp_path.unlink()
+
+
+def upsert_catalog_entry(index_path: Path, entry: dict) -> None:
+    rows = _read_catalog(index_path)
+    row = {field: str(entry.get(field, "") or "") for field in CATALOG_FIELDS}
+    if not row["id"]:
+        row["id"] = stable_song_id(row["artist"], row["title"], row["source_url"])
+    if not row["created_at"]:
+        row["created_at"] = datetime.now(timezone.utc).isoformat()
+
+    existing_index = next(
+        (
+            index for index, existing in enumerate(rows)
+            if existing.get("id") == row["id"]
+            or (
+                row["artist"] and row["title"]
+                and existing.get("artist", "").strip().casefold() == row["artist"].strip().casefold()
+                and existing.get("title", "").strip().casefold() == row["title"].strip().casefold()
+            )
+        ),
+        None,
+    )
+    if existing_index is None:
+        rows.append(row)
+    else:
+        existing = rows[existing_index]
+        row["created_at"] = existing.get("created_at") or row["created_at"]
+        rows[existing_index] = {**existing, **{key: value or existing.get(key, "") for key, value in row.items()}}
+    _write_catalog(index_path, rows)
 
 
 def parse_first_lyric_time(lrc_path: Path) -> float | None:
@@ -54,29 +151,33 @@ def find_intro_skip_seconds(songs_dir: Path, song_filename: str, lead_seconds: f
 
 
 def update_library_index(songs_dir: Path, index_path: Path) -> None:
-    index_path.parent.mkdir(parents=True, exist_ok=True)
+    previous_rows = _read_catalog(index_path)
+    existing_by_video = {row.get("video_filename", ""): row for row in previous_rows}
     rows = []
+    seen_ids = set()
     timestamp = int(time.time())
     for mp4_file in sorted(songs_dir.glob("*.mp4")):
         stem = mp4_file.stem
-        rows.append(
-            {
-                "song": mp4_file.name,
-                "instrumental": f"{stem}.instrumental.m4a" if (songs_dir / f"{stem}.instrumental.m4a").is_file() else "",
-                "vocals": (
-                    f"{stem}.lyrics.vocals.wav"
-                    if (songs_dir / f"{stem}.lyrics.vocals.wav").is_file()
-                    else (f"{stem}.vocals.wav" if (songs_dir / f"{stem}.vocals.wav").is_file() else "")
-                ),
-                "lyrics_lrc": f"{stem}.lrc" if (songs_dir / f"{stem}.lrc").is_file() else "",
-                "indexed_at": timestamp,
-            }
-        )
-
-    with index_path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["song", "instrumental", "vocals", "lyrics_lrc", "indexed_at"])
-        writer.writeheader()
-        writer.writerows(rows)
+        previous = existing_by_video.get(mp4_file.name, {})
+        lrc_name = f"{stem}.lrc" if (songs_dir / f"{stem}.lrc").is_file() else ""
+        entry = {
+            **previous,
+            "id": previous.get("id") or stable_song_id(previous.get("artist", ""), previous.get("title", ""), previous.get("source_url", mp4_file.name)),
+            "title": previous.get("title") or stem,
+            "video_filename": mp4_file.name,
+            "instrumental_filename": f"{stem}.instrumental.m4a" if (songs_dir / f"{stem}.instrumental.m4a").is_file() else "",
+            "lyrics_filename": lrc_name,
+            "vocals_filename": f"{stem}.vocals.wav" if (songs_dir / f"{stem}.vocals.wav").is_file() else "",
+            "dereverbed_vocals_filename": f"{stem}.vocals.dereverbed.wav" if (songs_dir / f"{stem}.vocals.dereverbed.wav").is_file() else "",
+            "lyrics": plain_lyrics_from_lrc(songs_dir / lrc_name) if lrc_name else "",
+            "processing_status": "complete",
+            "created_at": previous.get("created_at") or str(timestamp),
+        }
+        if entry["id"] in seen_ids:
+            continue
+        seen_ids.add(entry["id"])
+        rows.append({field: entry.get(field, "") for field in CATALOG_FIELDS})
+    _write_catalog(index_path, rows)
 
 
 def fetch_lrclib_lyrics(song_name: str, singer: str) -> str | None:

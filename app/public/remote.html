@@ -48,6 +48,11 @@
         </div>
     </div>
 
+    <div v-if="playbackError" class="mx-4 mt-3 rounded-xl border border-rose-700/50 bg-rose-950/70 px-4 py-3 text-sm text-rose-200">
+        {{ playbackError }}
+        <button @click="playbackError = ''" class="float-right ml-3 font-bold">✕</button>
+    </div>
+
     <!-- 主內容滑動分頁 -->
     <div class="flex-1 overflow-y-auto p-4 space-y-3 pb-40">
         <!-- 點歌大廳清單 -->
@@ -195,7 +200,8 @@
                     musicVol: 0.8,
                     micVol: 1.2,
                     reverbVol: 0.45,
-                    currentScore: 85
+                    currentScore: 85,
+                    playbackError: ''
                 }
             },
             mounted() {
@@ -212,6 +218,7 @@
                 socket.on('queue_updated', (q) => { this.queue = q; });
                 socket.on('search_results', (res) => { this.searchResults = res; });
                 socket.on('score_updated', ({ score }) => { this.currentScore = score; });
+                socket.on('playback_error', ({ message }) => { this.playbackError = message || '播放失敗'; });
                 socket.on('execute_command', (cmd) => {
                     if (cmd.isPlaying !== undefined) this.isPlaying = cmd.isPlaying;
                     if (cmd.audioMode) this.audioMode = cmd.audioMode;

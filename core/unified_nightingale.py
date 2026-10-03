@@ -23,6 +23,8 @@ from .audio import detect_vocal_region, highpass_filter, normalize_rms, suppress
 from .language_detection import detect_language_multiwindow
 from .whisper_alignment import align_with_backend
 from .cjk import is_cjk, tokenize_for_alignment, align_lang_code, attribute_chars_to_tokens, merge_punct, attach_reading, qwen_kept_len, is_supported_lang, align_model_for, clean_for_alignment
+from .library import upsert_catalog_entry
+from .metadata import extract_youtube_metadata, spotify_track_metadata
 
 @dataclass(frozen=True)
 class PipelineArtifacts:
@@ -31,6 +33,7 @@ class PipelineArtifacts:
     vocals: Path
     original_vocal_mp4: Path
     dialogue_vocals: Path
+    dereverbed_vocals: Path
     lrc: Path
     detected_language: str
 
@@ -304,7 +307,7 @@ def erase_lyrics_from_vocals(vocals_wav: Path, safe_regions: list[dict], output_
 def run_unified_nightingale(
     *, settings: AppSettings, vocals_wav: Path, accompaniment_wav: Path, temp_input_mp4: Path,
     output_orig_instrumental: Path, output_dialogue_instrumental: Path, output_vocals: Path, output_mp4: Path,
-    output_dialogue_vocals: Path, output_lrc: Path, song_name: str, singer: str, lyrics_text: str,
+    output_dialogue_vocals: Path, output_dereverbed_vocals: Path, output_lrc: Path, song_name: str, singer: str, lyrics_text: str,
     device_preference: str, alignment_backend: str,
 ) -> PipelineArtifacts:
     device = resolve_device(device_preference)
@@ -317,21 +320,23 @@ def run_unified_nightingale(
     make_pseudo_spatial_m4a(accompaniment_wav, output_orig_instrumental, ffmpeg_bin)
     shutil.copyfile(str(vocals_wav), str(output_vocals))
 
-    if not (lyrics_text and lyrics_text.strip()):
-        print("[core:pipeline] 無歌詞，使用 Whisper 辨識歌詞...", flush=True)
-        t_segs, det_lang = transcribe_segments(
-            vocals_wav=vocals_wav, model_name=settings.whisper_model, device=device, compute_type=compute_type,
-            language=(settings.whisper_language or "").strip() or None, alignment_backend=alignment_backend,
-        )
-        lyrics_text = "\n".join(s.get("text", "") for s in t_segs if s.get("text"))
-
     import whisperx
     transcription_device = align_device_for(device)
     full_audio = whisperx.load_audio(str(vocals_wav))
     full_audio = highpass_filter(full_audio)
     full_audio = suppress_reverb(full_audio)
     full_audio = normalize_rms(full_audio)
+    import soundfile as sf
+    sf.write(str(output_dereverbed_vocals), full_audio, 16000)
     vocal_start, vocal_end = detect_vocal_region(full_audio)
+
+    if not (lyrics_text and lyrics_text.strip()):
+        print("[core:pipeline] 使用去混響人聲執行 Whisper 歌詞辨識...", flush=True)
+        t_segs, det_lang = transcribe_segments(
+            vocals_wav=output_dereverbed_vocals, model_name=settings.whisper_model, device=device, compute_type=compute_type,
+            language=(settings.whisper_language or "").strip() or None, alignment_backend=alignment_backend,
+        )
+        lyrics_text = "\n".join(s.get("text", "") for s in t_segs if s.get("text"))
 
     detected_language = (settings.whisper_language or "").strip()
     if not detected_language:
@@ -413,12 +418,14 @@ def run_unified_nightingale(
     print("[core:pipeline] 產生安全發聲區間，提取純對白人聲 D (.dialogue.vocals.wav)...", flush=True)
     safe_vocal_regions = get_safe_vocal_regions(aligned_lines, pad_start=0.4, pad_end=0.8, merge_gap=2.5)
     erase_lyrics_from_vocals(vocals_wav, safe_vocal_regions, output_dialogue_vocals)
+    dialogue_alignment_input = output_dereverbed_vocals.with_name("dialogue.vocals.dereverbed.wav")
+    erase_lyrics_from_vocals(output_dereverbed_vocals, safe_vocal_regions, dialogue_alignment_input)
 
     print("[core:pipeline] 對純對白軌執行 ASR 語音辨識...", flush=True)
     dialogue_items = []
     try:
         diag_segs, _ = transcribe_segments(
-            vocals_wav=output_dialogue_vocals, model_name="tiny", device=device, compute_type=compute_type,
+            vocals_wav=dialogue_alignment_input, model_name="tiny", device=device, compute_type=compute_type,
             language=(settings.whisper_language or "").strip() or None, alignment_backend="whisperx",
         )
         for ds in diag_segs:
@@ -430,13 +437,14 @@ def run_unified_nightingale(
     has_dialogue = len(dialogue_items) > 0
     print(f"[core:pipeline] 產生含對白伴奏 A'' (.instrumental.m4a) [偵測到 {len(dialogue_items)} 段對白]...", flush=True)
     make_dialogue_instrumental_m4a(accompaniment_wav, output_dialogue_vocals, output_dialogue_instrumental, ffmpeg_bin, has_dialogue)
+    dialogue_alignment_input.unlink(missing_ok=True)
 
     write_ktv_lrc(output_lrc, song_name, singer, vocal_end, aligned_lines, dialogue_items)
 
     return PipelineArtifacts(
         original_instrumental=output_orig_instrumental, dialogue_instrumental=output_dialogue_instrumental,
         vocals=output_vocals, original_vocal_mp4=output_mp4, dialogue_vocals=output_dialogue_vocals,
-        lrc=output_lrc, detected_language=detected_language,
+        dereverbed_vocals=output_dereverbed_vocals, lrc=output_lrc, detected_language=detected_language,
     )
 
 class KTVProcessor:
@@ -453,7 +461,23 @@ class KTVProcessor:
             return song.strip(), artist.strip()
         return title.strip(), ""
 
-    def process_song(self, url: str, manual_title: str, options: dict | None = None) -> bool:
+    def _probe_duration(self, media_path: Path) -> str:
+        ffmpeg_bin = get_ffmpeg_bin(self.settings)
+        ffmpeg_path = Path(ffmpeg_bin)
+        ffprobe = ffmpeg_path.with_name("ffprobe.exe" if os.name == "nt" else "ffprobe") if ffmpeg_path.is_file() else "ffprobe"
+        try:
+            result = subprocess.run(
+                [
+                    str(ffprobe), "-v", "error", "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1", str(media_path),
+                ],
+                check=True, capture_output=True, text=True, timeout=20,
+            )
+            return str(round(float(result.stdout.strip())))
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return ""
+
+    def process_song(self, url: str, manual_title: str = "", options: dict | None = None) -> bool:
         options = options or {}
         stems = 4 if str(options.get("stems", self.settings.separator_stems)) == "4" else 2
         device_pref = str(options.get("device", self.settings.device_preference)).lower()
@@ -461,13 +485,44 @@ class KTVProcessor:
         alignment_backend = str(options.get("alignment_backend", self.settings.alignment_backend)).lower()
         lyrics_text = (options.get("lyrics_text") or "").strip()
         singer = (options.get("singer") or "").strip()
+        source_url = url.strip()
+        youtube_title = str(options.get("youtube_title") or "")
+        metadata: dict[str, str] = {}
+        moved_files: list[Path] = []
 
         job_temp_dir: Path | None = None
         try:
+            try:
+                youtube_metadata = extract_youtube_metadata(source_url)
+                youtube_title = youtube_metadata.get("youtube_title", "")
+                if not manual_title.strip():
+                    manual_title = youtube_metadata.get("title", "")
+                if not singer:
+                    singer = youtube_metadata.get("artist", "")
+            except Exception as error:
+                self.log(f"⚠️ YouTube 標題解析失敗：{error}")
+                youtube_metadata = {}
+                if not manual_title.strip():
+                    manual_title = source_url
+            metadata = youtube_metadata
             safe_title = self.sanitize_filename(manual_title)
             self.log(f"目標歌曲：{safe_title}")
             song_name, inferred_singer = self._extract_song_artist(safe_title)
             if not singer: singer = inferred_singer
+            if " - " not in safe_title and metadata.get("title"):
+                song_name = metadata["title"]
+            try:
+                spotify_metadata = spotify_track_metadata(song_name, singer)
+            except Exception as error:
+                self.log(f"⚠️ Spotify metadata 查詢失敗：{error}")
+                spotify_metadata = {}
+            if spotify_metadata.get("title"):
+                song_name = spotify_metadata["title"]
+            if spotify_metadata.get("artist") and not options.get("singer"):
+                singer = spotify_metadata["artist"]
+            metadata = {**metadata, **spotify_metadata}
+            if not youtube_title:
+                youtube_title = str(options.get("youtube_title") or manual_title)
 
             job_id = uuid.uuid4().hex
             job_temp_dir = self.settings.temp_base_dir / job_id
@@ -479,6 +534,7 @@ class KTVProcessor:
             temp_dialogue_instrumental = job_temp_dir / "instrumental.m4a"
             temp_vocals = job_temp_dir / "vocals.wav"
             temp_dialogue_vocals = job_temp_dir / "dialogue.vocals.wav"
+            temp_dereverbed_vocals = job_temp_dir / "vocals.dereverbed.wav"
             temp_lrc = job_temp_dir / "lyrics.lrc"
 
             self.log("步驟 1/8: 下載影片...")
@@ -503,12 +559,13 @@ class KTVProcessor:
             else:
                 self.log("步驟 3/8: 使用手動提供歌詞...")
 
-            self.log(f"步驟 4-7/8: 執行音訊空間化、合成無損原唱影片、1:1 精準對齊歌詞與對白分離...")
+            self.log(f"步驟 4-7/8: 去除人聲混響後辨識／對齊歌詞、音訊空間化與對白分離...")
             run_unified_nightingale(
                 settings=self.settings, vocals_wav=separated.vocals_path, accompaniment_wav=separated.accompaniment_path,
                 temp_input_mp4=temp_input, output_orig_instrumental=temp_orig_instrumental,
                 output_dialogue_instrumental=temp_dialogue_instrumental, output_vocals=temp_vocals,
                 output_mp4=temp_output_mp4, output_dialogue_vocals=temp_dialogue_vocals, output_lrc=temp_lrc,
+                output_dereverbed_vocals=temp_dereverbed_vocals,
                 song_name=song_name or safe_title, singer=singer or "", lyrics_text=lyrics_text,
                 device_preference=device_pref, alignment_backend=alignment_backend,
             )
@@ -521,22 +578,60 @@ class KTVProcessor:
             final_dialogue_instrumental = final.with_name(f"{final.stem}.instrumental.m4a")
             final_vocals = final.with_name(f"{final.stem}.vocals.wav")
             final_dialogue_vocals = final.with_name(f"{final.stem}.dialogue.vocals.wav")
+            final_dereverbed_vocals = final.with_name(f"{final.stem}.vocals.dereverbed.wav")
             final_lrc = final.with_name(f"{final.stem}.lrc")
 
-            shutil.move(str(temp_output_mp4), str(final))
-            shutil.move(str(temp_orig_instrumental), str(final_orig_instrumental))
-            shutil.move(str(temp_dialogue_instrumental), str(final_dialogue_instrumental))
-            shutil.move(str(temp_vocals), str(final_vocals))
-            shutil.move(str(temp_dialogue_vocals), str(final_dialogue_vocals))
-            shutil.move(str(temp_lrc), str(final_lrc))
+            self.settings.songs_dir.mkdir(parents=True, exist_ok=True)
+            artifact_pairs = [
+                (temp_output_mp4, final),
+                (temp_orig_instrumental, final_orig_instrumental),
+                (temp_dialogue_instrumental, final_dialogue_instrumental),
+                (temp_vocals, final_vocals),
+                (temp_dialogue_vocals, final_dialogue_vocals),
+                (temp_dereverbed_vocals, final_dereverbed_vocals),
+                (temp_lrc, final_lrc),
+            ]
+            for source, destination in artifact_pairs:
+                if destination.exists():
+                    raise FileExistsError(f"歌曲檔名衝突：{destination.name}")
+                shutil.move(str(source), str(destination))
+                moved_files.append(destination)
 
-            self.log("✅ 製作完成！已成功輸出 6 大核心檔案。")
+            from .library import plain_lyrics_from_lrc
+            upsert_catalog_entry(
+                self.settings.library_index_path,
+                {
+                    "artist": singer,
+                    "title": song_name,
+                    "album": metadata.get("album", ""),
+                    "release_year": metadata.get("release_year", ""),
+                    "duration_seconds": self._probe_duration(final) or metadata.get("duration_seconds", ""),
+                    "genre": metadata.get("genre", ""),
+                    "lyrics": plain_lyrics_from_lrc(final_lrc),
+                    "separator_model": self.settings.demucs_model if separator_backend in {"demucs", "hybrid"} else self.settings.uvr_model,
+                    "separator_mode": f"{separator_backend}:{stems}-stem",
+                    "alignment_model": alignment_backend,
+                    "video_filename": final.name,
+                    "instrumental_filename": final_dialogue_instrumental.name,
+                    "lyrics_filename": final_lrc.name,
+                    "source_url": source_url,
+                    "youtube_title": youtube_title,
+                    "vocals_filename": final_vocals.name,
+                    "dereverbed_vocals_filename": final_dereverbed_vocals.name,
+                    "alignment_results_filename": final_lrc.name,
+                    "processing_status": "complete",
+                },
+            )
+
+            self.log("✅ 製作完成！歌曲檔案與正式曲庫 CSV 已更新。")
             return True
         except subprocess.CalledProcessError as error:
             self.log(f"❌ 執行失敗 (Code {error})")
             return False
         except Exception as error:
             self.log(f"❌ 錯誤: {error}")
+            for path in moved_files:
+                path.unlink(missing_ok=True)
             import traceback
             traceback.print_exc()
             return False

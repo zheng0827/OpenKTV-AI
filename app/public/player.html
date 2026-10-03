@@ -279,6 +279,7 @@ let highpass = null;
 let notchFilter = null;
 let highShelf = null;
 let compressor = null;
+let micLimiter = null;
 let analyser = null;
 
 function initAudioSystem() {
@@ -374,8 +375,7 @@ async function toggleMic() {
             audio: {
                 echoCancellation: isAntiFeedback,
                 noiseSuppression: true,
-                autoGainControl: false,
-                latency: 0
+                autoGainControl: true
             },
             video: false
         });
@@ -408,6 +408,14 @@ async function toggleMic() {
         compressor.threshold.setValueAtTime(-28, audioCtx.currentTime);
         compressor.ratio.setValueAtTime(6, audioCtx.currentTime);
         compressor.attack.setValueAtTime(0.003, audioCtx.currentTime);
+        micLimiter = audioCtx.createWaveShaper();
+        const limiterCurve = new Float32Array(2048);
+        for (let i = 0; i < limiterCurve.length; i++) {
+            const sample = (i * 2) / (limiterCurve.length - 1) - 1;
+            limiterCurve[i] = Math.max(-0.92, Math.min(0.92, sample));
+        }
+        micLimiter.curve = limiterCurve;
+        micLimiter.oversample = '4x';
 
         // 6. 人聲乾濕音訊通道
         micDryGain = audioCtx.createGain();
@@ -431,8 +439,9 @@ async function toggleMic() {
         compressor.connect(analyser);
 
         // 輸出至乾濕混音
-        compressor.connect(micDryGain).connect(audioCtx.destination);
-        compressor.connect(convolver).connect(micWetGain).connect(audioCtx.destination);
+        compressor.connect(micLimiter);
+        micLimiter.connect(micDryGain).connect(audioCtx.destination);
+        micLimiter.connect(convolver).connect(micWetGain).connect(audioCtx.destination);
 
         isMicRunning = true;
         btnMic.className = 'btn-action btn-active';
@@ -671,12 +680,61 @@ async function playSong(song) {
     currentTitle.innerText = `${song.title} - ${song.artist}`;
 
     video.src = song.path;
-    instrumental.src = song.path.replace(/\.mp4$/i, '.instrumental.m4a');
+    instrumental.src = song.instrumental_path || song.path.replace(/\.mp4$/i, '.instrumental.m4a');
 
     await loadLyrics(song.path);
 
-    video.play().catch(() => {});
+    await new Promise(resolve => {
+        if (video.readyState >= 1) return resolve();
+        video.addEventListener('loadedmetadata', resolve, { once: true });
+        video.addEventListener('error', resolve, { once: true });
+    });
     updateAudioMode(activeMode);
+}
+
+let serverClockOffsetMs = 0;
+let latestPlaybackSnapshot = null;
+
+async function applyPlaybackSnapshot(payload) {
+    if (!payload?.state) return;
+    latestPlaybackSnapshot = payload;
+    const queue = payload.queue || [];
+    updateNextSongDisplay(queue);
+    const song = payload.currentSong || queue[0] || null;
+    if (song && (!currentSong || currentSong.queueId !== song.queueId)) {
+        await playSong(song);
+    }
+    if (!song) {
+        waiting.style.display = 'flex';
+        currentTitle.innerText = '等待點歌...';
+        video.pause();
+        instrumental.pause();
+        currentSong = null;
+        updateRenderedLine(lineTop, lyricRenderState.top, null, 0, false);
+        updateRenderedLine(lineBottom, lyricRenderState.bottom, null, 0, false);
+        return;
+    }
+    const state = payload.state;
+    activeMode = state.audioMode || activeMode;
+    applyMusicVolume(state.musicVol ?? currentMusicVol);
+    applyMicVolume(state.micVol ?? currentMicVol);
+    applyReverbVolume(state.reverbVol ?? currentReverbVol);
+    updateAudioMode(activeMode);
+    const nowOnServer = Date.now() + serverClockOffsetMs;
+    const target = Math.max(0, Number(state.position) + (
+        state.isPlaying ? Math.max(0, (nowOnServer - Number(state.serverTime || nowOnServer)) / 1000) : 0
+    ));
+    if (Number.isFinite(target) && Math.abs(video.currentTime - target) > 0.35) {
+        video.currentTime = target;
+        instrumental.currentTime = target;
+    }
+    if (state.isPlaying) {
+        video.play().catch(() => {});
+        if (activeMode === 'accompaniment' && instrumental.src) instrumental.play().catch(() => {});
+    } else {
+        video.pause();
+        instrumental.pause();
+    }
 }
 
 function updateNextSongDisplay(queue) {
@@ -771,6 +829,15 @@ socket.on('execute_command', (cmd) => {
         applyReverbVolume(cmd.reverbVol);
     }
 });
+
+socket.on('playback_snapshot', applyPlaybackSnapshot);
+socket.on('playback_error', payload => {
+    modeBadge.innerText = payload?.message || '播放錯誤';
+});
+socket.on('time_pong', ({ clientSentAt, serverTime }) => {
+    serverClockOffsetMs = serverTime - (clientSentAt + Date.now()) / 2;
+});
+setInterval(() => socket.emit('time_ping', Date.now()), 5000);
 
 video.onended = () => {
     socket.emit('next_song');
