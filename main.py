@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import logging
+import multiprocessing
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -188,9 +189,20 @@ class ServerApp(tk.Tk):
         if not node_binary:
             self.fail_startup("找不到 Node.js。請先安裝 Node.js 18.17 以上版本，再重新執行。")
             return
+        try:
+            version_result = subprocess.run(
+                [node_binary, "--version"], capture_output=True, text=True, check=True, timeout=5
+            )
+            version_match = re.match(r"v?(\d+)\.(\d+)", version_result.stdout.strip())
+            if not version_match or tuple(map(int, version_match.groups())) < (18, 17):
+                self.fail_startup("Node.js 版本需求為 18.17 以上，請先更新 Node.js。")
+                return
+        except (OSError, subprocess.SubprocessError):
+            self.fail_startup("無法確認 Node.js 版本，請檢查 Node.js 安裝。")
+            return
         if not (APP_DIR / "node_modules").is_dir():
             self.fail_startup(
-                "Node.js 套件尚未安裝。請在專案目錄執行 `npm --prefix app ci`，再重新啟動。"
+                "Node.js 套件尚未安裝。請在專案目錄執行 `npm --prefix app install`，再重新啟動。"
             )
             return
 
@@ -313,4 +325,5 @@ class ServerApp(tk.Tk):
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     ServerApp().mainloop()

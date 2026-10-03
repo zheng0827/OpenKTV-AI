@@ -34,7 +34,7 @@ CSV 會記錄 Spotify 歌曲／歌手／專輯 metadata、來源、對齊模型�
 
 ```bash
 pip install -r requirements.txt
-npm --prefix app ci
+npm --prefix app install
 ```
 
 桌面環境下，使用下列命令一鍵啟動 Flask 與 Node.js。服務就緒後會自動開啟新版 KTV 介面；關閉啟動器視窗會停止 Node.js 播放服務。
