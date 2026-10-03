@@ -30,22 +30,20 @@ CSV 會記錄 Spotify 歌曲／歌手／專輯 metadata、來源、對齊模型�
 
 ## 啟動
 
-安裝 Python 依賴後，分別啟動 Flask 與 Node：
+先安裝 Python／Node.js 依賴並完成 `.env` 設定：
 
 ```bash
 pip install -r requirements.txt
-python -m core.server
+npm --prefix app ci
 ```
 
-另一個終端：
+桌面環境下，使用下列命令一鍵啟動 Flask 與 Node.js。服務就緒後會自動開啟新版 KTV 介面；關閉啟動器視窗會停止 Node.js 播放服務。
 
 ```bash
-cd app
-npm ci
-npm run server
+python main.py
 ```
 
-桌面 GUI 仍可使用 `python main.py`。Node 播放服務位於 `http://localhost:3000`；Flask 背景工作 API 預設位於 `http://localhost:5000`。
+沒有桌面 GUI 時，可在兩個終端分別執行 `python -m core.server` 與 `npm --prefix app run server`。Node 播放服務預設位於 `http://localhost:3000`；Flask 背景工作 API 預設位於 `http://localhost:5000`。若 Node.js 或 npm 套件尚未安裝，啟動器會顯示安裝提示；Node 服務日誌寫入 `logs/node.log`。
 
 ## 設定與金鑰
 
