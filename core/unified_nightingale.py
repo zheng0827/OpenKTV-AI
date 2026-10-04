@@ -8,6 +8,8 @@ import urllib.request
 import urllib.parse
 import json
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,6 +25,8 @@ from .audio import detect_vocal_region, highpass_filter, normalize_rms, suppress
 from .language_detection import detect_language_multiwindow
 from .whisper_alignment import align_with_backend
 from .cjk import is_cjk, tokenize_for_alignment, align_lang_code, attribute_chars_to_tokens, merge_punct, attach_reading, qwen_kept_len, is_supported_lang, align_model_for, clean_for_alignment
+from .uvr_separator import dereverb_vocals_with_uvr
+from .metadata import extract_youtube_metadata, match_spotify_track, safe_filename, fetch_lyrics
 
 @dataclass(frozen=True)
 class PipelineArtifacts:
@@ -33,6 +37,7 @@ class PipelineArtifacts:
     dialogue_vocals: Path
     lrc: Path
     detected_language: str
+    alignment_results: dict[str, str]
 
 def get_ffmpeg_bin(settings: AppSettings) -> str:
     if settings.ffmpeg_dir:
@@ -211,6 +216,74 @@ def _map_qwen_units_to_lines(align_result: dict, clean_lines: list[str], languag
         segments.append(LyricLine(start=words[0]["start"], end=words[-1]["end"], text=line_text, words=words))
     return segments
 
+
+def _align_lyric_lines(
+    backend: str,
+    clean_lines: list[str],
+    full_audio,
+    detected_language: str,
+    transcription_device: str,
+    vocal_start: float,
+    vocal_end: float,
+    text_transform,
+) -> list[LyricLine]:
+    is_cjk_lang = is_cjk(detected_language)
+    aligned_lines = None
+    if backend == "qwen":
+        from .qwen_alignment import qwen_align_with_cpu_fallback, is_supported as qwen_supported
+        if qwen_supported(detected_language):
+            qwen_text = "\n".join(clean_lines)
+            try:
+                payload = qwen_align_with_cpu_fallback(
+                    [{"text": qwen_text, "start": vocal_start, "end": vocal_end}],
+                    full_audio,
+                    detected_language,
+                )
+                aligned_lines = _map_qwen_units_to_lines(payload, clean_lines, detected_language)
+            except Exception as error:
+                print(f"[core:pipeline] Qwen 對齊失敗: {error}，改用 WhisperX 對齊", flush=True)
+
+    if aligned_lines is None:
+        line_token_pairs = []
+        for line in clean_lines:
+            if detected_language in {"zh", "yue"}:
+                line_token_pairs.append([(char, clean_for_alignment(char)) for char in line])
+            elif is_cjk_lang:
+                line_token_pairs.append(tokenize_for_alignment(line, detected_language))
+        if is_cjk_lang:
+            alignment_text = "".join("".join(token for _, token in pairs) for pairs in line_token_pairs)
+        else:
+            alignment_text = " ".join(clean_lines)
+        payload = align_with_backend(
+            [{"text": alignment_text, "start": vocal_start, "end": vocal_end}],
+            full_audio,
+            align_lang_code(detected_language) if is_cjk_lang else detected_language,
+            transcription_device,
+            backend=backend if backend != "qwen" else "whisperx",
+            model_name=align_model_for(detected_language) if is_cjk_lang else None,
+        )
+        if is_cjk_lang:
+            aligned_lines = _map_chars_to_lines_cjk(payload, clean_lines, line_token_pairs, detected_language)
+        else:
+            aligned_lines = _map_words_to_lines(payload, clean_lines)
+
+    for line in aligned_lines:
+        line.text = text_transform(line.text)
+        for word in line.words:
+            word["text"] = text_transform(word.get("text", word.get("word", "")))
+    for index in range(1, len(aligned_lines)):
+        previous, current = aligned_lines[index - 1], aligned_lines[index]
+        if current.start < previous.end:
+            overlap_point = max(current.start, previous.start + 0.1)
+            previous.end = round(overlap_point, 3)
+            if previous.words and previous.words[-1]["end"] > previous.end:
+                previous.words[-1]["end"] = previous.end
+            if current.start < previous.end:
+                current.start = previous.end
+                if current.words and current.words[0]["start"] < current.start:
+                    current.words[0]["start"] = current.start
+    return _merge_short_segments(_split_long_segments(aligned_lines))
+
 def _split_long_segments(segments: list[LyricLine]) -> list[LyricLine]:
     MAX_WORDS_PER_LINE = 10
     out = []
@@ -306,6 +379,8 @@ def run_unified_nightingale(
     output_orig_instrumental: Path, output_dialogue_instrumental: Path, output_vocals: Path, output_mp4: Path,
     output_dialogue_vocals: Path, output_lrc: Path, song_name: str, singer: str, lyrics_text: str,
     device_preference: str, alignment_backend: str,
+    output_dereverbed_vocals: Path | None = None,
+    output_alignment_paths: dict[str, Path] | None = None,
 ) -> PipelineArtifacts:
     device = resolve_device(device_preference)
     compute_type = settings.whisper_compute_type if settings.whisper_compute_type != "auto" else compute_type_for(device)
@@ -327,9 +402,29 @@ def run_unified_nightingale(
 
     import whisperx
     transcription_device = align_device_for(device)
-    full_audio = whisperx.load_audio(str(vocals_wav))
-    full_audio = highpass_filter(full_audio)
-    full_audio = suppress_reverb(full_audio)
+    dereverbed_path = output_dereverbed_vocals or vocals_wav.with_name(f"{vocals_wav.stem}.dereverbed.wav")
+    dereverb_succeeded = False
+    if settings.dereverb_enabled:
+        try:
+            model_output = dereverb_vocals_with_uvr(
+                vocals_wav,
+                dereverbed_path.parent / "dereverb_model_output",
+                settings.uvr_model_dir,
+                settings.dereverb_model,
+                log_cb=print,
+            )
+            if model_output.resolve() != dereverbed_path.resolve():
+                shutil.copyfile(model_output, dereverbed_path)
+            dereverb_succeeded = True
+        except Exception as error:
+            print(f"[core:pipeline] UVR 去混響模型失敗，使用保守 DSP 備援: {error}", flush=True)
+    if not dereverb_succeeded:
+        import soundfile as sf
+        source_audio = whisperx.load_audio(str(vocals_wav))
+        if settings.dereverb_enabled:
+            source_audio = suppress_reverb(highpass_filter(source_audio))
+        sf.write(str(dereverbed_path), source_audio, 16000)
+    full_audio = whisperx.load_audio(str(dereverbed_path))
     full_audio = normalize_rms(full_audio)
     vocal_start, vocal_end = detect_vocal_region(full_audio)
 
@@ -343,72 +438,46 @@ def run_unified_nightingale(
 
     clean_lines = parse_lyrics_text(lyrics_text)
     text_transform, _ = build_text_transform(detected_language)
-    is_cjk_lang = is_cjk(detected_language)
-    aligned_lines = None
+    backends = list(dict.fromkeys(settings.lyrics_alignment_backends or (alignment_backend,)))
+    if alignment_backend not in backends:
+        backends.insert(0, alignment_backend)
+    requested_parallelism = max(1, min(len(backends), settings.alignment_parallelism))
+    lines_by_backend: dict[str, list[LyricLine]] = {}
+    alignment_timings: dict[str, dict] = {}
 
-    if alignment_backend == "qwen":
-        from .qwen_alignment import qwen_align_with_cpu_fallback, is_supported as qwen_supported
-        if qwen_supported(detected_language):
-            qwen_full_text = "\n".join(clean_lines)
-            qwen_segments = [{"text": qwen_full_text, "start": vocal_start, "end": vocal_end}]
-            try:
-                aligned_payload = qwen_align_with_cpu_fallback(qwen_segments, full_audio, detected_language)
-                aligned_lines = _map_qwen_units_to_lines(aligned_payload, clean_lines, detected_language)
-            except Exception as e:
-                print(f"[core:pipeline] Qwen 對齊失敗: {e}，改用 wav2vec2")
-
-    if aligned_lines is None:
-        # =========================================================================
-        # 【致勝核心】：針對中文，徹底拋棄 Jieba，強制將每句歌詞拆解為 1:1 單一字元！
-        # 讓 wav2vec2 直接為每個「字」提供真實的聲學時間點，絕不使用數學平均。
-        # =========================================================================
-        line_token_pairs = []
-        for line in clean_lines:
-            if detected_language in ["zh", "yue"]:
-                # 遇到中文/粵語，逐字拆解並清理標點
-                pairs = [(ch, clean_for_alignment(ch)) for ch in line]
-                line_token_pairs.append(pairs)
-            elif is_cjk_lang:
-                # 日文維持原樣 (因為需要 Fugashi 轉換假名)
-                line_token_pairs.append(tokenize_for_alignment(line, detected_language))
-
-        if is_cjk_lang:
-            full_alignment_text = "".join("".join(r for _, r in pairs) for pairs in line_token_pairs)
-        else:
-            full_alignment_text = " ".join(clean_lines)
-
-        raw_segments = [{"text": full_alignment_text, "start": vocal_start, "end": vocal_end}]
-        aligned_payload = align_with_backend(
-            raw_segments, full_audio, align_lang_code(detected_language) if is_cjk_lang else detected_language,
-            transcription_device, backend=alignment_backend if alignment_backend != "qwen" else "whisperx",
-            model_name=align_model_for(detected_language) if is_cjk_lang else None
+    def run_one(backend: str):
+        started = time.monotonic()
+        result = _align_lyric_lines(
+            backend, clean_lines, full_audio, detected_language, transcription_device,
+            vocal_start, vocal_end, text_transform,
         )
-        if is_cjk_lang:
-            aligned_lines = _map_chars_to_lines_cjk(aligned_payload, clean_lines, line_token_pairs, detected_language)
-        else:
-            aligned_lines = _map_words_to_lines(aligned_payload, clean_lines)
+        return backend, result, round(time.monotonic() - started, 3)
 
-    for line in aligned_lines:
-        line.text = text_transform(line.text)
-        for w in line.words:
-            w["text"] = text_transform(w.get("text", w.get("word", "")))
-
-    # 防重疊收束：確保不發生「偷跑」現象
-    for i in range(1, len(aligned_lines)):
-        prev = aligned_lines[i - 1]
-        cur = aligned_lines[i]
-        if cur.start < prev.end:
-            overlap_pt = max(cur.start, prev.start + 0.1)
-            prev.end = round(overlap_pt, 3)
-            if prev.words and prev.words[-1]["end"] > prev.end:
-                prev.words[-1]["end"] = prev.end
-            if cur.start < prev.end:
-                cur.start = prev.end
-                if cur.words and cur.words[0]["start"] < cur.start:
-                    cur.words[0]["start"] = cur.start
-
-    aligned_lines = _split_long_segments(aligned_lines)
-    aligned_lines = _merge_short_segments(aligned_lines)
+    if requested_parallelism > 1 and len(backends) > 1:
+        with ThreadPoolExecutor(max_workers=requested_parallelism) as executor:
+            futures = {executor.submit(run_one, backend): backend for backend in backends}
+            for future in as_completed(futures):
+                backend = futures[future]
+                try:
+                    _, lines, elapsed = future.result()
+                    lines_by_backend[backend] = lines
+                    alignment_timings[backend] = {"status": "complete", "seconds": elapsed}
+                except Exception as error:
+                    alignment_timings[backend] = {"status": "failed", "error": str(error)}
+                    print(f"[core:pipeline] {backend} 對齊失敗: {error}", flush=True)
+    else:
+        for backend in backends:
+            try:
+                _, lines, elapsed = run_one(backend)
+                lines_by_backend[backend] = lines
+                alignment_timings[backend] = {"status": "complete", "seconds": elapsed}
+            except Exception as error:
+                alignment_timings[backend] = {"status": "failed", "error": str(error)}
+                print(f"[core:pipeline] {backend} 對齊失敗: {error}", flush=True)
+    if not lines_by_backend:
+        raise RuntimeError("所有歌詞對齊後端皆執行失敗")
+    primary_backend = alignment_backend if alignment_backend in lines_by_backend else next(iter(lines_by_backend))
+    aligned_lines = lines_by_backend[primary_backend]
 
     print("[core:pipeline] 產生安全發聲區間，提取純對白人聲 D (.dialogue.vocals.wav)...", flush=True)
     safe_vocal_regions = get_safe_vocal_regions(aligned_lines, pad_start=0.4, pad_end=0.8, merge_gap=2.5)
@@ -432,11 +501,21 @@ def run_unified_nightingale(
     make_dialogue_instrumental_m4a(accompaniment_wav, output_dialogue_vocals, output_dialogue_instrumental, ffmpeg_bin, has_dialogue)
 
     write_ktv_lrc(output_lrc, song_name, singer, vocal_end, aligned_lines, dialogue_items)
+    alignment_results = {primary_backend: output_lrc.name}
+    for backend, backend_lines in lines_by_backend.items():
+        if backend == primary_backend:
+            continue
+        target = (output_alignment_paths or {}).get(backend)
+        if target is None:
+            target = output_lrc.with_name(f"{output_lrc.stem}.lyrics_alignment_{backend}.lrc")
+        write_ktv_lrc(target, song_name, singer, vocal_end, backend_lines, dialogue_items)
+        alignment_results[backend] = target.name
+    alignment_results["_metrics"] = json.dumps(alignment_timings, ensure_ascii=False)
 
     return PipelineArtifacts(
         original_instrumental=output_orig_instrumental, dialogue_instrumental=output_dialogue_instrumental,
         vocals=output_vocals, original_vocal_mp4=output_mp4, dialogue_vocals=output_dialogue_vocals,
-        lrc=output_lrc, detected_language=detected_language,
+        lrc=output_lrc, detected_language=detected_language, alignment_results=alignment_results,
     )
 
 class KTVProcessor:
@@ -464,10 +543,34 @@ class KTVProcessor:
 
         job_temp_dir: Path | None = None
         try:
-            safe_title = self.sanitize_filename(manual_title)
-            self.log(f"目標歌曲：{safe_title}")
-            song_name, inferred_singer = self._extract_song_artist(safe_title)
-            if not singer: singer = inferred_singer
+            youtube = extract_youtube_metadata(url)
+            parsed_title = youtube.get("title") or manual_title
+            song_name = manual_title or youtube.get("song") or ""
+            inferred_artist = singer or youtube.get("artist") or ""
+            self.log(
+                f"YouTube 標題解析：{parsed_title} "
+                f"(歌名={song_name or '未辨識'}, 歌手={inferred_artist or '未辨識'}, "
+                f"解析器={youtube.get('parser', 'heuristic')})"
+            )
+            spotify = match_spotify_track(song_name, inferred_artist, self.settings.spotify_match_threshold)
+            if spotify["status"] != "matched":
+                if spotify["status"] == "not_found":
+                    self.log(
+                        f"Spotify 搜尋無結果：song={song_name!r}, artist={inferred_artist!r}, "
+                        f"queries={spotify.get('search_queries', [])!r}"
+                    )
+                raise RuntimeError(
+                    f"Spotify 曲目比對狀態為 {spotify['status']} "
+                    f"(confidence={spotify['confidence']:.2f})；"
+                    f"{'Spotify 搜尋沒有找到候選曲目，請核對 YouTube 標題解析出的歌名／歌手或人工輸入正確資訊。' if spotify['status'] == 'not_found' else '請人工核對歌曲，'}"
+                    f"搜尋詞={json.dumps(spotify.get('search_queries', []), ensure_ascii=False)}；"
+                    f"未開始下載。候選={json.dumps(spotify.get('candidates', []), ensure_ascii=False)}"
+                )
+            spotify_track = spotify["track"]
+            song_name = spotify_track["song_name"]
+            singer = spotify_track["artist_name"]
+            safe_title = safe_filename(f"{singer} - {song_name}")
+            self.log(f"Spotify 正規曲目：{safe_title} ({spotify_track['id']})")
 
             job_id = uuid.uuid4().hex
             job_temp_dir = self.settings.temp_base_dir / job_id
@@ -478,10 +581,16 @@ class KTVProcessor:
             temp_orig_instrumental = job_temp_dir / "original.instrumental.m4a"
             temp_dialogue_instrumental = job_temp_dir / "instrumental.m4a"
             temp_vocals = job_temp_dir / "vocals.wav"
+            temp_dereverbed_vocals = job_temp_dir / "vocals.dereverbed.wav"
             temp_dialogue_vocals = job_temp_dir / "dialogue.vocals.wav"
             temp_lrc = job_temp_dir / "lyrics.lrc"
+            alignment_backends = list(dict.fromkeys(self.settings.lyrics_alignment_backends or (alignment_backend,)))
+            temp_alignment_paths = {
+                backend: job_temp_dir / f"lyrics_alignment_{backend}.lrc"
+                for backend in alignment_backends if backend != alignment_backend
+            }
 
-            self.log("步驟 1/8: 下載影片...")
+            self.log("步驟 1/8: 使用 Spotify 曲目資訊比對後下載影片...")
             download_youtube_video(url, temp_input, self.settings.ffmpeg_dir, self.settings.yt_dlp_path)
 
             if separator_backend in {"demucs", "hybrid"}:
@@ -494,32 +603,51 @@ class KTVProcessor:
             )
 
             if not lyrics_text:
-                self.log("步驟 3/8: 強化抓取正確歌詞...")
-                lyrics_text = enhanced_fetch_lrclib(song_name, singer or "") or ""
+                self.log("步驟 3/8: 依 Spotify 曲目資訊取得歌詞...")
+                lyrics = fetch_lyrics(
+                    song_name,
+                    singer,
+                    spotify_track.get("album", ""),
+                    spotify_track.get("duration_seconds", 0),
+                    self.settings.musixmatch_api_key,
+                )
+                lyrics_text = lyrics.get("synced") or lyrics.get("plain") or ""
+                lyrics_source = lyrics.get("source", "")
+                if not lyrics_text:
+                    lyrics_text = enhanced_fetch_lrclib(song_name, singer) or ""
+                    if lyrics_text and not lyrics_source:
+                        lyrics_source = "lrclib_search"
                 if lyrics_text:
                     self.log(f"✅ 成功獲取歌詞！(字數: {len(lyrics_text)})")
                 else:
                     self.log("⚠️ 無法獲取歌詞！將啟用 Whisper 盲聽辨識。")
             else:
                 self.log("步驟 3/8: 使用手動提供歌詞...")
+                lyrics_source = "manual"
 
             self.log(f"步驟 4-7/8: 執行音訊空間化、合成無損原唱影片、1:1 精準對齊歌詞與對白分離...")
-            run_unified_nightingale(
+            artifacts = run_unified_nightingale(
                 settings=self.settings, vocals_wav=separated.vocals_path, accompaniment_wav=separated.accompaniment_path,
                 temp_input_mp4=temp_input, output_orig_instrumental=temp_orig_instrumental,
                 output_dialogue_instrumental=temp_dialogue_instrumental, output_vocals=temp_vocals,
                 output_mp4=temp_output_mp4, output_dialogue_vocals=temp_dialogue_vocals, output_lrc=temp_lrc,
                 song_name=song_name or safe_title, singer=singer or "", lyrics_text=lyrics_text,
                 device_preference=device_pref, alignment_backend=alignment_backend,
+                output_dereverbed_vocals=temp_dereverbed_vocals,
+                output_alignment_paths=temp_alignment_paths,
             )
 
-            self.log(f"步驟 8/8: 歸檔 6 大最終成品檔案至歌曲庫...")
+            self.log("步驟 8/8: 歸檔媒體與多模型歌詞對齊結果...")
             final = self.settings.songs_dir / f"{safe_title}.mp4"
-            if final.exists(): final = self.settings.songs_dir / f"{safe_title}_{job_id}.mp4"
+            suffix = 1
+            while final.exists():
+                final = self.settings.songs_dir / f"{safe_title}_{suffix}.mp4"
+                suffix += 1
 
             final_orig_instrumental = final.with_name(f"{final.stem}.original.instrumental.m4a")
             final_dialogue_instrumental = final.with_name(f"{final.stem}.instrumental.m4a")
             final_vocals = final.with_name(f"{final.stem}.vocals.wav")
+            final_dereverbed_vocals = final.with_name(f"{final.stem}.vocals.dereverbed.wav")
             final_dialogue_vocals = final.with_name(f"{final.stem}.dialogue.vocals.wav")
             final_lrc = final.with_name(f"{final.stem}.lrc")
 
@@ -527,10 +655,54 @@ class KTVProcessor:
             shutil.move(str(temp_orig_instrumental), str(final_orig_instrumental))
             shutil.move(str(temp_dialogue_instrumental), str(final_dialogue_instrumental))
             shutil.move(str(temp_vocals), str(final_vocals))
+            shutil.move(str(temp_dereverbed_vocals), str(final_dereverbed_vocals))
             shutil.move(str(temp_dialogue_vocals), str(final_dialogue_vocals))
             shutil.move(str(temp_lrc), str(final_lrc))
 
-            self.log("✅ 製作完成！已成功輸出 6 大核心檔案。")
+            primary_alignment_backend = next(
+                (backend for backend, filename in artifacts.alignment_results.items() if filename == temp_lrc.name),
+                alignment_backend,
+            )
+            alignment_names = {primary_alignment_backend: final_lrc.name}
+            for backend, temp_path in temp_alignment_paths.items():
+                if temp_path.is_file():
+                    final_alignment = final.with_name(f"{final.stem}.lyrics_alignment_{backend}.lrc")
+                    shutil.move(str(temp_path), str(final_alignment))
+                    alignment_names[backend] = final_alignment.name
+
+            from datetime import datetime, timezone
+            metadata_row = {
+                "artist_name": singer,
+                "song_name": song_name,
+                "album": spotify_track.get("album", ""),
+                "release_year": spotify_track.get("release_year", ""),
+                "duration_seconds": spotify_track.get("duration_seconds", 0),
+                "artist_gender": "",
+                "genre": spotify_track.get("genre", ""),
+                "source_url": youtube.get("url") or url,
+                "original_source_title": youtube.get("raw_title", ""),
+                "normalized_youtube_title": parsed_title,
+                "spotify_track_id": spotify_track.get("id", ""),
+                "spotify_track_url": spotify_track.get("url", ""),
+                "separator_model": self.settings.demucs_model if separator_backend in {"demucs", "hybrid"} else self.settings.uvr_model,
+                "separator_mode": separator_backend,
+                "lyrics_alignment_model": primary_alignment_backend,
+                "alignment_result_filenames": json.dumps(alignment_names, ensure_ascii=False),
+                "alignment_metrics": artifacts.alignment_results.get("_metrics", ""),
+                "video_filename": final.name,
+                "accompaniment_filename": final_dialogue_instrumental.name,
+                "lyrics_filename": final_lrc.name,
+                "vocals_filename": final_vocals.name,
+                "dereverbed_vocals_filename": final_dereverbed_vocals.name,
+                "dialogue_vocals_filename": final_dialogue_vocals.name,
+                "lyrics_source": lyrics_source,
+                "metadata_match_status": spotify["status"],
+                "metadata_match_confidence": spotify["confidence"],
+                "processing_status": "complete",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            update_library_index(self.settings.songs_dir, self.settings.library_index_path, {final.name: metadata_row})
+            self.log("✅ 處理完成：Spotify metadata、歌曲曲庫與對齊結果已更新。")
             return True
         except subprocess.CalledProcessError as error:
             self.log(f"❌ 執行失敗 (Code {error})")

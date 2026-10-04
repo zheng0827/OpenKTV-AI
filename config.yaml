@@ -1,0 +1,257 @@
+# Shared runtime configuration for the Python and Node.js services.
+config_version: 1
+
+architecture:
+  download_processing_service: flask
+  playback_service: node
+  playback_state_authority: node
+  library_authority: python_generated_csv
+  shared_media_directory: ./ktv_songs
+  media_delivery:
+    method: http_range
+    realtime_state_transport: socket_io
+    server_authoritative_sync: true
+  legacy_app_directory:
+    rebuild_from_scratch: true
+    serve_library_from_public_directory: false
+
+services:
+  flask:
+    host: 0.0.0.0
+    port: 5000
+    responsibilities:
+      - youtube_metadata_and_download
+      - audio_processing_and_lyrics_alignment
+      - background_job_status_and_retry
+      - write_media_artifacts_and_library_csv
+  node:
+    host: 0.0.0.0
+    port: 3000
+    responsibilities:
+      - karaoke_web_interface
+      - rooms_and_queue
+      - authoritative_playback_state
+      - media_streaming
+      - socket_io_events
+    library_csv: ./ktv_songs/library.csv
+    media_directory: ./ktv_songs
+
+paths:
+  songs_directory: ./ktv_songs
+  temporary_directory: ./temp_processing
+  library_csv: ./ktv_songs/library.csv
+  logs_directory: ./logs
+  ffmpeg_directory: ./ffmpeg/bin
+
+models:
+  whisper:
+    model: large-v3
+    compute_type: auto
+
+download:
+  provider: yt_dlp
+  metadata_lookup_before_download: true
+  metadata_matching_provider: spotify_web_api
+  normalize_song_and_artist_names: true
+  preserve_original_title: true
+  normalization:
+    unicode_form: NFKC
+    remove_known_title_noise: true
+    infer_artist_and_title_from_metadata: true
+    sanitize_output_filename: true
+    use_manual_values_only_as_fallback: true
+  retry_count: 2
+  retry_delay_seconds: 2
+  background_jobs:
+    enabled: true
+    max_concurrent_song_jobs: 1
+    retry_count: 2
+    retry_delay_seconds: 2
+    report_progress: true
+    retain_failed_job_details: true
+
+audio_processing:
+  separator:
+    backend: hybrid
+    stems: 4
+    demucs_model: htdemucs_ft
+    uvr_model: UVR-MDX-NET-Voc_FT.onnx
+    preserve_existing_hybrid_implementation: true
+    outputs:
+      vocals: "{song}.vocals.wav"
+      accompaniment: "{song}.instrumental.m4a"
+  dereverb:
+    enabled: true
+    scope: vocals_only
+    model_provider: audio_separator_uvr
+    model_name: UVR-DeEcho-DeReverb.pth
+    dsp_fallback: conservative_spectral_subtraction
+    input: "{song}.vocals.wav"
+    output: "{song}.vocals.dereverbed.wav"
+    use_for_lyrics_alignment: true
+    keep_original_vocals: true
+    fall_back_to_original_on_failure: true
+  alignment:
+    primary_backend: ctc
+    backends:
+      - ctc
+      - whisperx
+      - qwen
+    generate_result_for_each_backend: true
+    run_in_parallel: false
+    max_parallel_backends: 1
+    input: "{song}.vocals.dereverbed.wav"
+    output_pattern: "{song}.lyrics_alignment_{backend}.lrc"
+    on_filename_collision: append_numeric_suffix
+    collision_suffix_pattern: "_{number}"
+    retain_all_results: true
+    select_primary_result: manual_or_configured_backend
+    fallback_input: "{song}.vocals.wav"
+  instrumental_validation:
+    require_vocal_leakage_check: true
+    do_not_mix_original_vocals_into_accompaniment: true
+  microphone:
+    realtime_processing: true
+    echo_cancellation: true
+    noise_suppression: true
+    automatic_gain_control: true
+    high_pass_filter: true
+    limiter: true
+    prevent_local_monitor_feedback: true
+    mix_microphone_into_playback: true
+    default_reverb: 0.25
+    clip_protection: true
+
+metadata:
+  source: spotify_web_api
+  spotify:
+    credentials_from_environment:
+      - SPOTIFY_CLIENT_ID
+      - SPOTIFY_CLIENT_SECRET
+    minimum_match_score: 0.72
+    require_high_confidence_before_download: true
+    penalize_cover_live_karaoke_instrumental: true
+    retain_raw_youtube_title_as_search_evidence: true
+  youtube_title:
+    source: yt_dlp
+    purpose: spotify_search_query_only
+    unicode_normalization: NFKC
+    remove_promo_text: true
+    sanitize_filename: true
+  lyrics:
+    primary: lrclib
+    fallback: musixmatch
+    musixmatch_api_key_environment_variable: MUSIXMATCH_API_KEY
+    prefer_timed_lyrics: true
+    record_provider: true
+  manual_fallback_for_unavailable_fields: false
+  keep_raw_source_metadata: true
+  lyrics_plain_text:
+    source: generated_lrc
+    remove_timestamps: true
+    line_separator: " "
+
+library:
+  format: csv
+  encoding: utf-8
+  path: ./ktv_songs/library.csv
+  write_atomically: true
+  required_columns:
+    - id
+    - artist_name
+    - song_name
+    - album
+    - release_year
+    - duration_seconds
+    - artist_gender
+    - genre
+    - lyrics_plain_text
+    - separator_model
+    - separator_mode
+    - lyrics_alignment_model
+    - video_filename
+    - accompaniment_filename
+    - lyrics_filename
+  additional_columns:
+    - source_url
+    - original_source_title
+    - vocals_filename
+    - dereverbed_vocals_filename
+    - alignment_result_filenames
+    - alignment_metrics
+    - processing_status
+    - created_at
+  unknown_metadata_value: ""
+  id_strategy: stable_unique_id
+
+player:
+  interface:
+    layout: bottom_function_menu_and_main_content
+    support_small_windows: true
+    responsive: true
+    mobile_qr_code: true
+  playback:
+    state_source: node_server
+    synchronize_clients: true
+    snapshot_interval_seconds: 1
+    seek_to_correct_drift: true
+    play_accompaniment_by_default: true
+    prevent_original_vocal_leakage: true
+  rooms:
+    allow_create: true
+    allow_join_by_id: true
+    generate_join_qr_code: true
+    close_when_empty: true
+    empty_room_grace_seconds: 30
+    persist_after_process_restart: false
+
+socket_io:
+  cors_origins: [] # Same-origin by default; explicitly list deployed trusted web origins.
+  authenticate_connections: true
+  authorize_roles_server_side: true
+  roles:
+    - player
+    - remote
+    - queue
+    - admin
+  validate_event_payloads: true
+  reject_unknown_events: true
+  rate_limit_control_events: true
+  enforce_room_membership: true
+  remote_permissions:
+    playback_actions:
+      - play
+      - pause
+      - next
+      - seek
+      - change_track
+      - set_effects
+    insert_next: true
+    remove_queue: true
+    reorder_queue: false
+
+performance:
+  target_playback_platform: raspberry_pi_4b_4gb
+  node_playback_service_only: true
+  limit_python_processing_concurrency: true
+  alignment_parallelism_must_be_configurable: true
+  monitor_memory_and_cpu: true
+  stream_existing_media_without_server_transcoding: true
+
+operations:
+  deployment:
+    start_services_independently: true
+    restart_on_failure: true
+    persistent_media_volume: true
+    health_check_interval_seconds: 30
+    tls_required_for_microphone: true
+  monitoring:
+    health_endpoints: true
+    structured_logs: true
+    log_level: info
+    track_background_jobs: true
+    track_room_and_socket_counts: true
+    track_cpu_memory_and_disk: true
+  security:
+    secrets_from_environment: true
+    do_not_store_credentials_in_yaml: true

@@ -1,0 +1,23 @@
+[Unit]
+Description=OpenKTV Python download and processing service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ktv
+Group=ktv
+WorkingDirectory=/opt/openktv-ai
+EnvironmentFile=/etc/openktv-ai/openktv.env
+Environment=KTV_HOST=127.0.0.1
+ExecStart=/opt/openktv-ai/.venv/bin/python -m core.server
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/openktv-ai/ktv_songs /opt/openktv-ai/temp_processing /opt/openktv-ai/model_cache
+
+[Install]
+WantedBy=multi-user.target
