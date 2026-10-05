@@ -72,13 +72,50 @@ async function readCatalog(filePath) {
 
 function createSearchIndex(songs) {
   const index = new MiniSearch({
-    fields: ['title', 'artist', 'language', 'pinyin_abbr', 'zhuyin_abbr'],
-    storeFields: ['id', 'title', 'artist', 'language', 'char_count', 'path', 'instrumental_path',
+    fields: ['title', 'artist', 'lyrics', 'language', 'pinyin_abbr', 'zhuyin_abbr'],
+    storeFields: ['id', 'title', 'artist', 'lyrics', 'language', 'char_count', 'path', 'instrumental_path',
       'video_filename', 'instrumental_filename', 'lyrics_filename'],
-    searchOptions: { prefix: true, fuzzy: 0.2 },
+    searchOptions: { prefix: true, fuzzy: 0.2, boost: { title: 4, artist: 3, lyrics: 1 } },
   });
   index.addAll(songs);
   return index;
+}
+
+function createInverseIndex(songs) {
+  const index = new Map();
+  for (const song of songs) {
+    const fields = [song.title, song.artist, song.lyrics, song.pinyin_abbr, song.zhuyin_abbr, song.language];
+    const tokens = new Set();
+    for (const field of fields) {
+      const value = String(field || '').toUpperCase();
+      for (const token of value.match(/[\p{L}\p{N}]+/gu) || []) tokens.add(token);
+      for (const char of [...value]) {
+        if (/^[\p{L}\p{N}]$/u.test(char)) tokens.add(char);
+      }
+    }
+    for (const token of tokens) {
+      if (!index.has(token)) index.set(token, new Set());
+      index.get(token).add(song.id);
+    }
+  }
+  return index;
+}
+
+function inverseSearch(songs, inverseIndex, query) {
+  const clean = String(query || '').trim().toUpperCase();
+  if (!clean) return songs;
+  const terms = clean.match(/[\p{L}\p{N}]+/gu) || [...clean].filter(ch => /^[\p{L}\p{N}]$/u.test(ch));
+  if (!terms.length) return [];
+  let candidates = null;
+  for (const term of terms) {
+    const ids = new Set();
+    for (const [token, values] of inverseIndex.entries()) {
+      if (token.startsWith(term) || token.includes(term)) for (const id of values) ids.add(id);
+    }
+    candidates = candidates === null ? ids : new Set([...candidates].filter(id => ids.has(id)));
+  }
+  const byId = new Map(songs.map(song => [song.id, song]));
+  return [...(candidates || [])].map(id => byId.get(id)).filter(Boolean);
 }
 
 function parseRange(range, size) {
@@ -107,6 +144,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         songs = await readCatalog(legacyCatalogPath);
       }
       let miniSearch = createSearchIndex(songs);
+      let inverseIndex = createInverseIndex(songs);
       const app = express();
       const httpServer = createServer(app);
       const io = new Server(httpServer, { cors: { origin: "*", methods: ["GET", "POST"] } });
@@ -120,6 +158,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       app.use(express.static(path.join(__dirname, 'public')));
       app.get('/player', (_req, res) => res.redirect('/player.html'));
       app.get(['/remote', '/queue'], (_req, res) => res.redirect('/remote.html'));
+      app.get(['/console', '/ktv'], (_req, res) => res.sendFile(path.join(__dirname, 'public', 'console.html')));
       app.get('/media/:filename', mediaRequestLimiter, (req, res) => {
         const fullPath = mediaPath(req.params.filename);
         if (!fullPath || !fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) {
@@ -222,8 +261,12 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         socket.on('search_songs', ({ query = '', language = '', charCount = 0 } = {}) => {
           const cleanQuery = String(query).trim();
           let results = cleanQuery
-            ? miniSearch.search(cleanQuery.toUpperCase()).map(result => songs.find(song => song.id === result.id)).filter(Boolean)
+            ? inverseSearch(songs, inverseIndex, cleanQuery)
             : songs;
+          if (cleanQuery && results.length < 5) {
+            const fuzzy = miniSearch.search(cleanQuery.toUpperCase()).map(result => songs.find(song => song.id === result.id)).filter(Boolean);
+            results = [...new Map([...results, ...fuzzy].map(song => [song.id, song])).values()];
+          }
           if (language) results = results.filter(song => song.language === language);
           if (charCount) results = results.filter(song => song.char_count === Number(charCount));
           socket.emit('search_results', results.slice(0, 50));
@@ -311,6 +354,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           if (stat && stat.mtimeMs !== catalogMtime) {
             songs = await readCatalog(catalogPath);
             miniSearch = createSearchIndex(songs);
+            inverseIndex = createInverseIndex(songs);
             catalogMtime = stat.mtimeMs;
           }
         } catch (error) {
