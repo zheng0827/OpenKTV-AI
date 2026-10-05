@@ -26,6 +26,21 @@ CATALOG_FIELDS = [
     "language", "char_count", "pinyin_abbr", "zhuyin_abbr",
 ]
 
+def _clean_bilingual_name(text: str) -> str:
+    """
+    移除「中文名 英文名」格式中的英文部分。
+    例如: "簡單愛 Simple Love" -> "簡單愛", "周杰倫 Jay Chou" -> "周杰倫"
+    "K歌之王 King of KTV" -> "K歌之王"
+    """
+    if not text:
+        return ""
+    # 檢查字串是否含有中日韓字元 (CJK)
+    if re.search(r'[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]', text):
+        # 移除尾部的空格與純英文/數字/常見符號
+        cleaned = re.sub(r'\s+[A-Za-z0-9\s\.\-\'’]+$', '', text).strip()
+        if cleaned:
+            return cleaned
+    return text.strip()
 
 def stable_song_id(artist: str, title: str, source_url: str = "") -> str:
     identity = "|".join((artist.strip().casefold(), title.strip().casefold()))
@@ -183,26 +198,66 @@ def update_library_index(songs_dir: Path, index_path: Path) -> None:
 def fetch_lrclib_lyrics(song_name: str, singer: str) -> str | None:
     if not song_name:
         return None
-    query = urllib.parse.urlencode({"track_name": song_name, "artist_name": singer or ""})
-    url = f"https://lrclib.net/api/search?{query}"
-    request = urllib.request.Request(url, headers={"User-Agent": "OpenKTV-AI/1.0"})
-    try:
-        with urllib.request.urlopen(request, timeout=12) as response:  # nosec B310
-            payload = json.loads(response.read().decode("utf-8"))
-    except Exception:
-        return None
 
-    if not isinstance(payload, list) or not payload:
-        return None
+    # 1. 產生清理過的中英混合名稱
+    clean_song = _clean_bilingual_name(song_name)
+    clean_singer = _clean_bilingual_name(singer)
 
-    for item in payload:
-        if not isinstance(item, dict):
+    # 2. 建立搜尋候選清單 (Fallback 策略)
+    candidates = []
+    
+    # 組合 A：原始名稱 (適用於純英文歌或剛好資料庫也是中英混合的狀況)
+    candidates.append((song_name, singer))
+    
+    # 組合 B：清理後的名稱 (例如: track_name="簡單愛", artist_name="周杰倫")
+    if clean_song != song_name or clean_singer != singer:
+        candidates.append((clean_song, clean_singer))
+    
+    # 組合 C：只有清理後的歌名，不指定歌手 (增加命中率)
+    candidates.append((clean_song, ""))
+    
+    # 組合 D：只有原始歌名，不指定歌手
+    if clean_song != song_name:
+        candidates.append((song_name, ""))
+
+    seen_queries = set()
+
+    # 3. 依序嘗試搜尋，直到找到歌詞為止
+    for track, artist in candidates:
+        query_dict = {"track_name": track}
+        if artist:
+            query_dict["artist_name"] = artist
+            
+        query_string = urllib.parse.urlencode(query_dict)
+
+        # 避免重複執行相同的 API 請求
+        if query_string in seen_queries:
             continue
-        cleaned = sanitize_lrclib_lyrics(item.get("plainLyrics"))
-        if cleaned:
-            return cleaned
-    return None
+        seen_queries.add(query_string)
 
+        url = f"https://lrclib.net/api/search?{query_string}"
+        print(f"[LRCLIB 搜尋] {url}")
+        
+        request = urllib.request.Request(url, headers={"User-Agent": "OpenKTV-AI/1.0"})
+        try:
+            with urllib.request.urlopen(request, timeout=12) as response:  # nosec B310
+                payload = json.loads(response.read().decode("utf-8"))
+        except Exception as e:
+            print(f"⚠️ API 請求失敗: {e}")
+            continue
+
+        if not isinstance(payload, list) or not payload:
+            continue
+
+        for item in payload:
+            if not isinstance(item, dict):
+                continue
+            cleaned = sanitize_lrclib_lyrics(item.get("plainLyrics"))
+            if cleaned:
+                print(f"\t✅ 成功找到歌詞！(匹配組合: 歌名='{track}', 歌手='{artist}')")
+                return cleaned
+
+    return None
 
 def sanitize_lrclib_lyrics(lyrics: str | None) -> str | None:
     if not lyrics:

@@ -23,7 +23,7 @@ from .audio import detect_vocal_region, highpass_filter, normalize_rms, suppress
 from .language_detection import detect_language_multiwindow
 from .whisper_alignment import align_with_backend
 from .cjk import is_cjk, tokenize_for_alignment, align_lang_code, attribute_chars_to_tokens, merge_punct, attach_reading, qwen_kept_len, is_supported_lang, align_model_for, clean_for_alignment
-from .library import upsert_catalog_entry
+from .library import upsert_catalog_entry, fetch_lrclib_lyrics
 from .metadata import ai_parse_youtube_title, extract_youtube_metadata, parse_youtube_title, search_metadata, spotify_track_metadata
 
 @dataclass(frozen=True)
@@ -55,11 +55,14 @@ def enhanced_fetch_lrclib(song_name: str, singer: str) -> str:
 
     for query in queries:
         url = f"https://lrclib.net/api/search?{query}"
+        print("\t"+url)
         req = urllib.request.Request(url, headers={"User-Agent": "OpenKTV-AI/1.0"})
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
+                print("\t"+data)
                 for item in data:
+                    print("\t"+item)
                     if item.get("plainLyrics"):
                         return item.get("plainLyrics")
         except Exception:
@@ -533,8 +536,10 @@ class KTVProcessor:
             except Exception as error:
                 self.log(f"⚠️ Spotify metadata 查詢失敗：{error}")
                 spotify_metadata = {}
+            print(metadata)
             if spotify_metadata.get("title"):
                 song_name = spotify_metadata["title"]
+                print(spotify_metadata["title"])
             if spotify_metadata.get("artist") and not options.get("singer_is_manual"):
                 singer = spotify_metadata["artist"]
             metadata = {**metadata, **spotify_metadata}
@@ -568,7 +573,7 @@ class KTVProcessor:
 
             if not lyrics_text:
                 self.log("步驟 3/8: 強化抓取正確歌詞...")
-                lyrics_text = enhanced_fetch_lrclib(song_name, singer or "") or ""
+                lyrics_text = fetch_lrclib_lyrics(song_name, singer or "") or ""
                 if lyrics_text:
                     self.log(f"✅ 成功獲取歌詞！(字數: {len(lyrics_text)})")
                 else:

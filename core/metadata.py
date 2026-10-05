@@ -102,7 +102,7 @@ def spotify_track_metadata(title: str, artist: str) -> dict[str, str]:
     token_request = urllib.request.Request(
         "https://accounts.spotify.com/api/token",
         data=urllib.parse.urlencode({"grant_type": "client_credentials"}).encode("ascii"),
-        headers={"Authorization": f"Basic {credentials}", "Content-Type": "application/x-www-form-urlencoded"},
+        headers={"Authorization": f"Basic {credentials}", "Content-Type": "application/x-www-form-urlencoded", "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7"},
         method="POST",
     )
     try:
@@ -111,12 +111,15 @@ def spotify_track_metadata(title: str, artist: str) -> dict[str, str]:
         if not token:
             return {}
         query = f"track:{title}" + (f" artist:{artist}" if artist else "")
+        print(query)
         url = "https://api.spotify.com/v1/search?" + urllib.parse.urlencode(
             {"q": query, "type": "track", "limit": 5}
         )
         search_request = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
         with urllib.request.urlopen(search_request, timeout=12) as response:  # nosec B310
-            tracks = json.loads(response.read().decode("utf-8")).get("tracks", {}).get("items", [])
+            
+            tracks = json.loads(response.read().decode("utf-8")).get("tracks", {})
+            tracks= tracks.get("items", [])
     except (urllib.error.URLError, TimeoutError, ValueError, KeyError):
         return {}
 
