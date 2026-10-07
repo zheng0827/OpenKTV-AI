@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="zh-Hant">
+
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
@@ -7,57 +8,436 @@
   <title>OpenKTV｜歡迎回來</title>
   <script src="/socket.io/socket.io.js"></script>
   <style>
-    :root{color-scheme:dark;--bg:#10131c;--panel:#191f2c;--panel2:#202838;--text:#f4f6fb;--muted:#9aa5b7;--line:#2b3547;--mint:#77f0d0;--blue:#8da9ff;--orange:#ffba7b}
-    *{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 75% 0%,#263551 0,transparent 42%),var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh}
-    a{color:inherit;text-decoration:none}button,input{font:inherit}.wrap{width:min(1180px,100% - 40px);margin:auto}
-    header{height:82px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #ffffff12}
-    .brand{font-size:18px;font-weight:850;letter-spacing:.1em}.brand i{font-style:normal;color:var(--mint)}.live{color:var(--mint);font-size:13px}.live:before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:currentColor;margin-right:9px;box-shadow:0 0 15px currentColor}
-    .hero{padding:66px 0 48px;display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center}.eyebrow{color:var(--mint);font-size:12px;font-weight:800;letter-spacing:.2em}.hero h1{font-size:clamp(40px,6vw,72px);line-height:1.06;letter-spacing:-.05em;margin:17px 0}.hero p{color:var(--muted);font-size:17px;max-width:560px}.actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}
-    .button{display:inline-flex;justify-content:center;align-items:center;min-height:48px;padding:0 20px;border-radius:14px;border:1px solid var(--line);font-weight:750;transition:.18s}.button:hover{transform:translateY(-2px);border-color:#ffffff60}.primary{color:#12201f;background:var(--mint);border-color:var(--mint)}.subtle{background:#ffffff08}
-    .now{background:linear-gradient(145deg,#222e42,#171d29);border:1px solid #ffffff18;border-radius:28px;padding:25px;box-shadow:0 25px 70px #0005}.now-top{display:flex;justify-content:space-between;align-items:center;color:var(--muted);font-size:12px;letter-spacing:.14em}.equalizer{display:flex;align-items:end;gap:4px;height:24px}.equalizer b{display:block;width:4px;border-radius:5px;background:var(--mint);height:35%;animation:wave .7s ease-in-out infinite alternate}.equalizer b:nth-child(2){height:80%;animation-delay:.18s}.equalizer b:nth-child(3){height:50%;animation-delay:.32s}.equalizer b:nth-child(4){height:100%;animation-delay:.1s}@keyframes wave{to{height:28%}}
-    .cover{height:210px;margin:22px 0;border-radius:20px;background:radial-gradient(circle at 65% 25%,#7cf3d45c,transparent 27%),linear-gradient(135deg,#243a4a,#29283c 55%,#43314a);display:grid;place-items:center;font-size:76px}.now h2{margin:0;font-size:25px}.artist{color:var(--muted);margin-top:4px}.now-actions{display:flex;gap:10px;margin-top:20px}.now-actions button{flex:1}
-    .search-section{padding:20px 0 70px}.section-heading{display:flex;justify-content:space-between;align-items:end;margin:0 0 18px}.section-heading h2{font-size:23px;margin:0}.section-heading p{color:var(--muted);margin:4px 0 0;font-size:13px}.searchbox{display:flex;gap:10px}.searchbox input{flex:1;min-width:0;border:1px solid var(--line);background:#151b27;border-radius:15px;padding:13px 17px;color:var(--text);outline:none}.searchbox input:focus{border-color:var(--mint)}
-    .results{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:14px}.song{display:flex;gap:12px;align-items:center;justify-content:space-between;background:#ffffff06;border:1px solid #ffffff0d;border-radius:15px;padding:13px}.song-name{font-weight:750;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.song-artist{color:var(--muted);font-size:13px}.add{border:0;border-radius:11px;background:#77f0d01a;color:var(--mint);font-weight:750;padding:9px 12px;cursor:pointer;white-space:nowrap}.empty{color:var(--muted);padding:28px;text-align:center;border:1px dashed var(--line);border-radius:15px;grid-column:1/-1}
-    .footer{padding:22px 0 35px;border-top:1px solid #ffffff12;color:var(--muted);font-size:13px;display:flex;justify-content:space-between}
-    @media(max-width:760px){.wrap{width:min(100% - 28px,600px)}header{height:68px}.hero{grid-template-columns:1fr;padding:42px 0 30px;gap:26px}.cover{height:165px}.now{padding:18px}.results{grid-template-columns:1fr}.section-heading{align-items:start;flex-direction:column;gap:5px}.footer{gap:14px;flex-direction:column}.hero p{font-size:15px}}
+    :root {
+      color-scheme: dark;
+      --bg: #10131c;
+      --panel: #191f2c;
+      --panel2: #202838;
+      --text: #f4f6fb;
+      --muted: #9aa5b7;
+      --line: #2b3547;
+      --mint: #77f0d0;
+      --blue: #8da9ff;
+      --orange: #ffba7b
+    }
+
+    * {
+      box-sizing: border-box
+    }
+
+    body {
+      margin: 0;
+      background: radial-gradient(ellipse at 75% 0%, #263551 0, transparent 42%), var(--bg);
+      color: var(--text);
+      font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      min-height: 100vh
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none
+    }
+
+    button,
+    input {
+      font: inherit
+    }
+
+    .wrap {
+      width: min(1180px, 100% - 40px);
+      margin: auto
+    }
+
+    header {
+      height: 82px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #ffffff12
+    }
+
+    .brand {
+      font-size: 18px;
+      font-weight: 850;
+      letter-spacing: .1em
+    }
+
+    .brand i {
+      font-style: normal;
+      color: var(--mint)
+    }
+
+    .live {
+      color: var(--mint);
+      font-size: 13px
+    }
+
+    .live:before {
+      content: "";
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      margin-right: 9px;
+      box-shadow: 0 0 15px currentColor
+    }
+
+    .hero {
+      padding: 66px 0 48px;
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 40px;
+      align-items: center
+    }
+
+    .eyebrow {
+      color: var(--mint);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .2em
+    }
+
+    .hero h1 {
+      font-size: clamp(40px, 6vw, 72px);
+      line-height: 1.06;
+      letter-spacing: -.05em;
+      margin: 17px 0
+    }
+
+    .hero p {
+      color: var(--muted);
+      font-size: 17px;
+      max-width: 560px
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 28px
+    }
+
+    .button {
+      display: inline-flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 48px;
+      padding: 0 20px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      font-weight: 750;
+      transition: .18s
+    }
+
+    .button:hover {
+      transform: translateY(-2px);
+      border-color: #ffffff60
+    }
+
+    .primary {
+      color: #12201f;
+      background: var(--mint);
+      border-color: var(--mint)
+    }
+
+    .subtle {
+      background: #ffffff08
+    }
+
+    .now {
+      background: linear-gradient(145deg, #222e42, #171d29);
+      border: 1px solid #ffffff18;
+      border-radius: 28px;
+      padding: 25px;
+      box-shadow: 0 25px 70px #0005
+    }
+
+    .now-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: .14em
+    }
+
+    .equalizer {
+      display: flex;
+      align-items: end;
+      gap: 4px;
+      height: 24px
+    }
+
+    .equalizer b {
+      display: block;
+      width: 4px;
+      border-radius: 5px;
+      background: var(--mint);
+      height: 35%;
+      animation: wave .7s ease-in-out infinite alternate
+    }
+
+    .equalizer b:nth-child(2) {
+      height: 80%;
+      animation-delay: .18s
+    }
+
+    .equalizer b:nth-child(3) {
+      height: 50%;
+      animation-delay: .32s
+    }
+
+    .equalizer b:nth-child(4) {
+      height: 100%;
+      animation-delay: .1s
+    }
+
+    @keyframes wave {
+      to {
+        height: 28%
+      }
+    }
+
+    .cover {
+      height: 210px;
+      margin: 22px 0;
+      border-radius: 20px;
+      background: radial-gradient(circle at 65% 25%, #7cf3d45c, transparent 27%), linear-gradient(135deg, #243a4a, #29283c 55%, #43314a);
+      display: grid;
+      place-items: center;
+      font-size: 76px
+    }
+
+    .now h2 {
+      margin: 0;
+      font-size: 25px
+    }
+
+    .artist {
+      color: var(--muted);
+      margin-top: 4px
+    }
+
+    .now-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px
+    }
+
+    .now-actions button {
+      flex: 1
+    }
+
+    .search-section {
+      padding: 20px 0 70px
+    }
+
+    .section-heading {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      margin: 0 0 18px
+    }
+
+    .section-heading h2 {
+      font-size: 23px;
+      margin: 0
+    }
+
+    .section-heading p {
+      color: var(--muted);
+      margin: 4px 0 0;
+      font-size: 13px
+    }
+
+    .searchbox {
+      display: flex;
+      gap: 10px
+    }
+
+    .searchbox input {
+      flex: 1;
+      min-width: 0;
+      border: 1px solid var(--line);
+      background: #151b27;
+      border-radius: 15px;
+      padding: 13px 17px;
+      color: var(--text);
+      outline: none
+    }
+
+    .searchbox input:focus {
+      border-color: var(--mint)
+    }
+
+    .results {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px
+    }
+
+    .song {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      background: #ffffff06;
+      border: 1px solid #ffffff0d;
+      border-radius: 15px;
+      padding: 13px
+    }
+
+    .song-name {
+      font-weight: 750;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap
+    }
+
+    .song-artist {
+      color: var(--muted);
+      font-size: 13px
+    }
+
+    .add {
+      border: 0;
+      border-radius: 11px;
+      background: #77f0d01a;
+      color: var(--mint);
+      font-weight: 750;
+      padding: 9px 12px;
+      cursor: pointer;
+      white-space: nowrap
+    }
+
+    .empty {
+      color: var(--muted);
+      padding: 28px;
+      text-align: center;
+      border: 1px dashed var(--line);
+      border-radius: 15px;
+      grid-column: 1/-1
+    }
+
+    .footer {
+      padding: 22px 0 35px;
+      border-top: 1px solid #ffffff12;
+      color: var(--muted);
+      font-size: 13px;
+      display: flex;
+      justify-content: space-between
+    }
+
+    @media(max-width:760px) {
+      .wrap {
+        width: min(100% - 28px, 600px)
+      }
+
+      header {
+        height: 68px
+      }
+
+      .hero {
+        grid-template-columns: 1fr;
+        padding: 42px 0 30px;
+        gap: 26px
+      }
+
+      .cover {
+        height: 165px
+      }
+
+      .now {
+        padding: 18px
+      }
+
+      .results {
+        grid-template-columns: 1fr
+      }
+
+      .section-heading {
+        align-items: start;
+        flex-direction: column;
+        gap: 5px
+      }
+
+      .footer {
+        gap: 14px;
+        flex-direction: column
+      }
+
+      .hero p {
+        font-size: 15px
+      }
+    }
   </style>
 </head>
+
 <body>
-  <header class="wrap"><a class="brand" href="/">OPEN<i>KTV</i></a><span class="live" id="connection">正在連線</span></header>
+  <header class="wrap"><a class="brand" href="/">OPEN<i>KTV</i></a><span class="live" id="connection">正在連線</span>
+  </header>
   <main class="wrap">
     <section class="hero">
       <div>
         <div class="eyebrow">YOUR ROOM. YOUR SOUND.</div>
         <h1>今晚，<br>讓歌聲接管舞台。</h1>
         <p>找一首歌、排好隊伍，或直接打開包廂主控台。播放器、點歌和混音都在同一個地方。</p>
-        <div class="actions"><a class="button primary" href="/console">進入包廂主控台 <span aria-hidden="true">　→</span></a><a class="button subtle" href="/player">開啟大螢幕播放器</a></div>
+        <div class="actions"><a class="button primary" href="/console">進入包廂主控台 <span aria-hidden="true">　→</span></a><a
+            class="button subtle" href="/player">開啟大螢幕播放器</a></div>
       </div>
       <section class="now" aria-label="目前播放">
-        <div class="now-top"><span>NOW PLAYING</span><span class="equalizer" id="equalizer" hidden><b></b><b></b><b></b><b></b></span><span id="playStatus">待機中</span></div>
+        <div class="now-top"><span>NOW PLAYING</span><span class="equalizer" id="equalizer"
+            hidden><b></b><b></b><b></b><b></b></span><span id="playStatus">待機中</span></div>
         <div class="cover" aria-hidden="true">♫</div>
-        <h2 id="currentTitle">尚未點歌</h2><div id="currentArtist" class="artist">選首歌，開始今晚的演出。</div>
-        <div class="now-actions"><a class="button subtle" href="/remote">開啟手機遙控器</a><a class="button subtle" href="/admin">新增歌曲</a></div>
+        <h2 id="currentTitle">尚未點歌</h2>
+        <div id="currentArtist" class="artist">選首歌，開始今晚的演出。</div>
+        <div class="now-actions"><a class="button subtle" href="/remote">開啟手機遙控器</a><a class="button subtle"
+            href="/admin">新增歌曲</a></div>
       </section>
     </section>
     <section class="search-section">
-      <div class="section-heading"><div><h2>想唱哪一首？</h2><p>搜尋歌名、歌手、拼音或注音，直接加入包廂佇列。</p></div><span id="songCount" class="artist"></span></div>
-      <div class="searchbox"><input id="query" type="search" autocomplete="off" placeholder="試試「晴天」或「周杰倫」" aria-label="搜尋歌曲"><a class="button subtle" href="/console">完整曲庫</a></div>
-      <div id="results" class="results"><div class="empty">正在載入歌曲曲庫…</div></div>
+      <div class="section-heading">
+        <div>
+          <h2>想唱哪一首？</h2>
+          <p>搜尋歌名、歌手、拼音或注音，直接加入包廂佇列。</p>
+        </div><span id="songCount" class="artist"></span>
+      </div>
+      <div class="searchbox"><input id="query" type="search" autocomplete="off" placeholder="試試「晴天」或「周杰倫」"
+          aria-label="搜尋歌曲"><a class="button subtle" href="/console">完整曲庫</a></div>
+      <div id="results" class="results">
+        <div class="empty">正在載入歌曲曲庫…</div>
+      </div>
     </section>
   </main>
-  <footer class="wrap footer"><span>OPENKTV · 歌聲與好心情同步</span><span><a href="/console">主控台</a>　·　<a href="/player">播放器</a>　·　<a href="/remote">遙控器</a></span></footer>
+  <footer class="wrap footer"><span>OPENKTV · 歌聲與好心情同步</span><span><a href="/console">主控台</a>　·　<a
+        href="/player">播放器</a>　·　<a href="/remote">遙控器</a></span></footer>
   <script>
-    const socket=io(),$=id=>document.getElementById(id);let songs=[],searchTimer;
-    const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-    function render(rows){$('results').innerHTML=rows.length?rows.slice(0,8).map(song=>`<article class="song"><div style="min-width:0"><div class="song-name">${esc(song.title)}</div><div class="song-artist">${esc(song.artist||'未知歌手')} · ${esc(song.language||'')}</div></div><button class="add" data-id="${esc(song.id)}">＋ 點歌</button></article>`).join(''):'<div class="empty">沒有找到歌曲，試試其他歌名或歌手。</div>';document.querySelectorAll('.add').forEach(button=>button.onclick=()=>{const song=songs.find(item=>item.id===button.dataset.id);if(song)socket.emit('add_to_queue',song);button.textContent='✓ 已加入';setTimeout(()=>button.textContent='＋ 點歌',1000)})}
-    function search(){clearTimeout(searchTimer);searchTimer=setTimeout(()=>socket.emit('search_songs',{query:$('query').value}),140)}
-    $('query').addEventListener('input',search);
-    socket.on('connect',()=>{$('connection').textContent='包廂已連線';$('connection').style.color='var(--mint)'});
-    socket.on('disconnect',()=>{$('connection').textContent='正在重新連線';$('connection').style.color='var(--orange)'});
-    socket.on('search_results',rows=>{songs=rows||[];render(songs)});
-    socket.on('sync_state',({queue,state})=>{const current=queue?.[0];$('currentTitle').textContent=current?.title||'尚未點歌';$('currentArtist').textContent=current?`${current.artist||'未知歌手'} · ${queue.length} 首排隊中`:'選首歌，開始今晚的演出。';$('playStatus').textContent=current?(state?.isPlaying?'正在播放':'已暫停'):'待機中';$('equalizer').hidden=!state?.isPlaying});
-    fetch('/api/room').then(response=>response.json()).then(room=>{$('songCount').textContent=`${room.songCount} 首歌曲`}).catch(()=>{});
-    socket.emit('search_songs',{query:''});
+    const socket = io(), $ = id => document.getElementById(id);
+    let songs = [], searchTimer;
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+    function render(rows) { $('results').innerHTML = rows.length ? rows.slice(0, 8).map(song => `<article class="song"><div style="min-width:0"><div class="song-name">${esc(song.title)}</div><div class="song-artist">${esc(song.artist || '未知歌手')} · ${esc(song.language || '')}</div></div><button class="add" data-id="${esc(song.id)}">＋ 點歌</button></article>`).join('') : '<div class="empty">沒有找到歌曲，試試其他歌名或歌手。</div>'; document.querySelectorAll('.add').forEach(button => button.onclick = () => { const song = songs.find(item => item.id === button.dataset.id); if (song) socket.emit('add_to_queue', song); button.textContent = '✓ 已加入'; setTimeout(() => button.textContent = '＋ 點歌', 1000) }) }
+    function search() { clearTimeout(searchTimer); searchTimer = setTimeout(() => socket.emit('search_songs', { query: $('query').value }), 140) }
+    $('query').addEventListener('input', search);
+    socket.on('connect', () => { $('connection').textContent = '包廂已連線'; $('connection').style.color = 'var(--mint)' });
+    socket.on('disconnect', () => { $('connection').textContent = '正在重新連線'; $('connection').style.color = 'var(--orange)' });
+    socket.on('search_results', rows => { songs = rows || []; render(songs) });
+    socket.on('sync_state', ({ queue, state }) => {
+      const current = queue?.[0];
+      $('currentTitle').textContent = current?.title || '尚未點歌';
+      $('currentArtist').textContent = current ? `${current.artist || '未知歌手'} · ${queue.length} 首排隊中` : '選首歌，開始今晚的演出。';
+      $('playStatus').textContent = current ? (state?.isPlaying ? '正在播放' : '已暫停') : '待機中';
+      $('equalizer').hidden = !state?.isPlaying
+    });
+    fetch('/api/room')
+      .then(response => response.json())
+      .then(room => {
+        $('songCount').textContent = `${room.songCount} 首歌曲`
+      })
+      .catch(() => { });
+    socket.emit('search_songs', { query: '' });
   </script>
 </body>
+
 </html>

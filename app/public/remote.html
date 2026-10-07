@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -8,47 +9,68 @@
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <script src="/socket.io/socket.io.js"></script>
     <style>
-        body { background: #09090b; }
+        body {
+            background: #09090b;
+        }
+
         .glass-header {
             background: rgba(24, 24, 27, 0.85);
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
             border-bottom: 1px solid rgba(255, 255, 255, 0.06);
         }
+
         .glass-card {
             background: rgba(39, 39, 42, 0.55);
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.05);
         }
-        .hide-scrollbar::-webkit-scrollbar { display: none; }
+
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
     </style>
 </head>
+
 <body class="text-zinc-100 font-sans h-screen flex flex-col overflow-hidden select-none" id="app">
-    
+
     <!-- 頂部搜尋與分類導覽列 -->
     <div class="glass-header p-4 space-y-3 z-30 shadow-xl">
         <div class="flex items-center justify-between">
-            <h1 class="text-lg font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-indigo-400">KTV REMOTE</h1>
-            <div class="text-xs font-bold px-3 py-1 bg-zinc-800/80 rounded-full text-zinc-300 flex items-center gap-2 border border-zinc-700/50">
+            <h1
+                class="text-lg font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-indigo-400">
+                KTV REMOTE</h1>
+            <div
+                class="text-xs font-bold px-3 py-1 bg-zinc-800/80 rounded-full text-zinc-300 flex items-center gap-2 border border-zinc-700/50">
                 <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div> 主機已連線
             </div>
         </div>
-        
+
         <div class="flex gap-2">
-            <input v-model="searchQuery" @input="fetchSongs" type="text" placeholder="拼音 (ZJL)、注音或歌名..." 
-                   class="flex-1 bg-zinc-900/90 border border-zinc-700/50 rounded-2xl px-5 py-2.5 text-sm text-white focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition placeholder-zinc-500">
-            <button v-show="searchQuery" @click="searchQuery = ''; fetchSongs()" class="px-4 bg-zinc-800 rounded-2xl text-xs text-zinc-400 font-bold active:scale-95 transition">清除</button>
+            <input v-model="searchQuery" @input="fetchSongs" type="text" placeholder="拼音 (ZJL)、注音或歌名..."
+                class="flex-1 bg-zinc-900/90 border border-zinc-700/50 rounded-2xl px-5 py-2.5 text-sm text-white focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition placeholder-zinc-500">
+            <button v-show="searchQuery" @click="searchQuery = ''; fetchSongs()"
+                class="px-4 bg-zinc-800 rounded-2xl text-xs text-zinc-400 font-bold active:scale-95 transition">清除</button>
         </div>
-        
+
         <div class="flex gap-2 overflow-x-auto hide-scrollbar pb-1 text-xs">
-            <button @click="selectedLang = ''; fetchSongs()" :class="!selectedLang ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30' : 'bg-zinc-800/60 text-zinc-400'" class="px-4 py-2 rounded-full font-bold whitespace-nowrap transition">全部語種</button>
-            <button @click="selectedLang = '國語'; fetchSongs()" :class="selectedLang === '國語' ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30' : 'bg-zinc-800/60 text-zinc-400'" class="px-4 py-2 rounded-full font-bold whitespace-nowrap transition">國語</button>
-            <button @click="selectedLang = '台語'; fetchSongs()" :class="selectedLang === '台語' ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30' : 'bg-zinc-800/60 text-zinc-400'" class="px-4 py-2 rounded-full font-bold whitespace-nowrap transition">台語</button>
-            <button @click="selectedLang = '粵語'; fetchSongs()" :class="selectedLang === '粵語' ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30' : 'bg-zinc-800/60 text-zinc-400'" class="px-4 py-2 rounded-full font-bold whitespace-nowrap transition">粵語</button>
+            <button @click="selectedLang = ''; fetchSongs()"
+                :class="!selectedLang ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30' : 'bg-zinc-800/60 text-zinc-400'"
+                class="px-4 py-2 rounded-full font-bold whitespace-nowrap transition">全部語種</button>
+            <button @click="selectedLang = '國語'; fetchSongs()"
+                :class="selectedLang === '國語' ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30' : 'bg-zinc-800/60 text-zinc-400'"
+                class="px-4 py-2 rounded-full font-bold whitespace-nowrap transition">國語</button>
+            <button @click="selectedLang = '台語'; fetchSongs()"
+                :class="selectedLang === '台語' ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30' : 'bg-zinc-800/60 text-zinc-400'"
+                class="px-4 py-2 rounded-full font-bold whitespace-nowrap transition">台語</button>
+            <button @click="selectedLang = '粵語'; fetchSongs()"
+                :class="selectedLang === '粵語' ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30' : 'bg-zinc-800/60 text-zinc-400'"
+                class="px-4 py-2 rounded-full font-bold whitespace-nowrap transition">粵語</button>
         </div>
     </div>
 
-    <div v-if="playbackError" class="mx-4 mt-3 rounded-xl border border-rose-700/50 bg-rose-950/70 px-4 py-3 text-sm text-rose-200">
+    <div v-if="playbackError"
+        class="mx-4 mt-3 rounded-xl border border-rose-700/50 bg-rose-950/70 px-4 py-3 text-sm text-rose-200">
         {{ playbackError }}
         <button @click="playbackError = ''" class="float-right ml-3 font-bold">✕</button>
     </div>
@@ -57,18 +79,22 @@
     <div class="flex-1 overflow-y-auto p-4 space-y-3 pb-40">
         <!-- 點歌大廳清單 -->
         <div v-show="tab === 'search'" class="space-y-3">
-            <div v-for="song in searchResults" :key="song.id" class="glass-card rounded-2xl p-4 flex justify-between items-center shadow-lg active:scale-[0.98] transition-transform">
+            <div v-for="song in searchResults" :key="song.id"
+                class="glass-card rounded-2xl p-4 flex justify-between items-center shadow-lg active:scale-[0.98] transition-transform">
                 <div class="flex-1 min-w-0 pr-4">
                     <h3 class="font-bold text-base text-white truncate">{{ song.title }}</h3>
                     <p class="text-xs text-zinc-400 mt-1 truncate">
                         {{ song.artist }}
-                        <span class="text-[10px] bg-zinc-700/60 text-zinc-300 px-2 py-0.5 rounded ml-2">{{ song.language }}</span>
+                        <span class="text-[10px] bg-zinc-700/60 text-zinc-300 px-2 py-0.5 rounded ml-2">{{ song.language
+                            }}</span>
                         <span class="text-[10px] text-zinc-500 ml-1">{{ song.char_count }}字</span>
                     </p>
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
-                    <button @click="addQueue(song)" class="px-4 py-2 bg-gradient-to-r from-sky-600 to-blue-600 active:from-sky-500 active:to-blue-500 rounded-xl font-bold text-xs shadow-md transition">點歌</button>
-                    <button @click="insertTop(song)" class="px-3 py-2 bg-zinc-800 text-rose-400 active:bg-zinc-700 rounded-xl font-bold text-xs shadow-md transition border border-rose-900/30">插播</button>
+                    <button @click="addQueue(song)"
+                        class="px-4 py-2 bg-gradient-to-r from-sky-600 to-blue-600 active:from-sky-500 active:to-blue-500 rounded-xl font-bold text-xs shadow-md transition">點歌</button>
+                    <button @click="insertTop(song)"
+                        class="px-3 py-2 bg-zinc-800 text-rose-400 active:bg-zinc-700 rounded-xl font-bold text-xs shadow-md transition border border-rose-900/30">插播</button>
                 </div>
             </div>
             <div v-if="searchResults.length === 0" class="text-center text-zinc-500 py-16 font-medium">找不到相關歌曲</div>
@@ -76,16 +102,20 @@
 
         <!-- 已點清單佇列管理 -->
         <div v-show="tab === 'queue'" class="space-y-3">
-            <div v-for="(song, index) in queue" :key="song.queueId" class="glass-card rounded-2xl p-4 flex justify-between items-center shadow-lg transition-all" :class="index === 0 ? 'border-emerald-500/50 bg-emerald-950/20' : ''">
+            <div v-for="(song, index) in queue" :key="song.queueId"
+                class="glass-card rounded-2xl p-4 flex justify-between items-center shadow-lg transition-all"
+                :class="index === 0 ? 'border-emerald-500/50 bg-emerald-950/20' : ''">
                 <div class="flex-1 min-w-0 pr-4">
                     <h3 class="font-bold text-base text-white flex items-center gap-2 truncate">
-                        <span v-if="index === 0" class="shrink-0 text-[10px] bg-emerald-500 text-black px-2 py-0.5 rounded-md font-black animate-pulse">播放中</span>
+                        <span v-if="index === 0"
+                            class="shrink-0 text-[10px] bg-emerald-500 text-black px-2 py-0.5 rounded-md font-black animate-pulse">播放中</span>
                         <span v-else class="shrink-0 text-xs text-zinc-500 w-5 font-bold">{{ index }}</span>
                         <span class="truncate">{{ song.title }}</span>
                     </h3>
                     <p class="text-xs text-zinc-400 mt-1 ml-7 truncate">{{ song.artist }}</p>
                 </div>
-                <button v-if="index !== 0" @click="removeQueue(song.queueId)" class="w-8 h-8 shrink-0 bg-zinc-800/80 rounded-full flex items-center justify-center text-zinc-400 active:bg-rose-900 active:text-rose-400 transition text-xs">✕</button>
+                <button v-if="index !== 0" @click="removeQueue(song.queueId)"
+                    class="w-8 h-8 shrink-0 bg-zinc-800/80 rounded-full flex items-center justify-center text-zinc-400 active:bg-rose-900 active:text-rose-400 transition text-xs">✕</button>
             </div>
             <div v-if="queue.length === 0" class="text-center text-zinc-500 py-20 flex flex-col items-center gap-3">
                 <span class="text-4xl">📜</span>
@@ -98,14 +128,15 @@
             <div class="glass-card rounded-2xl p-5 space-y-5">
                 <h3 class="font-black text-sm text-sky-400 flex items-center gap-2"><span>🎛️</span> 專業混音與音量控制</h3>
                 <p class="text-[11px] text-zinc-400">歌曲／伴奏不會直接回送麥克風輸入；麥克風效果獨立混音。喇叭仍可能造成空氣回授，建議使用耳機。</p>
-                
+
                 <!-- 音樂/伴奏音量 -->
                 <div class="space-y-2">
                     <div class="flex justify-between text-xs font-bold text-zinc-200">
                         <span>🎵 音樂/伴奏大小</span>
                         <span class="text-sky-400">{{ Math.round(musicVol * 100) }}%</span>
                     </div>
-                    <input type="range" min="0" max="1.5" step="0.05" v-model="musicVol" @input="updateMixer" class="w-full accent-sky-500">
+                    <input type="range" min="0" max="1.5" step="0.05" v-model="musicVol" @input="updateMixer"
+                        class="w-full accent-sky-500">
                 </div>
 
                 <!-- 麥克風音量 (支援高達 250% 增益放大) -->
@@ -114,7 +145,8 @@
                         <span>🎤 麥克風增益量 (人聲大小)</span>
                         <span class="text-emerald-400">{{ Math.round(micVol * 100) }}%</span>
                     </div>
-                    <input type="range" min="0" max="2.5" step="0.05" v-model="micVol" @input="updateMixer" class="w-full accent-emerald-500">
+                    <input type="range" min="0" max="2.5" step="0.05" v-model="micVol" @input="updateMixer"
+                        class="w-full accent-emerald-500">
                 </div>
 
                 <!-- KTV 空間殘響效果 -->
@@ -123,7 +155,8 @@
                         <span>✨ KTV 空間殘響 (混響效果)</span>
                         <span class="text-indigo-400">{{ Math.round(reverbVol * 100) }}%</span>
                     </div>
-                    <input type="range" min="0" max="1.2" step="0.02" v-model="reverbVol" @input="updateMixer" class="w-full accent-indigo-500">
+                    <input type="range" min="0" max="1.2" step="0.02" v-model="reverbVol" @input="updateMixer"
+                        class="w-full accent-indigo-500">
                 </div>
             </div>
 
@@ -140,16 +173,9 @@
     <div v-if="durationSeconds > 0" class="fixed bottom-[112px] left-0 right-0 z-20 px-5">
         <div class="glass-header rounded-xl px-3 py-2 flex items-center gap-3 text-[10px] font-mono text-zinc-300">
             <span>{{ formatTime(playbackPosition) }}</span>
-            <input
-                type="range"
-                min="0"
-                :max="durationSeconds"
-                step="0.1"
-                :value="Math.min(playbackPosition, durationSeconds)"
-                @change="seekTo"
-                class="flex-1 accent-sky-500"
-                aria-label="播放位置"
-            >
+            <input type="range" min="0" :max="durationSeconds" step="0.1"
+                :value="Math.min(playbackPosition, durationSeconds)" @change="seekTo" class="flex-1 accent-sky-500"
+                aria-label="播放位置">
             <span>{{ formatTime(durationSeconds) }}</span>
         </div>
     </div>
@@ -158,44 +184,56 @@
     <div class="fixed bottom-0 w-full glass-header z-30 pb-safe">
         <!-- 快速原唱/伴奏與重唱列 -->
         <div class="flex justify-between items-center px-5 py-2 border-b border-zinc-800/40 text-xs">
-            <button @click="toggleAudioMode" class="flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold active:scale-95 transition" :class="audioMode === 'accompaniment' ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40' : 'bg-sky-600/30 text-sky-300 border border-sky-500/40'">
+            <button @click="toggleAudioMode"
+                class="flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold active:scale-95 transition"
+                :class="audioMode === 'accompaniment' ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40' : 'bg-sky-600/30 text-sky-300 border border-sky-500/40'">
                 <span>🎙️</span> {{ audioMode === 'accompaniment' ? '伴奏模式' : '原唱模式' }}
             </button>
 
             <!-- 快捷音量微調按鈕 -->
             <div class="flex items-center gap-1 bg-zinc-800/60 rounded-full px-2 py-1 border border-zinc-700/40">
                 <span class="text-[10px] text-zinc-400 font-bold">🎵 音樂</span>
-                <button @click="adjustMusic(-0.1)" class="w-5 h-5 flex items-center justify-center rounded-full bg-zinc-700 text-xs font-bold active:scale-90">-</button>
-                <span class="text-[11px] font-mono w-8 text-center text-sky-400 font-bold">{{ Math.round(musicVol * 100) }}%</span>
-                <button @click="adjustMusic(0.1)" class="w-5 h-5 flex items-center justify-center rounded-full bg-zinc-700 text-xs font-bold active:scale-90">+</button>
+                <button @click="adjustMusic(-0.1)"
+                    class="w-5 h-5 flex items-center justify-center rounded-full bg-zinc-700 text-xs font-bold active:scale-90">-</button>
+                <span class="text-[11px] font-mono w-8 text-center text-sky-400 font-bold">{{ Math.round(musicVol * 100)
+                    }}%</span>
+                <button @click="adjustMusic(0.1)"
+                    class="w-5 h-5 flex items-center justify-center rounded-full bg-zinc-700 text-xs font-bold active:scale-90">+</button>
             </div>
 
             <button @click="replaySong" class="text-zinc-400 active:text-white font-bold flex items-center gap-1">
                 <span>🔄</span> 重唱
             </button>
         </div>
-        
+
         <!-- 底部導覽分頁與播放控制 -->
         <div class="flex justify-around items-center p-2.5">
-            <button @click="tab = 'search'" :class="tab === 'search' ? 'text-sky-400' : 'text-zinc-500'" class="flex flex-col items-center gap-1 font-bold text-[11px] p-2 transition">
+            <button @click="tab = 'search'" :class="tab === 'search' ? 'text-sky-400' : 'text-zinc-500'"
+                class="flex flex-col items-center gap-1 font-bold text-[11px] p-2 transition">
                 <span class="text-xl">🔍</span> 點歌
             </button>
-            <button @click="tab = 'queue'" :class="tab === 'queue' ? 'text-emerald-400' : 'text-zinc-500'" class="flex flex-col items-center gap-1 font-bold text-[11px] p-2 relative transition">
+            <button @click="tab = 'queue'" :class="tab === 'queue' ? 'text-emerald-400' : 'text-zinc-500'"
+                class="flex flex-col items-center gap-1 font-bold text-[11px] p-2 relative transition">
                 <span class="text-xl">📜</span> 佇列
-                <span v-if="queue.length > 0" class="absolute top-1 right-1 bg-rose-500 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-black border border-zinc-900 shadow-md">{{ queue.length }}</span>
+                <span v-if="queue.length > 0"
+                    class="absolute top-1 right-1 bg-rose-500 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-black border border-zinc-900 shadow-md">{{
+                    queue.length }}</span>
             </button>
-            
+
             <div class="w-px h-8 bg-zinc-800 mx-1"></div>
-            
-            <button @click="togglePlay" class="w-12 h-12 bg-zinc-800 active:bg-zinc-700 rounded-full flex items-center justify-center text-lg shadow-lg active:scale-90 transition border border-zinc-700/60">
+
+            <button @click="togglePlay"
+                class="w-12 h-12 bg-zinc-800 active:bg-zinc-700 rounded-full flex items-center justify-center text-lg shadow-lg active:scale-90 transition border border-zinc-700/60">
                 <span v-if="isPlaying">⏸️</span>
                 <span v-else class="ml-0.5">▶️</span>
             </button>
-            <button @click="nextSong" class="flex flex-col items-center gap-1 text-rose-400 active:scale-90 font-bold text-[11px] p-2 transition">
+            <button @click="nextSong"
+                class="flex flex-col items-center gap-1 text-rose-400 active:scale-90 font-bold text-[11px] p-2 transition">
                 <span class="text-xl">⏭️</span> 切歌
             </button>
-            
-            <button @click="tab = 'settings'" :class="tab === 'settings' ? 'text-teal-400' : 'text-zinc-500'" class="flex flex-col items-center gap-1 font-bold text-[11px] p-2 transition">
+
+            <button @click="tab = 'settings'" :class="tab === 'settings' ? 'text-teal-400' : 'text-zinc-500'"
+                class="flex flex-col items-center gap-1 font-bold text-[11px] p-2 transition">
                 <span class="text-xl">🎛️</span> 調音
             </button>
         </div>
@@ -225,13 +263,13 @@
                 }
             },
             mounted() {
-                socket.on('sync_state', ({ queue, state }) => { 
-                    this.queue = queue; 
+                socket.on('sync_state', ({ queue, state }) => {
+                    this.queue = queue;
                     if (state) {
                         this.isPlaying = state.isPlaying;
                         this.audioMode = state.audioMode;
-                    this.playbackPosition = Number(state.position) || 0;
-                    this.durationSeconds = Number(queue?.[0]?.duration_seconds) || 0;
+                        this.playbackPosition = Number(state.position) || 0;
+                        this.durationSeconds = Number(queue?.[0]?.duration_seconds) || 0;
                         if (state.musicVol !== undefined) this.musicVol = state.musicVol;
                         if (state.micVol !== undefined) this.micVol = state.micVol;
                         if (state.reverbVol !== undefined) this.reverbVol = state.reverbVol;
@@ -254,20 +292,20 @@
                 fetchSongs() {
                     socket.emit('search_songs', { query: this.searchQuery, language: this.selectedLang });
                 },
-                addQueue(song) { 
+                addQueue(song) {
                     socket.emit('add_to_queue', song);
                     if (navigator.vibrate) navigator.vibrate(40);
                 },
-                insertTop(song) { 
-                    socket.emit('insert_to_top', song); 
+                insertTop(song) {
+                    socket.emit('insert_to_top', song);
                     if (navigator.vibrate) navigator.vibrate([40, 40, 40]);
                     this.tab = 'queue';
                 },
                 removeQueue(queueId) {
                     socket.emit('remove_from_queue', queueId);
                 },
-                nextSong() { 
-                    socket.emit('next_song'); 
+                nextSong() {
+                    socket.emit('next_song');
                     if (navigator.vibrate) navigator.vibrate(80);
                 },
                 replaySong() {
@@ -289,10 +327,10 @@
                     socket.emit('player_command', { audioMode: this.audioMode });
                 },
                 updateMixer() {
-                    socket.emit('player_command', { 
+                    socket.emit('player_command', {
                         musicVol: parseFloat(this.musicVol),
-                        micVol: parseFloat(this.micVol), 
-                        reverbVol: parseFloat(this.reverbVol) 
+                        micVol: parseFloat(this.micVol),
+                        reverbVol: parseFloat(this.reverbVol)
                     });
                 },
                 adjustMusic(delta) {
@@ -306,4 +344,5 @@
         }).mount('#app');
     </script>
 </body>
+
 </html>
