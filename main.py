@@ -137,9 +137,9 @@ class ServerApp(tk.Tk):
         info_frame = tk.Frame(self, bg="white", bd=1, relief="solid")
         info_frame.pack(fill="x", padx=20, pady=5)
 
-        self.create_clickable_link(info_frame, "📺 播放端 (電視用)", f"http://{LOCAL_IP}:{settings.node_port}/player.html", "blue")
-        self.create_clickable_link(info_frame, "📱 遙控端 (手機用)", f"http://{LOCAL_IP}:{settings.node_port}/remote.html", "#d32f2f")
-        self.create_clickable_link(info_frame, "🕹️ 一體機 (單機用)", f"http://{LOCAL_IP}:{settings.node_port}/remote.html", "#9C27B0")
+        self.create_clickable_link(info_frame, "🏠 首頁", f"http://{LOCAL_IP}:{settings.node_port}/", "blue")
+        self.create_clickable_link(info_frame, "🎛️ 包廂主控台", f"http://{LOCAL_IP}:{settings.node_port}/console", "#9C27B0")
+        self.create_clickable_link(info_frame, "📺 大螢幕播放器", f"http://{LOCAL_IP}:{settings.node_port}/player", "#d32f2f")
         self.create_clickable_link(info_frame, "⚙️ 管理端 (加歌用)", f"http://{LOCAL_IP}:{settings.port}/admin", "#F57C00")
 
         stat_frame = tk.Frame(self, bg="#f4f4f9")

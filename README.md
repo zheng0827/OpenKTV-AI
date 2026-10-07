@@ -69,7 +69,7 @@ npm --prefix app install
 python main.py
 ```
 
-`python main.py` 啟動 Flask 管理服務及 Node 播放服務；電視播放器與遙控器使用 Node，遙控器以頁面內選單切換點歌、佇列與調音。Flask 管理頁維持在獨立連接埠。Node 直接讀取 `KTV_LIBRARY_INDEX_PATH` 指定的正式 CSV（預設 `ktv_songs/library_index.csv`），並由 `KTV_SONGS_DIR` 讀取媒體檔。
+`python main.py` 啟動 Flask 管理服務及 Node 播放服務。Node 首頁 `/` 提供歌曲搜尋與包廂狀態；`/console` 是整合大螢幕播放器、點歌、佇列、歌詞搜尋、混音及歌曲管理的一頁式主控台。`/player` 保留獨立大螢幕播放器，`/remote` 保留手機遙控器。歌曲處理仍由 Flask 管理服務提供；主控台的「新增歌曲」區塊直接嵌入管理頁。Node 直接讀取 `KTV_LIBRARY_INDEX_PATH` 指定的正式 CSV（預設 `ktv_songs/library_index.csv`），並由 `KTV_SONGS_DIR` 讀取媒體檔。
 
 若預設分離後端使用 `demucs` 或 `hybrid`，啟動前會先檢查 Demucs 權重；若在管理頁單次切換到 `demucs` / `hybrid`，處理該首歌前也會補做權重檢查。
 
