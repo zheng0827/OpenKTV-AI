@@ -75,7 +75,7 @@ python main.py
 
 ## 直接下載，不啟動伺服器
 
-CLI 逐首處理 YouTube 影片，沿用歌曲分離、歌詞、去混響、對齊及歸檔流程，並直接更新正式 CSV：
+CLI 逐首處理 YouTube 影片，沿用歌曲分離、歌詞、去混響、對齊及歸檔流程，並直接更新正式 CSV。輸入檔可用每行一個網址的舊格式，也可用帶欄位名稱的 pipe-delimited `.txt`、CSV、JSON 或 JSONL，為每首歌分別設定歌詞來源及處理模型：
 
 ```bash
 python script/download_songs.py "https://www.youtube.com/watch?v=VIDEO_ID"
@@ -83,7 +83,26 @@ python script/download_songs.py --input urls.txt
 python script/download_songs.py --title "歌手 - 歌名" --artist "歌手" "https://www.youtube.com/watch?v=VIDEO_ID"
 ```
 
-`urls.txt` 每行放一個 YouTube 影片網址；空行和 `#` 註解會忽略。CLI 不會啟動 Flask/Node，也不會同時平行處理歌曲。
+`urls.txt` 範例：
+
+```text
+youtube_url|lrclib_url|separator_mode|alignment_model|title|artist|stems|device
+https://www.youtube.com/watch?v=VIDEO_ID|https://lrclib.net/api/get/12345|uvr|whisperx|歌名|歌手|2|auto
+https://youtu.be/ANOTHER_ID||hybrid|ctc|另一首歌|歌手|4|cuda
+```
+
+欄位可用 `url`／`yt_url`、`lyrics_url`、`separator`／`separate_mode`、`alignment`／`text_alignment_model` 等別名；設定 `lrclib_url` 時必須是 LRCLIB 的 HTTPS `/api/get/{id}` API 網址。亦可用 JSON 陣列或 CSV 標頭提供相同欄位。空行與 `#` 註解會忽略。CLI 不會啟動 Flask/Node，也不會同時平行處理歌曲。
+
+## Discord 機器人
+
+在根目錄 `.env` 設定 `DISCORD_BOT_TOKEN`、`DISCORD_CLIENT_ID`、`KTV_BOT_API_TOKEN`，並在 Node KTV 服務使用相同的 `KTV_BOT_API_TOKEN`；`DISCORD_GUILD_ID` 可選，設定後會立即向指定伺服器註冊指令，未設定則註冊全域指令。啟動：
+
+```bash
+npm install --prefix app
+npm --prefix app run bot
+```
+
+機器人提供 `/songs`、`/song`、`/room`、`/queue` 與 `/add`。`/add` 可輸入 YouTube 關鍵字、影片或播放清單網址，會先排除曲庫內歌曲，播放清單以分頁選單預設全選；接著依選擇的語言查 LRCLIB，讓使用者逐首選歌詞結果，再把設定交給獨立 Python 腳本執行。房間／佇列資訊透過 `KTV_BOT_API_TOKEN` 保護的 Node API 讀取。
 
 ## 曲庫與 metadata
 

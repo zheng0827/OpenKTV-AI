@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { rateLimit } from 'express-rate-limit';
 import fs from 'fs';
+import { timingSafeEqual } from 'crypto';
 import csv from 'csv-parser';
 import MiniSearch from 'minisearch';
 import path from 'path';
@@ -154,6 +155,12 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         standardHeaders: 'draft-8',
         legacyHeaders: false,
       });
+      const botApiLimiter = rateLimit({
+        windowMs: 60 * 1000,
+        limit: 60,
+        standardHeaders: 'draft-8',
+        legacyHeaders: false,
+      });
 
       app.use(express.static(path.join(__dirname, 'public')));
       app.get(['/', '/home'], (_req, res) => res.sendFile(path.join(__dirname, 'public', 'home.html')));
@@ -170,6 +177,16 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         currentSong: currentSong(),
         queueCount: queue.length,
       }));
+      app.get('/api/bot/room', botApiLimiter, (req, res) => {
+        const expected = process.env.KTV_BOT_API_TOKEN || '';
+        const supplied = (req.get('authorization') || '').replace(/^Bearer\s+/i, '');
+        const expectedBuffer = Buffer.from(expected);
+        const suppliedBuffer = Buffer.from(supplied);
+        const authorized = expectedBuffer.length > 0 && suppliedBuffer.length === expectedBuffer.length
+          && timingSafeEqual(suppliedBuffer, expectedBuffer);
+        if (!authorized) return res.sendStatus(401);
+        return res.json({ songCount: songs.length, ...snapshot() });
+      });
       app.get('/media/:filename', mediaRequestLimiter, (req, res) => {
         const fullPath = mediaPath(req.params.filename);
         if (!fullPath || !fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) {

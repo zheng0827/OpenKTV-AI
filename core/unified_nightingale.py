@@ -23,7 +23,7 @@ from .audio import detect_vocal_region, highpass_filter, normalize_rms, suppress
 from .language_detection import detect_language_multiwindow
 from .whisper_alignment import align_with_backend
 from .cjk import is_cjk, tokenize_for_alignment, align_lang_code, attribute_chars_to_tokens, merge_punct, attach_reading, qwen_kept_len, is_supported_lang, align_model_for, clean_for_alignment
-from .library import upsert_catalog_entry, fetch_lrclib_lyrics
+from .library import upsert_catalog_entry, fetch_lrclib_lyrics, fetch_lrclib_lyrics_by_url
 from .metadata import ai_parse_youtube_title, extract_youtube_metadata, parse_youtube_title, search_metadata, spotify_track_metadata
 
 @dataclass(frozen=True)
@@ -493,6 +493,7 @@ class KTVProcessor:
         separator_backend = str(options.get("separator_backend", self.settings.separator_backend)).lower()
         alignment_backend = str(options.get("alignment_backend", self.settings.alignment_backend)).lower()
         lyrics_text = (options.get("lyrics_text") or "").strip()
+        lyrics_url = (options.get("lrclib_url") or "").strip()
         singer = (options.get("singer") or "").strip()
         source_url = url.strip()
         youtube_title = str(options.get("youtube_title") or "")
@@ -546,6 +547,11 @@ class KTVProcessor:
             metadata = {**metadata, **spotify_metadata}
             if not youtube_title:
                 youtube_title = str(options.get("youtube_title") or manual_title)
+            if not lyrics_text and lyrics_url:
+                try:
+                    lyrics_text = fetch_lrclib_lyrics_by_url(lyrics_url) or ""
+                except Exception as error:
+                    self.log(f"⚠️ LRCLIB 指定網址讀取失敗：{error}")
 
             job_id = uuid.uuid4().hex
             job_temp_dir = self.settings.temp_base_dir / job_id
