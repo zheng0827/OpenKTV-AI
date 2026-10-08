@@ -267,7 +267,8 @@ def make_original_vocal_mp4(input_mp4: Path, accompaniment_wav: Path, vocals_wav
     cmd = [
         ffmpeg_bin, "-y", "-i", str(input_mp4), "-i", str(accompaniment_wav), "-i", str(vocals_wav),
         "-filter_complex", "[1:a]extrastereo=m=1.35:c=0[acc];[acc][2:a]amix=inputs=2:normalize=0:duration=first[a]",
-        "-map", "0:v:0", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "320k", str(output_mp4)
+        "-map", "0:v:0", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "320k",
+        "-movflags", "+faststart", str(output_mp4)
     ]
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 

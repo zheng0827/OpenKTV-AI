@@ -51,88 +51,20 @@
     }
 
     .app {
-      display: grid;
-      grid-template-columns: 232px minmax(0, 1fr);
+      display: block;
       height: 100vh
-    }
-
-    .sidebar {
-      background: var(--sidebar);
-      border-right: 1px solid var(--line);
-      padding: 23px 15px;
-      display: flex;
-      flex-direction: column;
-      min-width: 0
     }
 
     .brand {
       font-weight: 900;
       letter-spacing: .1em;
       font-size: 16px;
-      padding: 4px 10px 28px
+      white-space: nowrap
     }
 
     .brand i {
       font-style: normal;
       color: var(--mint)
-    }
-
-    .room-label {
-      color: #718097;
-      font-size: 10px;
-      letter-spacing: .18em;
-      font-weight: 800;
-      padding: 0 11px 10px
-    }
-
-    .nav {
-      display: grid;
-      gap: 5px
-    }
-
-    .nav button {
-      border: 0;
-      text-align: left;
-      border-radius: 11px;
-      padding: 11px 12px;
-      color: var(--muted);
-      background: transparent;
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      font-weight: 700
-    }
-
-    .nav button:hover,
-    .nav button.active {
-      background: #ffffff0b;
-      color: var(--text)
-    }
-
-    .nav button.active {
-      box-shadow: inset 3px 0 var(--mint)
-    }
-
-    .nav-icon {
-      width: 20px;
-      text-align: center;
-      font-size: 17px
-    }
-
-    .badge {
-      margin-left: auto;
-      background: #ffffff12;
-      border-radius: 8px;
-      padding: 1px 7px;
-      font-size: 11px
-    }
-
-    .side-footer {
-      margin-top: auto;
-      padding: 13px 10px;
-      color: var(--muted);
-      font-size: 12px;
-      border-top: 1px solid var(--line)
     }
 
     .shell {
@@ -146,8 +78,8 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 25px;
-      gap: 14px
+      padding: 0 22px;
+      gap: 18px
     }
 
     .top-title {
@@ -165,6 +97,42 @@
       display: flex;
       align-items: center;
       gap: 12px
+    }
+
+    .top-nav {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      min-width: 0;
+      overflow-x: auto;
+      scrollbar-width: none
+    }
+
+    .top-nav::-webkit-scrollbar {
+      display: none
+    }
+
+    .top-nav button {
+      border: 0;
+      border-radius: 10px;
+      padding: 9px 11px;
+      color: var(--muted);
+      background: transparent;
+      white-space: nowrap;
+      font-size: 12px;
+      font-weight: 750
+    }
+
+    .top-nav button:hover,
+    .top-nav button.active {
+      color: var(--mint);
+      background: #ffffff0b
+    }
+
+    .queue-badge {
+      margin-left: 4px;
+      color: var(--mint);
+      font-size: 10px
     }
 
     .status {
@@ -198,15 +166,15 @@
     }
 
     .content {
-      padding: 20px 22px 24px;
+      padding: 22px 24px 26px;
       overflow: auto;
       min-width: 0
     }
 
     .workspace {
       display: grid;
-      grid-template-columns: minmax(0, 1.55fr) minmax(320px, .85fr);
-      gap: 18px;
+      grid-template-columns: minmax(0, 1.9fr) minmax(360px, .8fr);
+      gap: 20px;
       min-height: 100%
     }
 
@@ -558,38 +526,20 @@
     }
 
     @media(max-width:1000px) {
-      .app {
-        grid-template-columns: 74px minmax(0, 1fr)
+      .topbar {
+        min-height: 104px;
+        height: auto;
+        padding: 10px 18px;
+        flex-wrap: wrap
       }
 
-      .sidebar {
-        padding: 18px 9px
+      .top-nav {
+        order: 3;
+        flex-basis: 100%
       }
 
-      .brand {
-        font-size: 0;
-        padding: 6px 0 27px;
-        text-align: center
-      }
-
-      .brand:first-letter {
-        font-size: 16px
-      }
-
-      .room-label,
-      .nav-label,
-      .side-footer,
-      .badge {
-        display: none
-      }
-
-      .nav button {
-        justify-content: center;
-        padding: 12px 5px
-      }
-
-      .nav-icon {
-        font-size: 19px
+      .content {
+        padding: 16px
       }
 
       .workspace {
@@ -611,60 +561,7 @@
       .app {
         display: block;
         height: auto;
-        min-height: 100vh;
-        padding-bottom: 68px
-      }
-
-      .sidebar {
-        position: fixed;
-        z-index: 10;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        height: 64px;
-        padding: 4px 8px;
-        border-right: 0;
-        border-top: 1px solid var(--line);
-        display: block
-      }
-
-      .brand,
-      .room-label,
-      .side-footer {
-        display: none
-      }
-
-      .nav {
-        height: 100%;
-        display: flex;
-        justify-content: space-around;
-        align-items: center;
-        gap: 2px
-      }
-
-      .nav button {
-        height: 54px;
-        min-width: 48px;
-        display: flex;
-        flex: 1;
-        flex-direction: column;
-        justify-content: center;
-        gap: 0;
-        border-radius: 9px;
-        font-size: 9px;
-        padding: 2px
-      }
-
-      .nav-icon {
-        font-size: 17px
-      }
-
-      .nav-label {
-        display: block
-      }
-
-      .nav button.active {
-        box-shadow: inset 0 -2px var(--mint)
+        min-height: 100vh
       }
 
       .shell {
@@ -672,8 +569,9 @@
       }
 
       .topbar {
-        height: 58px;
-        padding: 0 14px
+        min-height: 106px;
+        padding: 10px 13px;
+        gap: 7px
       }
 
       .top-title {
@@ -686,6 +584,15 @@
 
       .top-right {
         gap: 8px
+      }
+
+      .top-nav {
+        gap: 2px
+      }
+
+      .top-nav button {
+        padding: 8px 9px;
+        font-size: 11px
       }
 
       .content {
@@ -758,26 +665,20 @@
 
 <body>
   <div class="app">
-    <aside class="sidebar">
-      <a href="/" class="brand">OPEN<i>KTV</i></a>
-      <div class="room-label">ROOM WORKSPACE</div>
-      <nav class="nav" aria-label="主控台內容">
-        <button class="active" data-pane="search"><span class="nav-icon">⌕</span><span
-            class="nav-label">點歌搜尋</span></button>
-        <button data-pane="queue"><span class="nav-icon">▤</span><span class="nav-label">播放佇列</span><span
-            id="queueBadge" class="badge">0</span></button>
-        <button data-pane="lyrics"><span class="nav-icon">♫</span><span class="nav-label">歌詞搜尋</span></button>
-        <button data-pane="mix"><span class="nav-icon">◉</span><span class="nav-label">音量調音</span></button>
-        <button data-pane="admin"><span class="nav-icon">＋</span><span class="nav-label">新增歌曲</span></button>
-      </nav>
-      <div class="side-footer"><a href="/">← 返回首頁</a><br><a href="/remote">手機遙控器</a></div>
-    </aside>
     <div class="shell">
       <header class="topbar">
         <div>
+          <a href="/" class="brand">OPEN<i>KTV</i></a>
           <div class="top-title">包廂主控台</div>
           <div id="topDescription" class="top-sub">搜尋歌曲，管理播放，一切都在這裡。</div>
         </div>
+        <nav class="top-nav" aria-label="主控台內容">
+          <button class="active" data-pane="search">⌕ 點歌</button>
+          <button data-pane="queue">▤ 佇列<span id="queueBadge" class="queue-badge"></span></button>
+          <button data-pane="lyrics">♫ 歌詞</button>
+          <button data-pane="mix">◉ 調音</button>
+          <button data-pane="admin">＋ 新增</button>
+        </nav>
         <div class="top-right"><span id="connection" class="status offline">連線中</span><button id="fullscreen"
             class="icon-button" title="全螢幕" aria-label="全螢幕">⛶</button></div>
       </header>
