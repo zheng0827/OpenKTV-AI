@@ -6,6 +6,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -100,7 +101,12 @@ def read_input_jobs(path: Path) -> list[dict[str, str]]:
     suffix = path.suffix.lower()
     if suffix == ".json":
         payload = json.loads(path.read_text(encoding="utf-8-sig"))
-        rows = payload if isinstance(payload, list) else payload.get("songs", [payload])
+        if isinstance(payload, list):
+            rows = payload
+        elif isinstance(payload, dict):
+            rows = payload.get("songs", [payload])
+        else:
+            raise ValueError("JSON 檔案必須是歌曲物件或歌曲陣列")
         if not isinstance(rows, list):
             raise ValueError("JSON 檔案必須是歌曲物件或歌曲陣列")
         return [_normalize_row(row) for row in rows if isinstance(row, dict)]
@@ -116,6 +122,16 @@ def read_input_jobs(path: Path) -> list[dict[str, str]]:
         with path.open("r", encoding="utf-8-sig", newline="") as handle:
             return [_normalize_row(row) for row in csv.DictReader(handle)]
     return _parse_text_rows(path)
+
+
+def is_youtube_url(value: str) -> bool:
+    try:
+        parsed = urlparse(value.strip())
+    except ValueError:
+        return False
+    return parsed.scheme in {"http", "https"} and parsed.hostname in {
+        "youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "www.youtu.be",
+    }
 
 
 def build_jobs(args: argparse.Namespace) -> list[dict[str, str]]:
@@ -160,12 +176,18 @@ def main() -> int:
         parser.error(f"讀取輸入檔失敗：{error}")
     if not jobs:
         parser.error("請提供至少一個 YouTube 網址或 --input 檔案")
-    invalid_rows = [
-        str(index) for index, job in enumerate(jobs, 1)
-        if not job.get("youtube_url", "").startswith(("https://", "http://"))
-    ]
+    invalid_rows = [str(index) for index, job in enumerate(jobs, 1) if not is_youtube_url(job.get("youtube_url", ""))]
     if invalid_rows:
-        parser.error(f"歌曲設定缺少有效 YouTube URL，項目：{', '.join(invalid_rows)}")
+        parser.error(f"歌曲設定包含非 YouTube 或無效網址，項目：{', '.join(invalid_rows)}")
+    for index, job in enumerate(jobs, 1):
+        for field, allowed in {
+            "separator_mode": {"demucs", "uvr", "hybrid"},
+            "alignment_model": {"ctc", "whisperx", "qwen"},
+            "device": {"auto", "cuda", "cpu"},
+            "stems": {"2", "4"},
+        }.items():
+            if job.get(field) and job[field].lower() not in allowed:
+                parser.error(f"第 {index} 首歌曲的 {field} 設定無效：{job[field]}")
 
     from core.config import load_settings
     from core.unified_nightingale import KTVProcessor

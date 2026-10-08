@@ -262,10 +262,16 @@ def fetch_lrclib_lyrics(song_name: str, singer: str) -> str | None:
 
 def fetch_lrclib_lyrics_by_url(url: str) -> str | None:
     parsed = urllib.parse.urlparse(url.strip())
-    if parsed.scheme != "https" or parsed.hostname not in {"lrclib.net", "www.lrclib.net"}:
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname not in {"lrclib.net", "www.lrclib.net"}
+        or parsed.port not in {None, 443}
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
         raise ValueError("歌詞網址必須是 HTTPS LRCLIB 網址")
-    if not parsed.path.startswith("/api/get/"):
-        raise ValueError("LRCLIB 歌詞網址必須是 /api/get/{id} API 網址")
+    if not re.fullmatch(r"/api/get/\d+", parsed.path):
+        raise ValueError("LRCLIB 歌詞網址必須是 /api/get/{數字 ID} API 網址")
 
     request = urllib.request.Request(url, headers={"User-Agent": "OpenKTV-AI/1.0"})
     with urllib.request.urlopen(request, timeout=12) as response:  # nosec B310

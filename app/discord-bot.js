@@ -14,6 +14,7 @@ import {
 import csv from 'csv-parser';
 import { spawn } from 'child_process';
 import { execFile as execFileCallback } from 'child_process';
+import './environment.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -23,22 +24,6 @@ import { promisify } from 'util';
 const execFile = promisify(execFileCallback);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
-
-function loadProjectEnv() {
-  const envFile = path.join(projectRoot, '.env');
-  if (!fs.existsSync(envFile)) return;
-  for (const line of fs.readFileSync(envFile, 'utf8').split(/\r?\n/)) {
-    const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
-    if (!match || process.env[match[1]] !== undefined) continue;
-    let value = match[2];
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-    process.env[match[1]] = value;
-  }
-}
-
-loadProjectEnv();
 
 const catalogPath = path.resolve(
   projectRoot,
@@ -93,6 +78,13 @@ function elapsedTime(value) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
+function safeProcessLog(value) {
+  return String(value || '沒有額外輸出')
+    .replace(/\u001b\[[0-9;]*m/g, '')
+    .replaceAll('`', 'ˋ')
+    .slice(-1700);
+}
+
 async function readCatalog() {
   if (!fs.existsSync(catalogPath)) return [];
   return new Promise((resolve, reject) => {
@@ -133,10 +125,12 @@ function songEmbed(song) {
     .setDescription(`歌手：${display(song.artist)}\n曲庫 ID：\`${display(song.id)}\``);
   const fields = [
     ['專輯', song.album], ['發行年份', song.release_year], ['音源時長', song.duration_seconds ? elapsedTime(song.duration_seconds) : ''],
-    ['語言', song.language], ['曲風', song.genre], ['分離模式', song.separator_mode],
+    ['歌手性別', song.artist_gender], ['語言', song.language], ['曲風', song.genre], ['分離模式', song.separator_mode],
     ['分離模型', song.separator_model], ['歌詞對齊模型', song.alignment_model],
     ['影片檔名', song.video_filename], ['伴奏檔名', song.instrumental_filename], ['歌詞檔名', song.lyrics_filename],
-    ['原始 YouTube 標題', song.youtube_title], ['來源 URL', song.source_url],
+    ['人聲檔名', song.vocals_filename], ['去混響人聲檔名', song.dereverbed_vocals_filename],
+    ['對齊結果檔名', song.alignment_results_filename], ['處理狀態', song.processing_status],
+    ['建立時間', song.created_at], ['原始 YouTube 標題', song.youtube_title], ['來源 URL', song.source_url],
   ];
   for (const [name, value] of fields) {
     if (value) embed.addFields({ name, value: display(value, '（無資料）').slice(0, 1024), inline: true });
@@ -183,12 +177,16 @@ function cleanVideoTitle(value) {
 
 function isCatalogDuplicate(entry, songs) {
   const id = ytVideoId(entry.youtube_url);
-  const cleanTitle = normalizeSearch(cleanVideoTitle(entry.title));
+  const titleParts = cleanVideoTitle(entry.title).split(/\s+-\s+/);
+  const candidateTitle = normalizeSearch(titleParts.length > 1 ? titleParts.slice(1).join(' - ') : titleParts[0]);
+  const candidateArtist = normalizeSearch(titleParts.length > 1 ? titleParts[0] : '');
   return songs.some(song => {
     if (id && ytVideoId(song.source_url) === id) return true;
     if (song.source_url && song.source_url === entry.youtube_url) return true;
     const catalogTitle = normalizeSearch(song.title);
-    return cleanTitle && catalogTitle && cleanTitle === catalogTitle;
+    const catalogArtist = normalizeSearch(song.artist);
+    return candidateTitle && catalogTitle && candidateTitle === catalogTitle
+      && (!candidateArtist || !catalogArtist || candidateArtist === catalogArtist);
   });
 }
 
@@ -196,13 +194,15 @@ async function resolveYouTubeCandidates(query) {
   const isUrl = /^https?:\/\//i.test(query);
   if (isUrl) {
     const parsed = new URL(query);
-    if (!['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be', 'www.youtu.be'].includes(parsed.hostname)) {
+    if (!['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be', 'www.youtu.be'].includes(parsed.hostname)
+      || parsed.username || parsed.password || !['', '80', '443'].includes(parsed.port)) {
       throw new Error('只接受 YouTube 影片或播放清單網址。');
     }
   }
   const target = isUrl ? query : `ytsearch25:${query}`;
   const { stdout } = await execFile(ytDlp, [
-    '--dump-single-json', '--flat-playlist', '--skip-download', '--no-warnings', '--no-call-home', target,
+    '--no-config', '--dump-single-json', '--flat-playlist', '--playlist-end', '250',
+    '--skip-download', '--no-warnings', '--no-call-home', target,
   ], { cwd: projectRoot, timeout: 120_000, maxBuffer: 8 * 1024 * 1024, windowsHide: true });
   const payload = JSON.parse(stdout);
   const entries = Array.isArray(payload.entries) ? payload.entries : [payload];
@@ -215,12 +215,16 @@ async function resolveYouTubeCandidates(query) {
 
 function languageMatches(item, requested) {
   if (!requested || requested === 'auto') return true;
-  const declared = String(item.language || '').toLowerCase();
+  const rawLanguage = String(item.language || '').toLowerCase();
+  const declared = ({
+    chinese: 'zh', zho: 'zh', mandarin: 'zh', cantonese: 'zh',
+    english: 'en', eng: 'en', japanese: 'ja', jpn: 'ja', korean: 'ko', kor: 'ko',
+  })[rawLanguage] || rawLanguage;
   const text = `${item.trackName || ''} ${item.plainLyrics || ''} ${item.syncedLyrics || ''}`;
   if (declared) {
     if (requested === 'zh' && declared.startsWith('zh')) return true;
     if (declared.startsWith(requested)) return true;
-    if (declared !== 'unknown') return false;
+    if (['zh', 'en', 'ja', 'ko'].includes(declared.slice(0, 2)) && declared !== 'unknown') return false;
   }
   if (requested === 'ja') return /[\u3040-\u30ff]/u.test(text);
   if (requested === 'ko') return /[\uac00-\ud7af]/u.test(text);
@@ -239,15 +243,23 @@ function trackAndArtist(title) {
 async function searchLyrics(entry, language) {
   const { artist, track } = trackAndArtist(entry.title);
   if (!track) return [];
-  const params = new URLSearchParams({ track_name: track });
-  if (artist) params.set('artist_name', artist);
-  const response = await fetch(`https://lrclib.net/api/search?${params}`, {
-    headers: { 'User-Agent': 'OpenKTV-AI-DiscordBot/1.0' },
-    signal: AbortSignal.timeout(12_000),
-  });
-  if (!response.ok) throw new Error(`LRCLIB 回應 ${response.status}`);
-  const rows = await response.json();
-  return (Array.isArray(rows) ? rows : []).filter(item => item && languageMatches(item, language)).slice(0, 24);
+  const queries = [artist ? { track_name: track, artist_name: artist } : { track_name: track }];
+  if (artist) queries.push({ track_name: track });
+  const matches = new Map();
+  for (const query of queries) {
+    const params = new URLSearchParams(query);
+    const response = await fetch(`https://lrclib.net/api/search?${params}`, {
+      headers: { 'User-Agent': 'OpenKTV-AI-DiscordBot/1.0' },
+      signal: AbortSignal.timeout(12_000),
+    });
+    if (!response.ok) throw new Error(`LRCLIB 回應 ${response.status}`);
+    const rows = await response.json();
+    for (const item of Array.isArray(rows) ? rows : []) {
+      if (item && languageMatches(item, language)) matches.set(String(item.id || `${item.trackName}-${item.artistName}`), item);
+    }
+    if (matches.size >= 23) break;
+  }
+  return [...matches.values()].slice(0, 23);
 }
 
 function selectMenu(customId, candidates, page, selected) {
@@ -274,11 +286,12 @@ function selectMenu(customId, candidates, page, selected) {
   return { components: [row, buttons] };
 }
 
-async function choosePlaylistSongs(interaction, candidates) {
+async function choosePlaylistSongs(interaction, message, candidates) {
   const selected = new Set(candidates.map((_, index) => index));
   let page = 0;
-  const message = await interaction.editReply({
+  await message.edit({
     content: `找到 ${candidates.length} 首，已先過濾曲庫中已有的歌曲。播放清單預設全選；可逐頁取消不需要下載的項目。`,
+    allowedMentions: { parse: [] },
     ...selectMenu('playlist-picker', candidates, page, selected),
   });
   const collector = message.createMessageComponentCollector({
@@ -301,8 +314,9 @@ async function choosePlaylistSongs(interaction, candidates) {
         return;
       }
       if (!component.deferred) await component.deferUpdate();
-      await interaction.editReply({
+      await message.edit({
         content: `已選 ${selected.size} / ${candidates.length} 首。播放清單預設全選；可逐頁取消不需要下載的項目。`,
+        allowedMentions: { parse: [] },
         ...selectMenu('playlist-picker', candidates, page, selected),
       });
     });
@@ -312,24 +326,29 @@ async function choosePlaylistSongs(interaction, candidates) {
   });
 }
 
-async function chooseLyricsForSongs(interaction, songs, language) {
+async function chooseLyricsForSongs(interaction, message, songs, language) {
   const selected = [];
-  const message = await interaction.fetchReply();
   for (let index = 0; index < songs.length; index++) {
     const song = songs[index];
+    if (index) await new Promise(resolve => setTimeout(resolve, 500));
     let results = [];
-    let lookupError = '';
     try {
       results = await searchLyrics(song, language);
-    } catch (error) {
-      lookupError = String(error.message || error).slice(0, 120);
+    } catch {}
+    if (!results.length) {
+      selected.push({ ...song, lrclib_url: '' });
+      continue;
     }
     const options = [{
       label: '不指定歌詞（處理時自動搜尋）',
-      description: lookupError || '讓歌曲處理流程自行尋找歌詞',
+      description: '讓歌曲處理流程自行尋找歌詞',
       value: 'auto',
       default: true,
-    }, ...results.map((item, resultIndex) => ({
+    }, {
+      label: '這首及之後的歌曲都自動搜尋',
+      description: '不再逐首詢問歌詞連結',
+      value: 'auto_remaining',
+    }, ...results.slice(0, 23).map((item, resultIndex) => ({
       label: `${item.trackName || '未命名歌曲'} — ${item.artistName || '未知歌手'}`.slice(0, 100),
       description: `${item.albumName || '未提供專輯'} · ${item.duration ? elapsedTime(item.duration) : '時長未知'}`.slice(0, 100),
       value: String(resultIndex),
@@ -343,12 +362,14 @@ async function chooseLyricsForSongs(interaction, songs, language) {
     const detail = results.length
       ? `LRCLIB 找到 ${results.length} 筆${language !== 'auto' ? `（已套用${LANGUAGE_CHOICES.find(item => item.value === language)?.name || ''}語言篩選）` : ''}。請為這首歌選擇歌詞連結。`
       : `沒有找到符合${language === 'auto' ? '' : `「${LANGUAGE_CHOICES.find(item => item.value === language)?.name}」`}條件的 LRCLIB 結果，將由處理流程自動搜尋。`;
-    await interaction.editReply({
+    await message.edit({
       content: `歌詞選擇 ${index + 1}/${songs.length}：${display(song.title)}\n${detail}`,
+      allowedMentions: { parse: [] },
       embeds: [],
       components: [new ActionRowBuilder().addComponents(menu)],
     });
     let choice = 'auto';
+    let timedOut = false;
     try {
       const component = await message.awaitMessageComponent({
         time: 10 * 60 * 1000,
@@ -358,12 +379,17 @@ async function chooseLyricsForSongs(interaction, songs, language) {
       await component.deferUpdate();
     } catch {
       choice = 'auto';
+      timedOut = true;
     }
-    const result = choice === 'auto' ? null : results[Number(choice)];
+    const result = choice === 'auto' || choice === 'auto_remaining' ? null : results[Number(choice)];
     selected.push({
       ...song,
       lrclib_url: result?.id ? `https://lrclib.net/api/get/${encodeURIComponent(result.id)}` : '',
     });
+    if (choice === 'auto_remaining' || timedOut) {
+      selected.push(...songs.slice(index + 1).map(item => ({ ...item, lrclib_url: '' })));
+      break;
+    }
   }
   return selected;
 }
@@ -399,7 +425,10 @@ function runDownloader(inputPath, statusMessage) {
       if (!updateTimer) {
         updateTimer = setTimeout(() => {
           updateTimer = null;
-          statusMessage.edit(`歌曲處理中：\n\`\`\`\n${(pending + '\n' + log).slice(-1700)}\n\`\`\``).catch(() => {});
+          statusMessage.edit({
+            content: `歌曲處理中：\n\`\`\`\n${safeProcessLog(pending + '\n' + log)}\n\`\`\``,
+            allowedMentions: { parse: [] },
+          }).catch(() => {});
         }, 5000);
       }
     };
@@ -496,29 +525,34 @@ async function handleAdd(interaction) {
     return interaction.reply({ content: '新增歌曲功能目前僅支援伺服器文字頻道。', ephemeral: true });
   }
   intake.add(interaction.user.id);
-  await interaction.deferReply({ ephemeral: true });
   let tempDirectory;
-  let statusMessage;
+  let workflowMessage;
   try {
+    await interaction.deferReply();
+    workflowMessage = await interaction.fetchReply();
     const query = interaction.options.getString('query', true).trim();
+    await workflowMessage.edit({
+      content: `正在搜尋 YouTube：${display(query)}`,
+      allowedMentions: { parse: [] },
+    });
     const allCandidates = await resolveYouTubeCandidates(query);
     const catalog = await readCatalog();
     const candidates = allCandidates.filter(candidate => !isCatalogDuplicate(candidate, catalog));
     if (!candidates.length) {
-      await interaction.editReply('沒有找到可新增的歌曲；搜尋結果可能都已存在於曲庫。');
+      await workflowMessage.edit({ content: '沒有找到可新增的歌曲；搜尋結果可能都已存在於曲庫。', allowedMentions: { parse: [] } });
       return;
     }
-    const chosen = await choosePlaylistSongs(interaction, candidates);
+    const chosen = await choosePlaylistSongs(interaction, workflowMessage, candidates);
     if (!chosen) {
-      await interaction.editReply({ content: '操作逾時，已取消新增歌曲。', components: [] });
+      await workflowMessage.edit({ content: '操作逾時，已取消新增歌曲。', components: [], allowedMentions: { parse: [] } });
       return;
     }
     if (!chosen.length) {
-      await interaction.editReply({ content: '沒有選取歌曲，已取消新增。', components: [] });
+      await workflowMessage.edit({ content: '沒有選取歌曲，已取消新增。', components: [], allowedMentions: { parse: [] } });
       return;
     }
     const language = interaction.options.getString('language') || 'auto';
-    const withLyrics = await chooseLyricsForSongs(interaction, chosen, language);
+    const withLyrics = await chooseLyricsForSongs(interaction, workflowMessage, chosen, language);
     const jobs = withLyrics.map(song => ({
       ...song,
       separator_mode: interaction.options.getString('separator') || '',
@@ -527,13 +561,22 @@ async function handleAdd(interaction) {
     tempDirectory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'openktv-discord-'));
     const inputPath = path.join(tempDirectory, 'songs.csv');
     await fs.promises.writeFile(inputPath, createInputCsv(jobs), { encoding: 'utf8', flag: 'wx' });
-    statusMessage = await interaction.channel.send(`已接收 ${jobs.length} 首歌曲，正在啟動 Python 歌曲處理流程。`);
-    await interaction.editReply({ content: `已開始處理 ${jobs.length} 首歌曲，後續進度會更新在頻道訊息中。`, components: [] });
-    const result = await runDownloader(inputPath, statusMessage);
-    await statusMessage.edit(`${result.code === 0 ? '✅ 處理完成' : '⚠️ 處理結束，部分歌曲失敗'}\n\`\`\`\n${(result.log || '沒有額外輸出').slice(-1700)}\n\`\`\``);
+    await workflowMessage.edit({
+      content: `已接收 ${jobs.length} 首歌曲，正在啟動 Python 歌曲處理流程。`,
+      components: [],
+      allowedMentions: { parse: [] },
+    });
+    const result = await runDownloader(inputPath, workflowMessage);
+    await workflowMessage.edit({
+      content: `${result.code === 0 ? '✅ 處理完成' : '⚠️ 處理結束，部分歌曲失敗'}\n\`\`\`\n${safeProcessLog(result.log)}\n\`\`\``,
+      allowedMentions: { parse: [] },
+    });
   } catch (error) {
     const message = String(error?.message || error).slice(0, 1500);
-    if (statusMessage) await statusMessage.edit(`歌曲處理啟動失敗：${message}`).catch(() => {});
+    if (workflowMessage) await workflowMessage.edit({
+      content: `無法新增歌曲：${message}`,
+      allowedMentions: { parse: [] },
+    }).catch(() => {});
     else await interaction.editReply(`無法新增歌曲：${message}`).catch(() => {});
   } finally {
     intake.delete(interaction.user.id);

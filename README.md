@@ -102,7 +102,7 @@ npm install --prefix app
 npm --prefix app run bot
 ```
 
-機器人提供 `/songs`、`/song`、`/room`、`/queue` 與 `/add`。`/add` 可輸入 YouTube 關鍵字、影片或播放清單網址，會先排除曲庫內歌曲，播放清單以分頁選單預設全選；接著依選擇的語言查 LRCLIB，讓使用者逐首選歌詞結果，再把設定交給獨立 Python 腳本執行。房間／佇列資訊透過 `KTV_BOT_API_TOKEN` 保護的 Node API 讀取。
+機器人提供 `/songs`、`/song`、`/room`、`/queue` 與 `/add`。`/add` 可輸入 YouTube 關鍵字、影片或播放清單網址，會先排除曲庫內歌曲，播放清單以分頁選單預設全選；接著依選擇的語言查 LRCLIB，讓使用者逐首選歌詞結果，再把設定交給獨立 Python 腳本執行。新增流程與長時間處理進度會顯示在呼叫指令的頻道；房間／佇列資訊透過 `KTV_BOT_API_TOKEN` 保護的 Node API 讀取。
 
 ## 曲庫與 metadata
 
