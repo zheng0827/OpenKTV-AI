@@ -162,12 +162,18 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         standardHeaders: 'draft-8',
         legacyHeaders: false,
       });
+      const pageRequestLimiter = rateLimit({
+        windowMs: 60 * 1000,
+        limit: 120,
+        standardHeaders: 'draft-8',
+        legacyHeaders: false,
+      });
 
       app.use(express.static(path.join(__dirname, 'public')));
-      app.get(['/', '/home'], (_req, res) => res.sendFile(path.join(__dirname, 'public', 'home.html')));
+      app.get(['/', '/home'], pageRequestLimiter, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'home.html')));
       app.get('/player', (_req, res) => res.redirect('/player.html'));
       app.get(['/remote', '/queue'], (_req, res) => res.redirect('/remote.html'));
-      app.get(['/console', '/ktv'], (_req, res) => res.sendFile(path.join(__dirname, 'public', 'console.html')));
+      app.get(['/console', '/ktv'], pageRequestLimiter, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'console.html')));
       app.get('/admin', (req, res) => {
         const host = req.hostname.includes(':') ? `[${req.hostname}]` : req.hostname;
         res.redirect(`http://${host}:${Number(process.env.KTV_PORT) || 5000}/admin`);
