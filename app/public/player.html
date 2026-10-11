@@ -214,8 +214,8 @@
                 </div>
 
                 <!-- 防嘯叫模式開關 -->
-                <button id="btn-anti-feedback" class="btn-action btn-active" onclick="toggleAntiFeedback()">
-                    🛡️ 筆電防嘯叫：開
+                <button id="btn-echo-cancellation" class="btn-action" onclick="toggleEchoCancellation()">
+                    🛡️ 瀏覽器回音消除：關（低延遲）
                 </button>
 
                 <!-- 麥克風開關 -->
@@ -236,7 +236,7 @@
         <div id="waiting">
             <div style="font-size: 52px;">🎤</div>
             <div>包廂已就緒，請使用手機掃碼點歌</div>
-            <div style="font-size: 15px; color: #6b7280;">支援手機遙控即時音量調整、人聲增益放大與空間混響</div>
+            <div style="font-size: 15px; color: #6b7280;">麥克風預設乾聲直通、低延遲；可由遙控器調整音量，混響預設關閉</div>
         </div>
 
         <!-- KTV 經典雙行字幕面板 -->
@@ -261,7 +261,7 @@
         const lineTop = document.getElementById('line-top');
         const lineBottom = document.getElementById('line-bottom');
         const btnMic = document.getElementById('btn-mic');
-        const btnAntiFeedback = document.getElementById('btn-anti-feedback');
+        const btnEchoCancellation = document.getElementById('btn-echo-cancellation');
         const pitchFill = document.getElementById('pitch-fill');
         const hudMusicVol = document.getElementById('hud-music-vol');
         const hudMicVol = document.getElementById('hud-mic-vol');
@@ -270,14 +270,14 @@
         let activeMode = 'original'; // 'original' 或 'accompaniment'
         let lyricLines = [];
         let isMicRunning = false;
-        let isAntiFeedback = true;
+        let useBrowserEchoCancellation = false;
         let isSkipping = false;
         let micErrorShown = false;
 
         // 預設音量參數 (由 Remote / Server 同步控制)
         let currentMusicVol = 0.8;
         let currentMicVol = 1.2;
-        let currentReverbVol = 0.45;
+        let currentReverbVol = 0;
 
         // ==========================================
         // 2. Web Audio DSP 鏈路 (含前級放大器與音量控制節點)
@@ -289,25 +289,18 @@
         let instGain = null;
         let musicGain = null; // 音樂總音量節點
 
-        // 麥克風 DSP 鏈路節點
+        // 麥克風乾聲直通；混響分支僅在使用者開啟時建立
         let micStream = null;
         let micSource = null;
-        let micPreAmp = null;    // 前級增益放大 (解決筆電或普通麥克風聲音過小)
-        let micDryGain = null;   // 人聲直通乾聲音量 (受 Remote micVol 控制)
-        let micWetGain = null;   // 人聲殘響混響量 (受 Remote reverbVol 控制)
+        let micDryGain = null;
+        let micWetGain = null;
         let convolver = null;
-        let highpass = null;
-        let notchFilter = null;
-        let highShelf = null;
-        let compressor = null;
-        let micLimiter = null;
         let analyser = null;
 
         function initAudioSystem() {
             if (!audioCtx) {
                 audioCtx = new (window.AudioContext || window.webkitAudioContext)({
-                    latencyHint: 'interactive',
-                    sampleRate: 48000
+                    latencyHint: 'interactive'
                 });
             }
             if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -342,17 +335,30 @@
             currentMicVol = Math.max(0, Math.min(3.0, parseFloat(val)));
             hudMicVol.innerText = `${Math.round(currentMicVol * 100)}%`;
             if (micDryGain && audioCtx) {
-                // 配合防嘯叫模式調整最大增益比
-                const targetVal = isAntiFeedback ? currentMicVol * 0.75 : currentMicVol;
-                micDryGain.gain.setTargetAtTime(targetVal, audioCtx.currentTime, 0.04);
+                micDryGain.gain.setTargetAtTime(currentMicVol, audioCtx.currentTime, 0.005);
             }
         }
 
         function applyReverbVolume(val) {
             currentReverbVol = Math.max(0, Math.min(1.5, parseFloat(val)));
-            if (micWetGain && audioCtx) {
-                micWetGain.gain.setTargetAtTime(currentReverbVol, audioCtx.currentTime, 0.04);
+            if (!micSource || !audioCtx) return;
+            if (currentReverbVol <= 0) {
+                if (convolver) {
+                    micSource.disconnect(convolver);
+                    convolver.disconnect();
+                    micWetGain.disconnect();
+                    convolver = null;
+                    micWetGain = null;
+                }
+                return;
             }
+            if (!convolver) {
+                convolver = audioCtx.createConvolver();
+                convolver.buffer = createRoomIR(audioCtx, 1.8, 1.8);
+                micWetGain = audioCtx.createGain();
+                micSource.connect(convolver).connect(micWetGain).connect(audioCtx.destination);
+            }
+            micWetGain.gain.setTargetAtTime(currentReverbVol, audioCtx.currentTime, 0.005);
         }
 
         function createRoomIR(ctx, duration, decay) {
@@ -368,14 +374,30 @@
             return buf;
         }
 
-        function toggleAntiFeedback() {
-            isAntiFeedback = !isAntiFeedback;
-            btnAntiFeedback.className = isAntiFeedback ? 'btn-action btn-active' : 'btn-action';
-            btnAntiFeedback.innerText = isAntiFeedback ? '🛡️ 筆電防嘯叫：開' : '🛡️ 筆電防嘯叫：關';
+        function stopMic() {
+            if (micStream) micStream.getTracks().forEach(track => track.stop());
+            if (micSource) micSource.disconnect();
+            if (micDryGain) micDryGain.disconnect();
+            if (analyser) analyser.disconnect();
+            if (convolver) convolver.disconnect();
+            if (micWetGain) micWetGain.disconnect();
+            micStream = micSource = micDryGain = analyser = convolver = micWetGain = null;
+            isMicRunning = false;
+            btnMic.className = 'btn-action';
+            btnMic.innerText = '🎤 啟動麥克風';
+            btnMic.title = '';
+            pitchFill.style.width = '0%';
+        }
 
+        async function toggleEchoCancellation() {
+            useBrowserEchoCancellation = !useBrowserEchoCancellation;
+            btnEchoCancellation.className = useBrowserEchoCancellation ? 'btn-action btn-active' : 'btn-action';
+            btnEchoCancellation.innerText = useBrowserEchoCancellation
+                ? '🛡️ 回音消除：開（較高延遲）'
+                : '🛡️ 回音消除：關（低延遲）';
             if (isMicRunning) {
-                toggleMic();
-                setTimeout(() => toggleMic(), 200);
+                stopMic();
+                await toggleMic();
             }
         }
 
@@ -392,91 +414,44 @@
             if (audioCtx?.state === 'suspended') await audioCtx.resume();
 
             if (isMicRunning) {
-                if (micStream) micStream.getTracks().forEach(t => t.stop());
-                isMicRunning = false;
-                btnMic.className = 'btn-action';
-                btnMic.innerText = '🎤 啟動麥克風';
-                pitchFill.style.width = '0%';
+                stopMic();
                 return;
             }
 
             try {
                 micStream = await navigator.mediaDevices.getUserMedia({
                     audio: {
-                        echoCancellation: isAntiFeedback,
-                        noiseSuppression: true,
-                        autoGainControl: true
+                        latency: { ideal: 0.01 },
+                        channelCount: { ideal: 1 },
+                        echoCancellation: useBrowserEchoCancellation,
+                        noiseSuppression: false,
+                        autoGainControl: false
                     },
                     video: false
                 });
 
                 micSource = audioCtx.createMediaStreamSource(micStream);
-
-                // 1. 前級增益放大器 (Pre-Amp Boost): 先將原始微弱訊號大幅抬升 2.5 倍
-                micPreAmp = audioCtx.createGain();
-                micPreAmp.gain.value = 2.5;
-
-                // 2. 85Hz 高通濾波器：切除噗音與敲擊震動
-                highpass = audioCtx.createBiquadFilter();
-                highpass.type = 'highpass';
-                highpass.frequency.value = 85;
-
-                // 3. 3100Hz 陷波濾波器 (Notch)：切除尖銳嘯叫共鳴點
-                notchFilter = audioCtx.createBiquadFilter();
-                notchFilter.type = 'notch';
-                notchFilter.frequency.value = 3100;
-                notchFilter.Q.value = 4.0;
-
-                // 4. 高頻修整：衰減毛刺感
-                highShelf = audioCtx.createBiquadFilter();
-                highShelf.type = 'highshelf';
-                highShelf.frequency.value = 6500;
-                highShelf.gain.value = isAntiFeedback ? -6.0 : 0.0;
-
-                // 5. 動態壓縮器：保護揚聲器不破音
-                compressor = audioCtx.createDynamicsCompressor();
-                compressor.threshold.setValueAtTime(-28, audioCtx.currentTime);
-                compressor.ratio.setValueAtTime(6, audioCtx.currentTime);
-                compressor.attack.setValueAtTime(0.003, audioCtx.currentTime);
-                micLimiter = audioCtx.createWaveShaper();
-                const limiterCurve = new Float32Array(2048);
-                for (let i = 0; i < limiterCurve.length; i++) {
-                    const sample = (i * 2) / (limiterCurve.length - 1) - 1;
-                    limiterCurve[i] = Math.max(-0.92, Math.min(0.92, sample));
-                }
-                micLimiter.curve = limiterCurve;
-                micLimiter.oversample = '4x';
-
-                // 6. 人聲乾濕音訊通道
                 micDryGain = audioCtx.createGain();
-                micWetGain = audioCtx.createGain();
-
+                micSource.connect(micDryGain).connect(audioCtx.destination);
                 applyMicVolume(currentMicVol);
-                applyReverbVolume(currentReverbVol);
-
-                convolver = audioCtx.createConvolver();
-                convolver.buffer = createRoomIR(audioCtx, 1.8, 1.8);
 
                 analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 2048;
-
-                // 串接音訊鏈路
-                micSource.connect(micPreAmp);
-                micPreAmp.connect(highpass);
-                highpass.connect(notchFilter);
-                notchFilter.connect(highShelf);
-                highShelf.connect(compressor);
-                compressor.connect(analyser);
-
-                // 輸出至乾濕混音
-                compressor.connect(micLimiter);
-                micLimiter.connect(micDryGain).connect(audioCtx.destination);
-                micLimiter.connect(convolver).connect(micWetGain).connect(audioCtx.destination);
+                analyser.fftSize = 1024;
+                micSource.connect(analyser);
+                if (currentReverbVol > 0) applyReverbVolume(currentReverbVol);
 
                 isMicRunning = true;
                 btnMic.className = 'btn-action btn-active';
-                btnMic.innerText = '🎙️ 麥克風已啟動';
+                btnMic.innerText = '🎙️ 乾聲直通已啟動';
+                const settings = micStream.getAudioTracks()[0]?.getSettings?.() || {};
+                const estimatedLatency = (Number(settings.latency) || 0)
+                    + (Number(audioCtx.baseLatency) || 0)
+                    + (Number(audioCtx.outputLatency) || 0);
+                btnMic.title = estimatedLatency
+                    ? `瀏覽器回報的輸入與輸出延遲約 ${Math.round(estimatedLatency * 1000)} ms；實際值依裝置而異`
+                    : '乾聲直通；實際延遲依麥克風、音效裝置與瀏覽器而異';
             } catch (err) {
+                stopMic();
                 alert('麥克風啟動失敗: ' + err.message);
             }
         }

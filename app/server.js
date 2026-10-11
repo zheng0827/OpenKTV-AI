@@ -232,7 +232,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         audioMode: 'original',
         musicVol: 0.8,
         micVol: 1,
-        reverbVol: 0.35,
+        reverbVol: 0,
         position: 0,
         startedAt: null,
         serverTime: Date.now(),
