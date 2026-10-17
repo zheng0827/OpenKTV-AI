@@ -1,7 +1,7 @@
 {
   "name": "ktv-enterprise-system",
   "version": "3.0.0",
-  "description": "企業級雙端分離 (Host & Remote) KTV 點播與即時混響系統",
+  "description": "Electron KTV 主控、內建影片播放器與手機遙控點播系統",
   "main": "main.js",
   "type": "module",
   "scripts": {

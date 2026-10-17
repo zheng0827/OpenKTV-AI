@@ -23,6 +23,7 @@ export async function startPythonService() {
   const logStream = fs.createWriteStream(path.join(logDirectory, 'python-service.log'), { flags: 'w', encoding: 'utf8' });
   logStream.on('error', () => console.error('[Python] Could not write service logs.'));
   const childEnv = { ...process.env };
+  childEnv.KTV_HOST = '127.0.0.1';
   if (process.platform === 'win32') {
     childEnv.PYTHONUTF8 = '1';
     childEnv.PYTHONIOENCODING = 'utf-8';

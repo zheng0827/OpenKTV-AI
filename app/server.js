@@ -6,7 +6,7 @@ import { rateLimit } from 'express-rate-limit';
 import fs from 'fs';
 import os from 'os';
 import { timingSafeEqual } from 'crypto';
-import { MpvPlayer } from './mpv-player.js';
+import { allowsPageAccess } from './page-access.js';
 import csv from 'csv-parser';
 import MiniSearch from 'minisearch';
 import QRCode from 'qrcode';
@@ -175,7 +175,6 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       const httpServer = createServer(app);
       const io = new Server(httpServer, { cors: { origin: "*", methods: ["GET", "POST"] } });
       let advanceQueue = () => {};
-      const mpvPlayer = new MpvPlayer({ onEnded: () => advanceQueue() });
       app.use(express.json({ limit: '32kb' }));
       const mediaRequestLimiter = rateLimit({
         windowMs: 60 * 1000,
@@ -196,12 +195,19 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         legacyHeaders: false,
       });
 
-      app.use(express.static(path.join(__dirname, 'public')));
-      app.get(['/', '/home'], pageRequestLimiter, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'home.html')));
+      const publicDirectory = path.join(__dirname, 'public');
+      app.use((req, res, next) => {
+        if (!allowsPageAccess(req.originalUrl, req.socket.remoteAddress)) {
+          return res.redirect('/remote');
+        }
+        return next();
+      });
+      app.use(express.static(publicDirectory));
+      app.get(['/', '/home'], pageRequestLimiter, (_req, res) => res.sendFile(path.join(publicDirectory, 'home.html')));
       app.get('/player', (_req, res) => res.redirect('/player.html'));
       app.get(['/remote', '/queue'], (_req, res) => res.redirect('/remote.html'));
-      app.get('/operator', pageRequestLimiter, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'console.html')));
-      app.get(['/console', '/ktv'], pageRequestLimiter, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'console.html')));
+      app.get('/operator', pageRequestLimiter, (_req, res) => res.sendFile(path.join(publicDirectory, 'console.html')));
+      app.get(['/console', '/ktv'], pageRequestLimiter, (_req, res) => res.sendFile(path.join(publicDirectory, 'console.html')));
       app.get('/api/room', (_req, res) => res.json({
         songCount: songs.length,
         clientCount: io.engine.clientsCount,
@@ -220,10 +226,9 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
             node: { ok: true },
             python: { ok: Boolean(health?.ok && health.service === 'python') },
             pythonPort,
-            player: mpvPlayer.getStatus(),
           });
         } catch {
-          return res.status(503).json({ node: { ok: true }, python: { ok: false }, pythonPort, player: mpvPlayer.getStatus() });
+          return res.status(503).json({ node: { ok: true }, python: { ok: false }, pythonPort });
         }
       });
       app.get('/api/qr', pageRequestLimiter, async (req, res) => {
@@ -345,8 +350,6 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         isPlaying: false,
         audioMode: 'original',
         musicVol: 0.8,
-        micVol: 1,
-        reverbVol: 0,
         position: 0,
         startedAt: null,
         serverTime: Date.now(),
@@ -375,16 +378,12 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           isPlaying: playerState.isPlaying,
           audioMode: playerState.audioMode,
           musicVol: playerState.musicVol,
-          micVol: playerState.micVol,
-          reverbVol: playerState.reverbVol,
           position: currentPosition(),
           serverTime: Date.now(),
         },
       });
       const emitState = () => {
         const payload = snapshot();
-        mpvPlayer.sync(payload.currentSong || payload.queue[0] || null, payload.state, mediaPath)
-          .catch(error => io.emit('playback_error', { message: error.message }));
         io.emit('sync_state', { queue: payload.queue, history: payload.history, state: payload.state });
         io.emit('queue_updated', payload.queue);
         io.emit('playback_snapshot', payload);
@@ -501,7 +500,6 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         socket.on('replay_current', () => {
           playerState.position = 0;
           playerState.startedAt = playerState.isPlaying ? Date.now() : null;
-          mpvPlayer.seek(0).catch(error => io.emit('playback_error', { message: error.message }));
           emitState();
         });
         socket.on('seek', value => {
@@ -510,7 +508,6 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           const duration = Number(currentSong()?.duration_seconds);
           playerState.position = duration > 0 ? Math.min(position, duration) : position;
           playerState.startedAt = playerState.isPlaying ? Date.now() : null;
-          mpvPlayer.seek(playerState.position).catch(error => io.emit('playback_error', { message: error.message }));
           emitState();
         });
         socket.on('player_command', command => {
@@ -529,10 +526,9 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
               command = { ...command, audioMode: undefined };
             } else playerState.audioMode = 'accompaniment';
           }
-          for (const key of ['musicVol', 'micVol', 'reverbVol']) {
+          for (const key of ['musicVol']) {
             if (command[key] !== undefined && Number.isFinite(Number(command[key]))) {
-              const max = key === 'musicVol' ? 1.5 : key === 'micVol' ? 2.5 : 1.2;
-              playerState[key] = Math.max(0, Math.min(max, Number(command[key])));
+              playerState[key] = Math.max(0, Math.min(1, Number(command[key])));
             }
           }
           playerState.serverTime = Date.now();
@@ -573,13 +569,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       httpServer.listen(port, '0.0.0.0', () => {
         console.log(`[Database] Loaded ${songs.length} songs.`);
         console.log(`[Server] KTV service listening on port ${port}.`);
-        resolve({
-          openCurrent: async () => {
-            const payload = snapshot();
-            await mpvPlayer.open(payload.currentSong, payload.state, mediaPath);
-          },
-          close: () => mpvPlayer.close(),
-        });
+        resolve({ close: () => new Promise(resolveClose => io.close(resolveClose)) });
       });
     } catch (error) {
       reject(error);

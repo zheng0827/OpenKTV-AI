@@ -14,11 +14,17 @@ if (process.platform === 'win32' && process.stdout.isTTY) {
   });
 }
 let mainWindow = null;
+let playerWindow = null;
 let pythonProcess = null;
-let playerService = null;
+let serverService = null;
 let isQuitting = false;
 
 function createWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+    return;
+  }
   mainWindow = new BrowserWindow({
     width: 1500,
     height: 950,
@@ -33,34 +39,54 @@ function createWindow() {
     autoHideMenuBar: true,
     title: 'OpenKTV Master'
   });
-  mainWindow.loadURL(`http://localhost:${serverPort}/operator`);
+  mainWindow.loadURL(`http://127.0.0.1:${serverPort}/operator`);
 
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 }
 
-ipcMain.handle('player:open', async () => {
-  try {
-    await playerService?.openCurrent();
-    return { ok: true };
-  } catch (error) {
-    return { ok: false, error: error.message };
+function openPlayerWindow() {
+  if (playerWindow && !playerWindow.isDestroyed()) {
+    playerWindow.show();
+    playerWindow.focus();
+    return;
   }
+  const displays = screen.getAllDisplays();
+  const playerDisplay = displays.find(display => display.id !== screen.getPrimaryDisplay().id);
+  playerWindow = new BrowserWindow({
+    ...(playerDisplay ? { x: playerDisplay.bounds.x, y: playerDisplay.bounds.y } : {}),
+    width: playerDisplay?.bounds.width || 1280,
+    height: playerDisplay?.bounds.height || 720,
+    backgroundColor: '#000000',
+    autoHideMenuBar: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+    },
+    title: 'OpenKTV Player',
+  });
+  playerWindow.loadURL(`http://127.0.0.1:${serverPort}/player`);
+  if (playerDisplay) playerWindow.setFullScreen(true);
+  playerWindow.on('closed', () => {
+    playerWindow = null;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('player:closed');
+    }
+  });
+}
+
+ipcMain.handle('player:open', async () => {
+  openPlayerWindow();
+  return { ok: true };
 });
-ipcMain.handle('player:close', async () => playerService?.close());
 
 app.whenReady().then(async () => {
   try {
     process.env.KTV_LOG_DIR = path.join(app.getPath('userData'), 'logs');
-    const displays = screen.getAllDisplays();
-    const playerDisplay = displays.find(display => display.id !== screen.getPrimaryDisplay().id);
-    if (playerDisplay) {
-      process.env.KTV_MPV_FULLSCREEN = '1';
-      process.env.KTV_MPV_SCREEN = String(displays.indexOf(playerDisplay));
-    }
     pythonProcess = await startPythonService();
-    playerService = await startServer(serverPort);
+    serverService = await startServer(serverPort);
     createWindow();
   } catch (error) {
     console.error('[OpenKTV] Startup failed:', error.message);
@@ -77,14 +103,14 @@ app.whenReady().then(async () => {
 app.on('before-quit', event => {
   if (isQuitting) return;
   isQuitting = true;
-  if (pythonProcess || playerService) {
+  if (pythonProcess || serverService) {
     event.preventDefault();
     Promise.allSettled([
-      playerService?.close(),
+      serverService?.close(),
       pythonProcess ? stopPythonService(pythonProcess) : Promise.resolve(),
     ]).finally(() => {
       pythonProcess = null;
-      playerService = null;
+      serverService = null;
       app.quit();
     });
   }
