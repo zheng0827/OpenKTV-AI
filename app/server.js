@@ -4,6 +4,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import { rateLimit } from 'express-rate-limit';
 import fs from 'fs';
+import os from 'os';
 import { timingSafeEqual } from 'crypto';
 import csv from 'csv-parser';
 import MiniSearch from 'minisearch';
@@ -225,22 +226,24 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         }
       });
       app.get('/api/qr', pageRequestLimiter, async (req, res) => {
-        const requestedUrl = String(req.query.url || '');
         let target;
-        let requestOrigin;
         try {
-          target = new URL(requestedUrl);
-          requestOrigin = new URL(`${req.protocol}://${req.get('host')}`);
+          target = new URL(`${req.protocol}://${req.get('host')}/remote`);
         } catch {
-          return res.status(400).json({ error: '無效的遙控器網址' });
+          return res.status(400).json({ error: '無效的服務網址' });
         }
-        if (!['http:', 'https:'].includes(target.protocol)
-          || target.pathname !== '/remote'
-          || target.origin !== requestOrigin.origin) {
-          return res.status(400).json({ error: '遙控器網址必須指向本機服務' });
+        if (['localhost', '127.0.0.1', '::1'].includes(target.hostname)) {
+          const addresses = Object.values(os.networkInterfaces()).flatMap(items => items || []);
+          const lanAddress = addresses.find(item => (item.family === 'IPv4' || item.family === 4) && !item.internal);
+          if (lanAddress) target.hostname = lanAddress.address;
         }
-        const dataUrl = await QRCode.toDataURL(target.toString(), { margin: 1, width: 440 });
-        return res.json({ dataUrl, url: target.toString() });
+        try {
+          const url = target.toString();
+          const dataUrl = await QRCode.toDataURL(url, { margin: 2, width: 440, errorCorrectionLevel: 'M' });
+          return res.json({ dataUrl, url });
+        } catch {
+          return res.status(503).json({ error: '無法產生遙控器 QR Code' });
+        }
       });
       app.get('/api/resolve_yt_title', pageRequestLimiter, async (req, res) => {
         const pythonPort = Number(process.env.KTV_PORT) || 5000;

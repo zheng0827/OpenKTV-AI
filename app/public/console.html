@@ -89,6 +89,7 @@
     </nav>
   </div>
   <div id="overlay" class="overlay" hidden><div class="modal"><div class="modal-head"><h2 id="modalTitle">QR Code</h2><button id="modalClose" class="small">✕ 關閉</button></div><div id="modalContent"></div></div></div>
+  <style>.overlay[hidden]{display:none}</style>
   <div id="toast" class="toast" role="status"></div>
   <script>
     const socket = io({query:{role:'admin'}}), $ = id => document.getElementById(id);
@@ -104,13 +105,13 @@
     function wakeFullscreen(){if(!$('app').classList.contains('fullscreen-mode'))return;$('app').classList.remove('controls-hidden');clearTimeout(fullscreenIdle);fullscreenIdle=setTimeout(()=>$('app').classList.add('controls-hidden'),3000)}
     function showView(name){document.querySelectorAll('[data-view]').forEach(el=>el.hidden=el.dataset.view!==name);document.querySelectorAll('[data-view-button]').forEach(el=>el.classList.toggle('active',el.dataset.viewButton===name));$('app').classList.toggle('fullscreen-mode',name==='full');if(name==='full'){$('fullPlayerFrame').src='/player.html?embed=1';$('fullPlayerFrame').focus();wakeFullscreen()}else if($('fullPlayerFrame').src) $('fullPlayerFrame').src='about:blank';if(name==='library')loadLibrary(true)}
     document.addEventListener('mousemove',wakeFullscreen);document.addEventListener('touchstart',wakeFullscreen,{passive:true});
-    document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!$('view-full').hidden){event.preventDefault();showView('controller')}});
+    document.addEventListener('keydown',event=>{if(event.key!=='Escape')return;if(!$('overlay').hidden){event.preventDefault();$('overlay').hidden=true;return}if(!$('view-full').hidden){event.preventDefault();showView('controller')}});
     document.querySelectorAll('[data-view-button]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.viewButton)));
     function setPreview(enabled){$('preview').hidden=!enabled;$('workArea').classList.toggle('no-preview',!enabled);$('previewToggle').classList.toggle('active',enabled);$('previewToggle').textContent=`👁️ 預覽：${enabled?'開':'關'}`;localStorage.setItem('ktvPreview',String(enabled));$('settingPreview').checked=enabled}
     $('previewToggle').onclick=()=>setPreview($('preview').hidden);
     $('settingPreview').onchange=event=>setPreview(event.target.checked);
     setPreview(localStorage.getItem('ktvPreview')!=='false');
-    $('qrOpen').onclick=async()=>{ $('modalTitle').textContent='📱 手機掃碼點歌';$('modalContent').innerHTML='<p class="status-note">正在產生遙控器 QR Code…</p>';$('overlay').hidden=false;try{const response=await fetch(`/api/qr?url=${encodeURIComponent(`${location.origin}/remote`)}`);if(!response.ok)throw Error('QR Code 服務無法使用');const data=await response.json();$('modalContent').innerHTML=`<img class="qr" alt="手機遙控器 QR Code" src="${esc(data.dataUrl)}"><p class="status-note" style="text-align:center">請讓手機連上同一個 Wi-Fi／熱點，再掃描或開啟：<br><a href="${esc(data.url)}">${esc(data.url)}</a></p>`}catch(error){$('modalContent').innerHTML=`<div class="message">${esc(error.message)}<br><a href="${esc(`${location.origin}/remote`)}">${esc(`${location.origin}/remote`)}</a></div>`}};
+    $('qrOpen').onclick=async()=>{ $('modalTitle').textContent='📱 手機掃碼點歌';$('modalContent').innerHTML='<p class="status-note">正在產生遙控器 QR Code…</p>';$('overlay').hidden=false;try{const response=await fetch('/api/qr');const data=await response.json();if(!response.ok)throw Error(data.error||'QR Code 服務無法使用');$('modalContent').innerHTML=`<img class="qr" alt="手機遙控器 QR Code" src="${esc(data.dataUrl)}"><p class="status-note" style="text-align:center">請讓手機連上同一個 Wi-Fi／熱點，再掃描或開啟：<br><a href="${esc(data.url)}">${esc(data.url)}</a></p>`}catch(error){$('modalContent').innerHTML=`<div class="message">${esc(error.message)}<br>請確認手機與主機連線至同一個 Wi-Fi／熱點，並嘗試重新開啟 QR Code。</div>`}};
     $('modalClose').onclick=()=>{$('overlay').hidden=true};$('overlay').onclick=e=>{if(e.target===$('overlay'))$('overlay').hidden=true};
     async function desktopAction(name){if(!window.ktvDesktop?.[name]){if(name==='openPlayer')window.open('/player','_blank','noopener');else toast('請在播放器視窗執行此操作');return}try{await window.ktvDesktop[name]()}catch(error){toast(error.message||'操作失敗')}}
     $('playerOpen').onclick=$('settingsPlayerOpen').onclick=()=>desktopAction('openPlayer');

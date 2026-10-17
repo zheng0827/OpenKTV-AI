@@ -17,9 +17,14 @@ function delay(milliseconds) {
 export async function startPythonService() {
   const port = Number(process.env.KTV_PORT) || 5000;
   const healthUrl = `http://127.0.0.1:${port}/health`;
+  const childEnv = { ...process.env };
+  if (process.platform === 'win32') {
+    childEnv.PYTHONUTF8 = '1';
+    childEnv.PYTHONIOENCODING = 'utf-8';
+  }
   const child = spawn(pythonCommand(), ['-m', 'core.service'], {
     cwd: projectRoot,
-    env: process.env,
+    env: childEnv,
     stdio: 'inherit',
     windowsHide: true,
     detached: process.platform !== 'win32',
