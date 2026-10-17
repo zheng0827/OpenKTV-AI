@@ -6,7 +6,9 @@ import { rateLimit } from 'express-rate-limit';
 import fs from 'fs';
 import os from 'os';
 import { timingSafeEqual } from 'crypto';
-import { allowsPageAccess } from './page-access.js';
+import { allowsPageAccess, isLocalAddress } from './page-access.js';
+import { createMicRelay } from './mic-relay.js';
+import { startHttpsProxy } from './https-proxy.js';
 import csv from 'csv-parser';
 import MiniSearch from 'minisearch';
 import QRCode from 'qrcode';
@@ -174,6 +176,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       const app = express();
       const httpServer = createServer(app);
       const io = new Server(httpServer, { cors: { origin: "*", methods: ["GET", "POST"] } });
+      const micRelay = createMicRelay(io);
       let advanceQueue = () => {};
       app.use(express.json({ limit: '32kb' }));
       const mediaRequestLimiter = rateLimit({
@@ -197,7 +200,10 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
 
       const publicDirectory = path.join(__dirname, 'public');
       app.use((req, res, next) => {
-        if (!allowsPageAccess(req.originalUrl, req.socket.remoteAddress)) {
+        const proxyClientAddress = isLocalAddress(req.socket.remoteAddress)
+          ? req.get('x-ktv-proxy-client-ip')
+          : null;
+        if (!allowsPageAccess(req.originalUrl, proxyClientAddress || req.socket.remoteAddress)) {
           return res.redirect('/remote');
         }
         return next();
@@ -215,6 +221,23 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         currentSong: currentSong(),
         queueCount: queue.length,
       }));
+      app.get('/api/webrtc-config', (_req, res) => {
+        const iceServers = String(process.env.KTV_STUN_URLS || 'stun:stun.l.google.com:19302')
+          .split(',')
+          .map(url => url.trim())
+          .filter(Boolean)
+          .map(urls => ({ urls }));
+        const turnUrls = String(process.env.KTV_TURN_URLS || '').split(',').map(url => url.trim()).filter(Boolean);
+        if (turnUrls.length && process.env.KTV_TURN_USERNAME && process.env.KTV_TURN_CREDENTIAL) {
+          iceServers.push({
+            urls: turnUrls,
+            username: process.env.KTV_TURN_USERNAME,
+            credential: process.env.KTV_TURN_CREDENTIAL,
+          });
+        }
+        res.setHeader('Cache-Control', 'no-store');
+        return res.json({ iceServers });
+      });
       app.get('/api/services', pageRequestLimiter, async (_req, res) => {
         const pythonPort = Number(process.env.KTV_PORT) || 5000;
         try {
@@ -233,8 +256,11 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       });
       app.get('/api/qr', pageRequestLimiter, async (req, res) => {
         let target;
+        const isHttpsProxyRequest = isLocalAddress(req.socket.remoteAddress)
+          && Boolean(req.get('x-ktv-proxy-client-ip'));
+        const httpsConfigured = Boolean(process.env.KTV_TLS_CERT_PATH && process.env.KTV_TLS_KEY_PATH);
         try {
-          target = new URL(`${req.protocol}://${req.get('host')}/remote`);
+          target = new URL(`${isHttpsProxyRequest ? 'https' : req.protocol}://${req.get('host')}/remote`);
         } catch {
           return res.status(400).json({ error: '無效的服務網址' });
         }
@@ -242,6 +268,10 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           const addresses = Object.values(os.networkInterfaces()).flatMap(items => items || []);
           const lanAddress = addresses.find(item => (item.family === 'IPv4' || item.family === 4) && !item.internal);
           if (lanAddress) target.hostname = lanAddress.address;
+        }
+        if (httpsConfigured && !isHttpsProxyRequest) {
+          target.protocol = 'https:';
+          target.port = String(Number(process.env.KTV_HTTPS_PORT) || 3443);
         }
         try {
           const url = target.toString();
@@ -411,6 +441,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       app.get('/health', (_req, res) => res.json({ ok: true, songs: songs.length }));
 
       io.on('connection', socket => {
+        micRelay.attach(socket);
         const payload = snapshot();
         socket.emit('sync_state', { queue: payload.queue, history: payload.history, state: payload.state });
         socket.emit('playback_snapshot', payload);
@@ -567,9 +598,25 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       let catalogMtime = fs.existsSync(catalogPath) ? fs.statSync(catalogPath).mtimeMs : 0;
       httpServer.once('error', reject);
       httpServer.listen(port, '0.0.0.0', () => {
-        console.log(`[Database] Loaded ${songs.length} songs.`);
-        console.log(`[Server] KTV service listening on port ${port}.`);
-        resolve({ close: () => new Promise(resolveClose => io.close(resolveClose)) });
+        const httpsPort = Number(process.env.KTV_HTTPS_PORT) || 3443;
+        startHttpsProxy({
+          port: httpsPort,
+          targetPort: port,
+          certPath: process.env.KTV_TLS_CERT_PATH,
+          keyPath: process.env.KTV_TLS_KEY_PATH,
+        }).then(httpsProxy => {
+          console.log(`[Database] Loaded ${songs.length} songs.`);
+          console.log(`[Server] KTV service listening on port ${port}.`);
+          if (httpsProxy) console.log(`[Server] HTTPS remote available on port ${httpsPort}.`);
+          resolve({
+            close: async () => {
+              await httpsProxy?.close();
+              await new Promise(resolveClose => io.close(resolveClose));
+            },
+          });
+        }).catch(error => {
+          io.close(() => reject(error));
+        });
       });
     } catch (error) {
       reject(error);

@@ -1,4 +1,4 @@
-function isLocalAddress(address = '') {
+export function isLocalAddress(address = '') {
   const normalized = address.toLowerCase().replace(/^::ffff:/, '');
   return normalized === '::1' || normalized === '127.0.0.1' || normalized.startsWith('127.');
 }

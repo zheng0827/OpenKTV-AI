@@ -220,12 +220,14 @@
         <aside id="remote-qr" hidden><img alt="掃描加入手機遙控器"><span>掃碼點歌</span></aside>
         <!-- 純伴奏音訊軌 (.instrumental.m4a) -->
         <audio id="instrumental" preload="auto" crossorigin="anonymous"></audio>
+        <audio id="phone-mic" autoplay></audio>
 
         <!-- 頂部控制與狀態 HUD -->
         <div id="top-bar">
             <div class="hud-panel">
                 <span id="conn-status" style="color: #10b981; font-weight: bold;">● 就緒</span>
                 <span id="mode-badge" style="color: #38bdf8; font-weight: bold;">原唱模式</span>
+                <span id="phone-mic-status" style="color: #9ca3af; font-size: 12px;">手機麥克風待命</span>
                 <span id="current-title"
                     style="color: #f3f4f6; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500;">等待點歌...</span>
                 <span id="next-title"
@@ -264,7 +266,7 @@
         // ==========================================
         // 1. 全域狀態與變數
         // ==========================================
-        const socket = io();
+        const socket = io({ query: { role: 'player' } });
         const remoteQr = document.getElementById('remote-qr');
         if (localStorage.getItem('ktvShowQr') !== 'false') {
             fetch(`/api/qr?url=${encodeURIComponent(`${location.origin}/remote`)}`)
@@ -286,6 +288,9 @@
         });
         const video = document.getElementById('video');
         const instrumental = document.getElementById('instrumental');
+        const phoneMic = document.getElementById('phone-mic');
+        phoneMic.volume = 0.8;
+        const phoneMicStatus = document.getElementById('phone-mic-status');
         const waiting = document.getElementById('waiting');
         const connStatus = document.getElementById('conn-status');
         const modeBadge = document.getElementById('mode-badge');
@@ -302,6 +307,84 @@
 
         // 預設歌曲音量由 Server 同步控制
         let currentMusicVol = 0.8;
+        let micPeer = null;
+        let pendingMicCandidates = [];
+        let micPeerGeneration = 0;
+
+        function closePhoneMic(status = '手機麥克風待命') {
+            micPeerGeneration += 1;
+            if (micPeer) micPeer.close();
+            micPeer = null;
+            pendingMicCandidates = [];
+            phoneMic.srcObject = null;
+            phoneMicStatus.textContent = status;
+            phoneMicStatus.style.color = status.includes('已連線') ? '#34d399' : '#9ca3af';
+        }
+
+        socket.on('mic_request', async () => {
+            closePhoneMic('手機麥克風連線中…');
+            const generation = micPeerGeneration;
+            try {
+                const response = await fetch('/api/webrtc-config', { cache: 'no-store' });
+                if (!response.ok) throw new Error('無法取得 WebRTC 網路設定');
+                micPeer = new RTCPeerConnection(await response.json());
+                const peer = micPeer;
+                peer.onicecandidate = event => {
+                    if (event.candidate && generation === micPeerGeneration) {
+                        socket.emit('mic_signal', { type: 'candidate', data: event.candidate.toJSON() });
+                    }
+                };
+                peer.ontrack = event => {
+                    if (generation !== micPeerGeneration) return;
+                    phoneMic.srcObject = event.streams[0] || new MediaStream([event.track]);
+                    phoneMic.play().catch(() => {
+                        phoneMicStatus.textContent = '手機麥克風已連線；請點擊播放器啟用音訊';
+                    });
+                };
+                peer.onconnectionstatechange = () => {
+                    if (generation !== micPeerGeneration) return;
+                    if (peer.connectionState === 'connected') {
+                        phoneMicStatus.textContent = '手機麥克風已連線';
+                        phoneMicStatus.style.color = '#34d399';
+                    } else if (['failed', 'closed'].includes(peer.connectionState)) {
+                        closePhoneMic('手機麥克風連線中斷');
+                        socket.emit('mic_stop');
+                    }
+                };
+                socket.emit('mic_ready');
+            } catch (error) {
+                closePhoneMic(`手機麥克風錯誤：${error.message}`);
+                socket.emit('mic_stop');
+            }
+        });
+
+        socket.on('mic_signal', async payload => {
+            if (!micPeer || !payload) return;
+            try {
+                if (payload.type === 'offer') {
+                    await micPeer.setRemoteDescription(payload.data);
+                    for (const candidate of pendingMicCandidates) await micPeer.addIceCandidate(candidate);
+                    pendingMicCandidates = [];
+                    const answer = await micPeer.createAnswer();
+                    await micPeer.setLocalDescription(answer);
+                    socket.emit('mic_signal', { type: 'answer', data: micPeer.localDescription.toJSON() });
+                } else if (payload.type === 'candidate') {
+                    const candidate = new RTCIceCandidate(payload.data);
+                    if (micPeer.remoteDescription) await micPeer.addIceCandidate(candidate);
+                    else pendingMicCandidates.push(candidate);
+                }
+            } catch (error) {
+                closePhoneMic(`手機麥克風訊號錯誤：${error.message}`);
+                socket.emit('mic_stop');
+            }
+        });
+
+        socket.on('mic_volume', value => {
+            const volume = Number(value);
+            if (Number.isFinite(volume)) phoneMic.volume = Math.max(0, Math.min(1, volume));
+        });
+        socket.on('mic_stop', () => closePhoneMic());
+        socket.on('disconnect', () => closePhoneMic('播放器連線中斷'));
 
         function applyMusicVolume(val) {
             currentMusicVol = Math.max(0, Math.min(1.0, parseFloat(val)));

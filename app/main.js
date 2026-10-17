@@ -8,6 +8,7 @@ import { startPythonService, stopPythonService } from './python-service.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const serverPort = Number(process.env.KTV_NODE_PORT) || 3000;
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 if (process.platform === 'win32' && process.stdout.isTTY) {
   spawnSync('cmd.exe', ['/d', '/s', '/c', 'chcp 65001 > nul'], {
     stdio: 'ignore',
