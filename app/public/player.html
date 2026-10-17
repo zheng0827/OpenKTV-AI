@@ -336,6 +336,9 @@
                 };
                 peer.ontrack = event => {
                     if (generation !== micPeerGeneration) return;
+                    if ('playoutDelayHint' in event.receiver) {
+                        event.receiver.playoutDelayHint = 0.02;
+                    }
                     phoneMic.srcObject = event.streams[0] || new MediaStream([event.track]);
                     phoneMic.play().catch(() => {
                         phoneMicStatus.textContent = '手機麥克風已連線；請點擊播放器啟用音訊';
