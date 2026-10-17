@@ -69,7 +69,7 @@ npm --prefix app install
 npm --prefix app start
 ```
 
-`npm --prefix app start` 啟動 Electron 主 App，由 Node 背景啟動並監控既有 Python/Flask 處理 API，再啟動 Node 播放服務；關閉 App 時會停止 Python 與 MPV 子程序。預設使用 `python3`（Windows 使用 `python`），可用 `KTV_PYTHON_EXECUTABLE` 指定 Python 執行檔。Python 環境仍須先安裝 `requirements.txt`；模型權重會依目前既有處理流程檢查或下載。MPV 需另外安裝並加入系統 PATH；若自動偵測不到，可用 `KTV_MPV_EXECUTABLE` 指定執行檔。Python 輸出改存至 Electron 使用者資料目錄的 `logs/python-service.log`，避免 Windows 終端機字碼頁造成處理日誌亂碼。
+`npm --prefix app start` 啟動 Electron 主 App，由 Node 背景啟動並監控既有 Python/Flask 處理 API，再啟動 Node 播放服務；關閉 App 時會停止 Python 與 MPV 子程序。預設使用 `python3`（Windows 使用 `python`），可用 `KTV_PYTHON_EXECUTABLE` 指定 Python 執行檔。Python 環境仍須先安裝 `requirements.txt`；模型權重會依目前既有處理流程檢查或下載。MPV 需另外安裝；應用程式會偵測 PATH、常見 Windows 安裝目錄及隨附的 `mpv` 子目錄。若無法偵測，請在 `.env` 設定 `KTV_MPV_EXECUTABLE` 為 `mpv.exe` 的完整路徑並重新啟動 App。播放器缺失時，中控會顯示安裝提示而不再拋出未處理的 Electron IPC 錯誤。Python 輸出改存至 Electron 使用者資料目錄的 `logs/python-service.log`，避免 Windows 終端機字碼頁造成處理日誌亂碼。
 
 Node 首頁 `/` 提供歌曲搜尋與包廂狀態；`/operator`（相容路徑 `/console`、`/ktv`）是全寬中控端，移除即時播放器預覽並以底部導覽開啟本機 MPV；有第二螢幕時在外接螢幕全螢幕播放，單螢幕時使用較小視窗，讓中控導覽仍可使用。播放、暫停、切歌、seek、原伴唱及歌曲音量會同步到本機 MPV；麥克風音量與混響在 MPV 模式停用。`/remote` 是免安裝手機遙控器，包含找歌、待播佇列、暱稱與現場文字／掌聲／歡呼互動。
 

@@ -1,11 +1,61 @@
 import { spawn } from 'child_process';
 import { createConnection } from 'net';
+import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-function mpvExecutable() {
-  if (process.env.KTV_MPV_EXECUTABLE) return process.env.KTV_MPV_EXECUTABLE;
-  return process.platform === 'win32' ? 'mpv.exe' : 'mpv';
+export function resolveMpvExecutable({
+  platform = process.platform,
+  env = process.env,
+  resourcesPath = process.resourcesPath,
+} = {}) {
+  const windows = platform === 'win32';
+  const binaryName = windows ? 'mpv.exe' : 'mpv';
+  const pathApi = windows ? path.win32 : path;
+  const candidates = [];
+  const configured = env.KTV_MPV_EXECUTABLE?.trim();
+  if (configured) {
+    candidates.push(pathApi.isAbsolute(configured)
+      ? configured
+      : pathApi.dirname(configured) !== '.'
+        ? pathApi.resolve(configured)
+        : configured);
+  } else {
+    if (resourcesPath) {
+      candidates.push(pathApi.join(resourcesPath, 'mpv', binaryName));
+      candidates.push(pathApi.join(resourcesPath, 'app.asar.unpacked', 'bin', binaryName));
+    }
+    if (windows) {
+      for (const root of [env.ProgramFiles, env['ProgramFiles(x86)'], env.LOCALAPPDATA, env.Scoop]) {
+        if (!root) continue;
+        candidates.push(pathApi.join(root, 'mpv', binaryName));
+        candidates.push(pathApi.join(root, 'Programs', 'mpv', binaryName));
+        candidates.push(pathApi.join(root, 'Scoop', 'apps', 'mpv', 'current', binaryName));
+      }
+      if (env.ChocolateyInstall) {
+        candidates.push(pathApi.join(env.ChocolateyInstall, 'bin', binaryName));
+      }
+      candidates.push('C:\\mpv\\mpv.exe');
+    }
+    candidates.push(binaryName);
+  }
+
+  const searchPaths = (env.PATH || env.Path || '').split(pathApi.delimiter);
+  for (const candidate of candidates) {
+    if (pathApi.isAbsolute(candidate) || candidate.includes(pathApi.sep)) {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return pathApi.resolve(candidate);
+      continue;
+    }
+    for (const directory of searchPaths) {
+      if (!directory) continue;
+      const fullPath = pathApi.join(directory, candidate);
+      if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) return fullPath;
+    }
+  }
+  if (configured) {
+    throw new Error(`MPV was not found at "${configured}". Install MPV or set KTV_MPV_EXECUTABLE to the full path of mpv.exe.`);
+  }
+  throw new Error(`MPV is not installed or not on PATH. Install MPV, restart OpenKTV, or set KTV_MPV_EXECUTABLE to the full path of ${binaryName}.`);
 }
 
 export class MpvPlayer {
@@ -52,7 +102,8 @@ export class MpvPlayer {
     const displayArgs = process.env.KTV_MPV_FULLSCREEN === '1'
       ? ['--fullscreen', `--screen=${Number(process.env.KTV_MPV_SCREEN) || 0}`]
       : ['--autofit=70%x70%', '--geometry=+20+20'];
-    this.child = spawn(mpvExecutable(), [
+    const executable = resolveMpvExecutable();
+    this.child = spawn(executable, [
       '--idle=yes',
       '--force-window=yes',
       '--keep-open=always',
@@ -62,7 +113,9 @@ export class MpvPlayer {
     ], { stdio: 'ignore', windowsHide: false });
     this.child.once('error', error => {
       this.status = 'unavailable';
-      this.error = error.message;
+      this.error = error.code === 'ENOENT'
+        ? 'MPV executable was not found. Install MPV or set KTV_MPV_EXECUTABLE to its full path.'
+        : `Could not start MPV: ${error.message}`;
     });
     this.child.once('exit', code => {
       this.status = 'stopped';

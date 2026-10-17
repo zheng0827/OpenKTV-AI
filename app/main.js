@@ -40,7 +40,14 @@ function createWindow() {
   });
 }
 
-ipcMain.handle('player:open', async () => playerService?.openCurrent());
+ipcMain.handle('player:open', async () => {
+  try {
+    await playerService?.openCurrent();
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+});
 ipcMain.handle('player:close', async () => playerService?.close());
 
 app.whenReady().then(async () => {
