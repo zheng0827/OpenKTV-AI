@@ -41,7 +41,7 @@ export async function startPythonService() {
   let exitCode = null;
   child.once('exit', code => { exitCode = code ?? 1; });
   child.once('error', error => { exitCode = 1; console.error('[Python] Failed to start processing service:', error.message); });
-  child.once('exit', () => logStream.end());
+  child.once('close', () => logStream.end());
 
   const deadline = Date.now() + startupTimeoutMs;
   while (Date.now() < deadline) {

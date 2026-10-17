@@ -501,6 +501,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         socket.on('replay_current', () => {
           playerState.position = 0;
           playerState.startedAt = playerState.isPlaying ? Date.now() : null;
+          mpvPlayer.seek(0).catch(error => io.emit('playback_error', { message: error.message }));
           emitState();
         });
         socket.on('seek', value => {
@@ -562,7 +563,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
             catalogMtime = stat.mtimeMs;
           }
         } catch (error) {
-          console.error('[Database] 重新載入正式曲庫失敗：', error.message);
+          console.error('[Database] Catalog reload failed:', error.message);
         }
         if (currentSong()) emitState();
       }, 1000).unref();

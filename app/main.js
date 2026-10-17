@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, screen } from 'electron';
 import { spawnSync } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -46,6 +46,12 @@ ipcMain.handle('player:close', async () => playerService?.close());
 app.whenReady().then(async () => {
   try {
     process.env.KTV_LOG_DIR = path.join(app.getPath('userData'), 'logs');
+    const displays = screen.getAllDisplays();
+    const playerDisplay = displays.find(display => display.id !== screen.getPrimaryDisplay().id);
+    if (playerDisplay) {
+      process.env.KTV_MPV_FULLSCREEN = '1';
+      process.env.KTV_MPV_SCREEN = String(displays.indexOf(playerDisplay));
+    }
     pythonProcess = await startPythonService();
     playerService = await startServer(serverPort);
     createWindow();

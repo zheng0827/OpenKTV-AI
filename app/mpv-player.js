@@ -17,10 +17,13 @@ export class MpvPlayer {
     this.requestId = 0;
     this.queueId = null;
     this.audioMode = null;
+    this.externalAudioTrackId = null;
     this.isPlaying = null;
     this.musicVolume = null;
+    this.lastPositionSync = 0;
     this.status = 'stopped';
     this.error = '';
+    this.disabled = false;
     this.startPromise = null;
     this.syncQueue = Promise.resolve();
     this.ipcPath = process.platform === 'win32'
@@ -46,12 +49,15 @@ export class MpvPlayer {
     }
     this.status = 'starting';
     this.error = '';
+    const displayArgs = process.env.KTV_MPV_FULLSCREEN === '1'
+      ? ['--fullscreen', `--screen=${Number(process.env.KTV_MPV_SCREEN) || 0}`]
+      : ['--autofit=70%x70%', '--geometry=+20+20'];
     this.child = spawn(mpvExecutable(), [
       '--idle=yes',
       '--force-window=yes',
-      '--fullscreen',
       '--keep-open=always',
       '--volume-max=150',
+      ...displayArgs,
       `--input-ipc-server=${this.ipcPath}`,
     ], { stdio: 'ignore', windowsHide: false });
     this.child.once('error', error => {
@@ -108,6 +114,12 @@ export class MpvPlayer {
               this.socket = null;
               this.status = 'stopped';
             });
+            socket.on('error', error => {
+              this.status = 'unavailable';
+              this.error = error.message;
+              for (const resolve of this.pending.values()) resolve({ error: error.message });
+              this.pending.clear();
+            });
             resolve();
           });
         });
@@ -151,10 +163,14 @@ export class MpvPlayer {
     await this.command(['loadfile', videoPath, 'replace']);
     this.queueId = song.queueId;
     this.audioMode = null;
+    this.externalAudioTrackId = null;
     this.isPlaying = null;
     this.musicVolume = null;
     await this.applyState(song, state, resolveMedia);
-    if (Number(state.position) > 0) await this.seek(state.position);
+    const target = Number(state.position || 0) + (state.isPlaying
+      ? Math.max(0, (Date.now() - Number(state.serverTime || Date.now())) / 1000)
+      : 0);
+    if (target > 0) await this.seek(target);
   }
 
   async applyState(song, state, resolveMedia) {
@@ -164,15 +180,20 @@ export class MpvPlayer {
         const audioPath = resolveMedia(song?.instrumental_filename);
         if (!audioPath) throw new Error('The instrumental audio file is missing or invalid.');
         const tracks = await this.command(['get_property', 'track-list']);
-        let track = tracks.data?.find(item => item.type === 'audio' && item.external && item['external-filename'] === audioPath);
+        let track = tracks.data?.find(item => item.type === 'audio' && item.external
+          && (item['external-filename'] === audioPath || item.id === this.externalAudioTrackId));
         if (!track) {
           await this.command(['audio-add', audioPath, 'select']);
           const updatedTracks = await this.command(['get_property', 'track-list']);
-          track = updatedTracks.data?.find(item => item.type === 'audio' && item.external && item['external-filename'] === audioPath);
+          track = updatedTracks.data?.find(item => item.type === 'audio' && item.external
+            && (item['external-filename'] === audioPath || item.selected));
         }
-        if (track) await this.command(['set_property', 'aid', track.id]);
+        if (!track) throw new Error('MPV could not load the instrumental audio track.');
+        this.externalAudioTrackId = track.id;
+        await this.command(['set_property', 'aid', track.id]);
       } else {
         await this.command(['set_property', 'aid', 'auto']);
+        this.externalAudioTrackId = null;
       }
       this.audioMode = state.audioMode;
     }
@@ -185,10 +206,20 @@ export class MpvPlayer {
       await this.command(['set_property', 'volume', volume]);
       this.musicVolume = volume;
     }
+    if (state.isPlaying && Date.now() - this.lastPositionSync >= 4000) {
+      this.lastPositionSync = Date.now();
+      const current = await this.command(['get_property', 'time-pos']);
+      const target = Number(state.position || 0)
+        + Math.max(0, (Date.now() - Number(state.serverTime || Date.now())) / 1000);
+      if (Number.isFinite(current.data) && Math.abs(current.data - target) > 0.75) {
+        await this.seek(target);
+      }
+    }
   }
 
   async sync(song, state, resolveMedia) {
     const operation = async () => {
+      if (this.disabled) return;
       if (!song) {
         if (this.queueId && this.socket && !this.socket.destroyed) await this.command(['stop']);
         this.queueId = null;
@@ -209,11 +240,13 @@ export class MpvPlayer {
   }
 
   async open(song, state, resolveMedia) {
+    this.disabled = false;
     await this.ensureStarted();
     if (song && song.queueId !== this.queueId) await this.sync(song, state, resolveMedia);
   }
 
   async close() {
+    this.disabled = true;
     if (!this.socket || this.socket.destroyed) return;
     try {
       await this.command(['quit']);
@@ -223,8 +256,10 @@ export class MpvPlayer {
       this.child = null;
       this.queueId = null;
       this.audioMode = null;
+      this.externalAudioTrackId = null;
       this.isPlaying = null;
       this.musicVolume = null;
+      this.lastPositionSync = 0;
       this.status = 'stopped';
       this.syncQueue = Promise.resolve();
     }
