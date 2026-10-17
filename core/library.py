@@ -127,6 +127,44 @@ def upsert_catalog_entry(index_path: Path, entry: dict) -> None:
     _write_catalog(index_path, rows)
 
 
+def update_catalog_entry(index_path: Path, song_id: str, updates: dict) -> dict | None:
+    editable_fields = {
+        "artist", "title", "album", "release_year", "artist_gender", "genre", "language", "lyrics",
+    }
+    rows = _read_catalog(index_path)
+    row_index = next((index for index, row in enumerate(rows) if row.get("id") == song_id), None)
+    if row_index is None:
+        return None
+    updated = {
+        **rows[row_index],
+        **{
+            field: str(value).strip()
+            for field, value in updates.items()
+            if field in editable_fields and value is not None
+        },
+    }
+    if any(
+        index != row_index
+        and row.get("artist", "").strip().casefold() == updated.get("artist", "").strip().casefold()
+        and row.get("title", "").strip().casefold() == updated.get("title", "").strip().casefold()
+        for index, row in enumerate(rows)
+    ):
+        raise ValueError("相同歌手與歌名已存在於曲庫")
+    rows[row_index] = updated
+    _write_catalog(index_path, rows)
+    return updated
+
+
+def delete_catalog_entry(index_path: Path, song_id: str) -> dict | None:
+    rows = _read_catalog(index_path)
+    row_index = next((index for index, row in enumerate(rows) if row.get("id") == song_id), None)
+    if row_index is None:
+        return None
+    deleted = rows.pop(row_index)
+    _write_catalog(index_path, rows)
+    return deleted
+
+
 def parse_first_lyric_time(lrc_path: Path) -> float | None:
     if not lrc_path.is_file():
         return None

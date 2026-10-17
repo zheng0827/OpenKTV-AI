@@ -172,6 +172,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       const app = express();
       const httpServer = createServer(app);
       const io = new Server(httpServer, { cors: { origin: "*", methods: ["GET", "POST"] } });
+      app.use(express.json({ limit: '32kb' }));
       const mediaRequestLimiter = rateLimit({
         windowMs: 60 * 1000,
         limit: 600,
@@ -226,15 +227,16 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       app.get('/api/qr', pageRequestLimiter, async (req, res) => {
         const requestedUrl = String(req.query.url || '');
         let target;
+        let requestOrigin;
         try {
           target = new URL(requestedUrl);
+          requestOrigin = new URL(`${req.protocol}://${req.get('host')}`);
         } catch {
           return res.status(400).json({ error: '無效的遙控器網址' });
         }
-        const allowedHost = req.get('host')?.split(':')[0];
         if (!['http:', 'https:'].includes(target.protocol)
           || target.pathname !== '/remote'
-          || target.hostname !== allowedHost) {
+          || target.origin !== requestOrigin.origin) {
           return res.status(400).json({ error: '遙控器網址必須指向本機服務' });
         }
         const dataUrl = await QRCode.toDataURL(target.toString(), { margin: 1, width: 440 });
@@ -248,6 +250,34 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           const response = await fetch(target, { signal: AbortSignal.timeout(30000) });
           const payload = await response.json();
           return res.status(response.status).json(payload);
+        } catch {
+          return res.status(503).json({ ok: false, error: 'Python 處理服務目前無法使用' });
+        }
+      });
+      app.patch('/api/catalog/:songId', pageRequestLimiter, async (req, res) => {
+        try {
+          const response = await fetch(`http://127.0.0.1:${Number(process.env.KTV_PORT) || 5000}/api/catalog/${encodeURIComponent(req.params.songId)}`, {
+            method: 'PATCH',
+            headers: {
+              authorization: req.get('authorization') || '',
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify(req.body || {}),
+            signal: AbortSignal.timeout(5000),
+          });
+          return res.status(response.status).json(await response.json());
+        } catch {
+          return res.status(503).json({ ok: false, error: 'Python 處理服務目前無法使用' });
+        }
+      });
+      app.delete('/api/catalog/:songId', pageRequestLimiter, async (req, res) => {
+        try {
+          const response = await fetch(`http://127.0.0.1:${Number(process.env.KTV_PORT) || 5000}/api/catalog/${encodeURIComponent(req.params.songId)}`, {
+            method: 'DELETE',
+            headers: { authorization: req.get('authorization') || '' },
+            signal: AbortSignal.timeout(5000),
+          });
+          return res.status(response.status).json(await response.json());
         } catch {
           return res.status(503).json({ ok: false, error: 'Python 處理服務目前無法使用' });
         }
@@ -441,8 +471,6 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           emitState();
         });
         socket.on('clear_queue', () => {
-          history.unshift(...queue.slice(1));
-          history.splice(100);
           queue.splice(1);
           emitState();
         });

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hmac
 import os
 import socket
 import subprocess
@@ -14,7 +15,7 @@ from flask import Blueprint, Flask, current_app, jsonify, redirect, render_templ
 from flask_socketio import SocketIO, emit
 
 from .config import AppSettings, load_settings
-from .library import find_intro_skip_seconds, update_library_index
+from .library import delete_catalog_entry, find_intro_skip_seconds, update_catalog_entry, update_library_index
 from .metadata import ai_parse_youtube_title, parse_youtube_title
 
 CONTROL_ROLES = {"remote", "queue", "admin", "combo"}
@@ -155,6 +156,55 @@ def _create_blueprint() -> Blueprint:
             ok=True,
             service="python",
         )
+
+    def can_edit_catalog() -> bool:
+        expected = os.getenv("KTV_LIBRARY_ADMIN_TOKEN", "")
+        supplied = request.headers.get("Authorization", "")
+        scheme, separator, token = supplied.partition(" ")
+        return bool(
+            expected
+            and separator
+            and scheme.lower() == "bearer"
+            and len(token) == len(expected)
+            and hmac.compare_digest(token, expected)
+        )
+
+    @bp.route("/api/catalog/<song_id>", methods=["PATCH"])
+    def edit_catalog_song(song_id: str):
+        if not can_edit_catalog():
+            return jsonify(ok=False, error="曲庫管理權杖無效或尚未設定"), 401
+        if len(song_id) > 128 or not request.is_json:
+            return jsonify(ok=False, error="歌曲識別碼或更新內容無效"), 400
+        updates = request.get_json(silent=True)
+        editable_fields = {
+            "artist", "title", "album", "release_year", "artist_gender", "genre", "language", "lyrics",
+        }
+        if not isinstance(updates, dict) or not updates or set(updates) - editable_fields:
+            return jsonify(ok=False, error="更新欄位不受支援"), 400
+        if not str(updates.get("artist", "")).strip() and "artist" in updates:
+            return jsonify(ok=False, error="歌手名稱不可為空"), 400
+        if not str(updates.get("title", "")).strip() and "title" in updates:
+            return jsonify(ok=False, error="歌曲名稱不可為空"), 400
+        settings: AppSettings = current_app.config["APP_SETTINGS"]
+        try:
+            row = update_catalog_entry(settings.library_index_path, song_id, updates)
+        except ValueError as error:
+            return jsonify(ok=False, error=str(error)), 409
+        if row is None:
+            return jsonify(ok=False, error="找不到歌曲"), 404
+        return jsonify(ok=True, song=row)
+
+    @bp.route("/api/catalog/<song_id>", methods=["DELETE"])
+    def remove_catalog_song(song_id: str):
+        if not can_edit_catalog():
+            return jsonify(ok=False, error="曲庫管理權杖無效或尚未設定"), 401
+        if len(song_id) > 128:
+            return jsonify(ok=False, error="歌曲識別碼無效"), 400
+        settings: AppSettings = current_app.config["APP_SETTINGS"]
+        row = delete_catalog_entry(settings.library_index_path, song_id)
+        if row is None:
+            return jsonify(ok=False, error="找不到歌曲"), 404
+        return jsonify(ok=True, song=row, media_files_deleted=False)
 
     @bp.route("/api/playlist_preview")
     def playlist_preview():

@@ -71,7 +71,11 @@ npm --prefix app start
 
 `npm --prefix app start` 啟動 Electron 主 App，由 Node 背景啟動並監控既有 Python/Flask 處理服務，再啟動 Node 播放服務；關閉 App 時會停止 Python 子程序。預設使用 `python3`（Windows 使用 `python`），可用 `KTV_PYTHON_EXECUTABLE` 指定 Python 執行檔。Python 環境仍須先安裝 `requirements.txt`；模型權重會依目前既有處理流程檢查或下載。
 
-Node 首頁 `/` 提供歌曲搜尋與包廂狀態；`/console` 是整合大螢幕播放器、點歌、佇列、歌詞搜尋、混音及歌曲管理的一頁式主控台。主控台顯示 Python 處理服務健康狀態，歌曲搜尋支援分頁與排序 API。`/player` 保留獨立大螢幕播放器，`/remote` 保留手機遙控器。主控台的「新增歌曲」區塊仍使用既有 Flask 管理頁。Node 直接讀取 `KTV_LIBRARY_INDEX_PATH` 指定的正式 CSV（預設 `ktv_songs/library_index.csv`），並由 `KTV_SONGS_DIR` 讀取媒體檔；不會建立第二份曲庫。
+Node 首頁 `/` 提供歌曲搜尋與包廂狀態；`/operator`（相容路徑 `/console`、`/ktv`）是依 `New.md` 的頂部狀態列、可隱藏播放器預覽和底部六頁導覽所設計的中控端。Electron 有第二螢幕時會建立獨立全螢幕 `/player` 視窗，中控端以 Canvas 擷取播放器預覽；也可以在單螢幕切到全屏顯示。`/remote` 是免安裝手機遙控器，包含找歌、待播佇列、暱稱與現場文字／掌聲／歡呼互動。
+
+中控端包含控制台、佇列及本次執行期間的播放歷史、多模式曲庫搜尋、分類設定、曲庫列表和人工歌詞編輯工作台。人工編輯器匯出獨立 KTV-LRC 草稿，不會覆寫正式曲庫或呼叫自動對齊流程。尚無播放端支援的升降 Key、罐頭音效及跨裝置麥克風等項目會明確標示未啟用；系統頁中的裝置／網路資訊不會假稱已套用未支援的設定。新增歌曲仍嵌入既有 Flask 管理頁。
+
+Node 直接讀取 `KTV_LIBRARY_INDEX_PATH` 指定的正式 CSV（預設 `ktv_songs/library_index.csv`），並由 `KTV_SONGS_DIR` 讀取媒體檔；搜尋索引與頁面分頁不會改變 CSV schema 或建立第二份正式曲庫。曲庫管理頁的匯出是目前載入歌曲的 JSON 資料，不是正式 CSV 寫入操作。
 
 若要分別啟動服務供開發使用，可執行 `python -m core.service` 與 `npm --prefix app run server`。既有桌面啟動器 `python main.py` 仍可用。
 
