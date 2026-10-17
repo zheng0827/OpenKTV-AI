@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, urlparse
 
-from flask import Blueprint, Flask, current_app, redirect, render_template, request, send_from_directory
+from flask import Blueprint, Flask, current_app, jsonify, redirect, render_template, request, send_from_directory
 from flask_socketio import SocketIO, emit
 
 from .config import AppSettings, load_settings
@@ -148,6 +148,16 @@ def _create_blueprint() -> Blueprint:
             if file_name.lower().endswith(".mp4")
         ]
         return json.dumps(sorted(songs))
+
+    @bp.route("/health")
+    def health():
+        settings: AppSettings = current_app.config["APP_SETTINGS"]
+        return jsonify(
+            ok=True,
+            service="python",
+            catalog=str(settings.library_index_path),
+            songs_dir=str(settings.songs_dir),
+        )
 
     @bp.route("/api/playlist_preview")
     def playlist_preview():
