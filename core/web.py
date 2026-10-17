@@ -16,7 +16,6 @@ from flask_socketio import SocketIO, emit
 from .config import AppSettings, load_settings
 from .library import find_intro_skip_seconds, update_library_index
 from .metadata import ai_parse_youtube_title, parse_youtube_title
-from .unified_nightingale import KTVProcessor
 
 CONTROL_ROLES = {"remote", "queue", "admin", "combo"}
 
@@ -529,6 +528,8 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
 
         def run_process():
             try:
+                from .unified_nightingale import KTVProcessor  # pylint: disable=import-outside-toplevel
+
                 socketio.emit("task_status", {"status": "busy"})
                 processor = KTVProcessor(settings=settings, log_cb=broadcast_log)
                 total = len(tasks)
