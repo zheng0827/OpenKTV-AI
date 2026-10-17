@@ -5,9 +5,18 @@ from pathlib import Path
 
 from core.library import plain_lyrics_from_lrc, stable_song_id, upsert_catalog_entry
 from core.metadata import extract_youtube_metadata, parse_youtube_title
+from core.config import load_settings
+from core.web import create_app
 
 
 class CatalogTests(unittest.TestCase):
+    def test_processing_service_health_endpoint(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app, _socketio, _settings = create_app(load_settings(Path(directory)))
+            response = app.test_client().get("/health")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_json(), {"ok": True, "service": "python"})
+
     def test_song_id_is_stable_and_normalized(self):
         self.assertEqual(stable_song_id("Artist", "Song"), stable_song_id(" artist ", "song"))
         self.assertNotEqual(stable_song_id("Artist A", "Song"), stable_song_id("Artist B", "Song"))

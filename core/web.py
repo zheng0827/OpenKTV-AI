@@ -155,8 +155,6 @@ def _create_blueprint() -> Blueprint:
         return jsonify(
             ok=True,
             service="python",
-            catalog=str(settings.library_index_path),
-            songs_dir=str(settings.songs_dir),
         )
 
     @bp.route("/api/playlist_preview")

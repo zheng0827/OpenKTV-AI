@@ -22,6 +22,7 @@ export async function startPythonService() {
     env: process.env,
     stdio: 'inherit',
     windowsHide: true,
+    detached: process.platform !== 'win32',
   });
   let exitCode = null;
   child.once('exit', code => { exitCode = code ?? 1; });
@@ -44,21 +45,40 @@ export async function startPythonService() {
     await delay(500);
   }
 
-  child.kill();
+  await stopPythonService(child);
   throw new Error(`等待 Python 處理服務逾時（${startupTimeoutMs} ms）。請檢查 Python 相依套件與連接埠 ${port}。`);
 }
 
 export async function stopPythonService(child) {
   if (!child || child.exitCode !== null || child.killed) return;
+  if (process.platform === 'win32' && child.pid) {
+    await new Promise(resolve => {
+      const killer = spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], {
+        stdio: 'ignore',
+        windowsHide: true,
+      });
+      killer.once('error', () => resolve());
+      killer.once('close', () => resolve());
+    });
+    return;
+  }
   await new Promise(resolve => {
     const timeout = setTimeout(() => {
-      child.kill('SIGKILL');
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        child.kill('SIGKILL');
+      }
       resolve();
     }, 5000);
     child.once('exit', () => {
       clearTimeout(timeout);
       resolve();
     });
-    child.kill();
+    try {
+      process.kill(-child.pid, 'SIGTERM');
+    } catch {
+      child.kill('SIGTERM');
+    }
   });
 }

@@ -678,7 +678,7 @@
           <button data-pane="mix">◉ 調音</button>
           <button data-pane="admin">＋ 新增</button>
         </nav>
-        <div class="top-right"><span id="connection" class="status offline">連線中</span><button id="fullscreen"
+        <div class="top-right"><span id="backendConnection" class="status offline">處理服務檢查中</span><span id="connection" class="status offline">連線中</span><button id="fullscreen"
             class="icon-button" title="全螢幕" aria-label="全螢幕">⛶</button></div>
       </header>
       <main class="content">
@@ -730,6 +730,7 @@
                 <div id="searchResults" class="list">
                   <div class="empty">正在載入歌曲…</div>
                 </div>
+                <button id="loadMoreSongs" class="small-button" type="button" hidden>載入更多歌曲</button>
               </section>
               <section id="pane-queue" class="pane" role="tabpanel">
                 <div class="pane-title">
@@ -766,7 +767,7 @@
               </section>
               <section id="pane-admin" class="pane" role="tabpanel">
                 <div class="pane-title">
-                  <h2>新增歌曲</h2><span>Flask 處理服務</span>
+                  <h2>新增歌曲</h2><span>Python 處理服務</span>
                 </div>
                 <p class="lyrics-note">處理工作由 Python 服務執行，完成後播放器會從正式曲庫載入新歌曲。</p>
                 <iframe class="admin-frame" src="/admin" title="歌曲處理管理介面" loading="lazy"></iframe>
@@ -780,13 +781,37 @@
   <script>
     const socket = io({ query: { role: 'remote' } }), $ = id => document.getElementById(id);
     let searchSongs = [], queue = [], state = {}, searchTimer, lyricsTimer, position = 0, duration = 0, dragging = false;
+    let searchOffset = 0, searchTotal = 0, searchLoading = false, searchRequestId = 0;
+    const searchPageSize = 50;
     const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
     const formatTime = value => { const seconds = Math.max(0, Math.floor(Number(value) || 0)); return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` };
     function selectPane(name) { document.querySelectorAll('[data-pane]').forEach(button => button.classList.toggle('active', button.dataset.pane === name)); document.querySelectorAll('[data-tab]').forEach(button => button.classList.toggle('active', button.dataset.tab === name)); document.querySelectorAll('.pane').forEach(pane => pane.classList.toggle('active', pane.id === `pane-${name}`)); const descriptions = { search: '搜尋歌曲，管理播放，一切都在這裡。', queue: '調整接下來要唱的歌曲。', lyrics: '透過記得的歌詞找到歌曲。', mix: '調整歌曲音量與麥克風效果。', admin: '新增歌曲並追蹤處理進度。' }; $('topDescription').textContent = descriptions[name] || descriptions.search }
     document.querySelectorAll('[data-pane],[data-tab]').forEach(button => button.addEventListener('click', () => selectPane(button.dataset.pane || button.dataset.tab)));
     $('fullscreen').onclick = () => document.documentElement.requestFullscreen?.();
-    $('query').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => socket.emit('search_songs', { query: $('query').value, language: $('language').value }), 160) });
-    $('language').onchange = () => socket.emit('search_songs', { query: $('query').value, language: $('language').value });
+    function requestSongs(reset = false) {
+      if (reset) {
+        searchOffset = 0;
+        searchSongs = [];
+        searchTotal = 0;
+        searchLoading = false;
+        searchRequestId += 1;
+        $('searchResults').innerHTML = '<div class="empty">正在搜尋…</div>';
+      }
+      if (searchLoading) return;
+      searchLoading = true;
+      $('loadMoreSongs').disabled = true;
+      socket.emit('search_songs', {
+        query: $('query').value,
+        language: $('language').value,
+        offset: searchOffset,
+        limit: searchPageSize,
+        paginated: true,
+        requestId: searchRequestId,
+      });
+    }
+    $('query').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => requestSongs(true), 160) });
+    $('language').onchange = () => requestSongs(true);
+    $('loadMoreSongs').onclick = () => requestSongs();
     $('lyricsQuery').addEventListener('input', () => { clearTimeout(lyricsTimer); lyricsTimer = setTimeout(() => { const query = $('lyricsQuery').value.trim(); if (query) socket.emit('search_songs', { query }); else $('lyricsResults').innerHTML = '<div class="empty">輸入歌詞即可搜尋</div>' }, 180) });
     function songMarkup(song, target) { return `<article class="song-row"><div class="song-info"><div class="song-title">${esc(song.title)}</div><div class="song-sub">${esc(song.artist || '未知歌手')} · ${esc(song.language || '')}</div></div><div class="song-actions"><button class="small-button add" data-id="${esc(song.id)}" data-target="${target}">＋ 點歌</button><button class="small-button" data-insert="${esc(song.id)}" data-target="${target}">插播</button></div></article>` }
     function bindSongActions(container) { container.querySelectorAll('[data-id]').forEach(button => button.onclick = () => { const song = searchSongs.find(item => item.id === button.dataset.id); if (song) socket.emit('add_to_queue', song); button.textContent = '✓ 已加入'; setTimeout(() => button.textContent = '＋ 點歌', 900) }); container.querySelectorAll('[data-insert]').forEach(button => button.onclick = () => { const song = searchSongs.find(item => item.id === button.dataset.insert); if (song) socket.emit('insert_to_top', song); button.textContent = '已插播'; setTimeout(() => button.textContent = '插播', 900) }) }
@@ -795,11 +820,35 @@
     function applyPlayback(payload) { queue = payload.queue || []; state = payload.state || {}; const current = queue[0]; $('currentTitle').textContent = current?.title || '尚未點歌'; $('currentArtist').textContent = current ? `${current.artist || '未知歌手'} · ${queue.length} 首在佇列中` : '選首歌開始今晚的演出'; $('togglePlay').textContent = state.isPlaying ? 'Ⅱ' : '▶'; $('mode').textContent = state.audioMode === 'accompaniment' ? '伴奏' : '原唱'; position = Number(state.position) || 0; duration = Number(current?.duration_seconds) || 0; $('duration').textContent = formatTime(duration); if (!dragging) { $('seek').max = duration || 100; $('seek').value = Math.min(position, duration || 100); $('elapsed').textContent = formatTime(position) }; renderQueue();['music', 'mic', 'reverb'].forEach(id => { const key = { music: 'musicVol', mic: 'micVol', reverb: 'reverbVol' }[id]; if (state[key] !== undefined) { $(id).value = state[key]; $(`${id}Out`).textContent = `${Math.round(state[key] * 100)}%` } }) }
     socket.on('connect', () => { $('connection').textContent = '已連線'; $('connection').classList.remove('offline') });
     socket.on('disconnect', () => { $('connection').textContent = '重新連線中'; $('connection').classList.add('offline') });
-    socket.on('search_results', rows => { searchSongs = rows || []; renderSearch(searchSongs); if ($('lyricsQuery').value.trim()) renderSearch(searchSongs, 'lyricsResults') });
+    socket.on('search_results', rows => { if ($('lyricsQuery').value.trim()) renderSearch(rows || [], 'lyricsResults') });
+    socket.on('search_page_results', page => {
+      if (page?.requestId !== searchRequestId) return;
+      const rows = page?.items || [];
+      searchSongs = page?.offset ? [...searchSongs, ...rows] : rows;
+      searchOffset = searchSongs.length;
+      searchTotal = Number(page?.total) || 0;
+      searchLoading = false;
+      renderSearch(searchSongs);
+      $('resultCount').textContent = `${searchTotal} 首歌曲`;
+      $('loadMoreSongs').hidden = searchOffset >= searchTotal;
+      $('loadMoreSongs').disabled = false;
+    });
     socket.on('sync_state', payload => applyPlayback(payload || {}));
     socket.on('playback_snapshot', payload => applyPlayback(payload || {}));
     socket.on('queue_updated', items => { queue = items || []; renderQueue() });
     socket.on('playback_error', payload => { $('playbackError').textContent = payload?.message || '播放錯誤'; $('playbackError').classList.add('show'); setTimeout(() => $('playbackError').classList.remove('show'), 6000) });
+    async function refreshBackendStatus() {
+      try {
+        const response = await fetch('/api/services');
+        const services = await response.json();
+        const ready = response.ok && services.python?.ok;
+        $('backendConnection').textContent = ready ? '處理服務就緒' : '處理服務離線';
+        $('backendConnection').classList.toggle('offline', !ready);
+      } catch {
+        $('backendConnection').textContent = '處理服務離線';
+        $('backendConnection').classList.add('offline');
+      }
+    }
     $('togglePlay').onclick = () => socket.emit('player_command', { isPlaying: !state.isPlaying });
     $('next').onclick = () => socket.emit('next_song');
     $('replay').onclick = () => socket.emit('replay_current');
@@ -808,7 +857,9 @@
     $('seek').addEventListener('change', () => { socket.emit('seek', { position: Number($('seek').value) }); dragging = false });
     [['music', 'musicVol'], ['mic', 'micVol'], ['reverb', 'reverbVol']].forEach(([id, key]) => $(id).addEventListener('input', () => { $(`${id}Out`).textContent = `${Math.round(Number($(id).value) * 100)}%`; socket.emit('player_command', { [key]: Number($(id).value) }) }));
     setInterval(() => { if (state.isPlaying && !dragging && duration) { position += 1; $('seek').value = Math.min(position, duration); $('elapsed').textContent = formatTime(position) } }, 1000);
-    socket.emit('search_songs', { query: '' });
+    socket.on('connect', () => requestSongs(true));
+    refreshBackendStatus();
+    setInterval(refreshBackendStatus, 5000);
   </script>
 </body>
 

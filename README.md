@@ -66,10 +66,14 @@ Python/Flask 負責歌曲下載、音訊處理與管理頁；Node.js 負責播�
 ```bash
 pip install -r requirements.txt
 npm --prefix app install
-python main.py
+npm --prefix app start
 ```
 
-`python main.py` 啟動 Flask 管理服務及 Node 播放服務。Node 首頁 `/` 提供歌曲搜尋與包廂狀態；`/console` 是整合大螢幕播放器、點歌、佇列、歌詞搜尋、混音及歌曲管理的一頁式主控台。`/player` 保留獨立大螢幕播放器，`/remote` 保留手機遙控器。歌曲處理仍由 Flask 管理服務提供；主控台的「新增歌曲」區塊直接嵌入管理頁。Node 直接讀取 `KTV_LIBRARY_INDEX_PATH` 指定的正式 CSV（預設 `ktv_songs/library_index.csv`），並由 `KTV_SONGS_DIR` 讀取媒體檔。
+`npm --prefix app start` 啟動 Electron 主 App，由 Node 背景啟動並監控既有 Python/Flask 處理服務，再啟動 Node 播放服務；關閉 App 時會停止 Python 子程序。預設使用 `python3`（Windows 使用 `python`），可用 `KTV_PYTHON_EXECUTABLE` 指定 Python 執行檔。Python 環境仍須先安裝 `requirements.txt`；模型權重會依目前既有處理流程檢查或下載。
+
+Node 首頁 `/` 提供歌曲搜尋與包廂狀態；`/console` 是整合大螢幕播放器、點歌、佇列、歌詞搜尋、混音及歌曲管理的一頁式主控台。主控台顯示 Python 處理服務健康狀態，歌曲搜尋支援分頁與排序 API。`/player` 保留獨立大螢幕播放器，`/remote` 保留手機遙控器。主控台的「新增歌曲」區塊仍使用既有 Flask 管理頁。Node 直接讀取 `KTV_LIBRARY_INDEX_PATH` 指定的正式 CSV（預設 `ktv_songs/library_index.csv`），並由 `KTV_SONGS_DIR` 讀取媒體檔；不會建立第二份曲庫。
+
+若要分別啟動服務供開發使用，可執行 `python -m core.service` 與 `npm --prefix app run server`。既有桌面啟動器 `python main.py` 仍可用。
 
 若預設分離後端使用 `demucs` 或 `hybrid`，啟動前會先檢查 Demucs 權重；若在管理頁單次切換到 `demucs` / `hybrid`，處理該首歌前也會補做權重檢查。
 

@@ -8,7 +8,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const serverPort = Number(process.env.KTV_NODE_PORT) || 3000;
 let mainWindow = null;
 let pythonProcess = null;
-let serverStarted = false;
 let isQuitting = false;
 
 async function createWindow() {
@@ -38,7 +37,6 @@ app.whenReady().then(async () => {
   try {
     pythonProcess = await startPythonService();
     await startServer(serverPort);
-    serverStarted = true;
     await createWindow();
   } catch (error) {
     console.error('[OpenKTV] 啟動失敗：', error.message);

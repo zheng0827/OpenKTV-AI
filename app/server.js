@@ -120,6 +120,19 @@ function inverseSearch(songs, inverseIndex, query) {
   return [...(candidates || [])].map(id => byId.get(id)).filter(Boolean);
 }
 
+function findSongs(songs, miniSearch, inverseIndex, query, language, charCount) {
+  let results = query ? inverseSearch(songs, inverseIndex, query) : songs;
+  if (query && results.length < 5) {
+    const fuzzy = miniSearch.search(query.toUpperCase())
+      .map(result => songs.find(song => song.id === result.id))
+      .filter(Boolean);
+    results = [...new Map([...results, ...fuzzy].map(song => [song.id, song])).values()];
+  }
+  if (language) results = results.filter(song => song.language === language);
+  if (charCount) results = results.filter(song => song.char_count === Number(charCount));
+  return results;
+}
+
 function parseRange(range, size) {
   const match = /^bytes=(\d*)-(\d*)$/.exec(range || '');
   if (!match) return null;
@@ -184,6 +197,34 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         currentSong: currentSong(),
         queueCount: queue.length,
       }));
+      app.get('/api/services', pageRequestLimiter, async (_req, res) => {
+        const pythonPort = Number(process.env.KTV_PORT) || 5000;
+        try {
+          const response = await fetch(`http://127.0.0.1:${pythonPort}/health`, {
+            signal: AbortSignal.timeout(1500),
+          });
+          const health = response.ok ? await response.json() : null;
+          return res.json({
+            node: { ok: true },
+            python: { ok: Boolean(health?.ok && health.service === 'python') },
+          });
+        } catch {
+          return res.status(503).json({ node: { ok: true }, python: { ok: false } });
+        }
+      });
+      app.get('/api/songs', pageRequestLimiter, (req, res) => {
+        const query = String(req.query.q || '').trim();
+        const language = String(req.query.language || '');
+        const charCount = Number(req.query.charCount) || 0;
+        const offset = Math.max(0, Number.parseInt(req.query.offset, 10) || 0);
+        const limit = Math.max(1, Math.min(100, Number.parseInt(req.query.limit, 10) || 50));
+        const sort = String(req.query.sort || 'relevance');
+        let results = findSongs(songs, miniSearch, inverseIndex, query, language, charCount);
+        if (sort === 'title') results = [...results].sort((a, b) => a.title.localeCompare(b.title));
+        else if (sort === 'artist') results = [...results].sort((a, b) => a.artist.localeCompare(b.artist));
+        else if (sort === 'duration') results = [...results].sort((a, b) => (a.duration_seconds || 0) - (b.duration_seconds || 0));
+        return res.json({ items: results.slice(offset, offset + limit), total: results.length, offset, limit });
+      });
       app.get('/api/bot/room', botApiLimiter, (req, res) => {
         const expected = process.env.KTV_BOT_API_TOKEN || '';
         const supplied = (req.get('authorization') || '').replace(/^Bearer\s+/i, '');
@@ -293,18 +334,22 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         socket.on('time_ping', clientSentAt => {
           socket.emit('time_pong', { clientSentAt: Number(clientSentAt), serverTime: Date.now() });
         });
-        socket.on('search_songs', ({ query = '', language = '', charCount = 0 } = {}) => {
+        socket.on('search_songs', ({ query = '', language = '', charCount = 0, offset = 0, limit = 50, paginated = false, requestId } = {}) => {
           const cleanQuery = String(query).trim();
-          let results = cleanQuery
-            ? inverseSearch(songs, inverseIndex, cleanQuery)
-            : songs;
-          if (cleanQuery && results.length < 5) {
-            const fuzzy = miniSearch.search(cleanQuery.toUpperCase()).map(result => songs.find(song => song.id === result.id)).filter(Boolean);
-            results = [...new Map([...results, ...fuzzy].map(song => [song.id, song])).values()];
+          const results = findSongs(songs, miniSearch, inverseIndex, cleanQuery, language, charCount);
+          if (paginated) {
+            const safeOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
+            const safeLimit = Math.max(1, Math.min(100, Number.parseInt(limit, 10) || 50));
+            socket.emit('search_page_results', {
+              items: results.slice(safeOffset, safeOffset + safeLimit),
+              total: results.length,
+              offset: safeOffset,
+              limit: safeLimit,
+              requestId,
+            });
+          } else {
+            socket.emit('search_results', results.slice(0, 50));
           }
-          if (language) results = results.filter(song => song.language === language);
-          if (charCount) results = results.filter(song => song.char_count === Number(charCount));
-          socket.emit('search_results', results.slice(0, 50));
         });
         socket.on('add_to_queue', payloadSong => {
           const song = findSong(payloadSong);
