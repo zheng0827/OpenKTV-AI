@@ -188,8 +188,8 @@ def _create_blueprint() -> Blueprint:
         settings: AppSettings = current_app.config["APP_SETTINGS"]
         try:
             row = update_catalog_entry(settings.library_index_path, song_id, updates)
-        except ValueError as error:
-            return jsonify(ok=False, error=str(error)), 409
+        except ValueError:
+            return jsonify(ok=False, error="相同歌手與歌名已存在於曲庫"), 409
         if row is None:
             return jsonify(ok=False, error="找不到歌曲"), 404
         return jsonify(ok=True, song=row)
