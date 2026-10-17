@@ -102,8 +102,15 @@ export class MpvPlayer {
     const displayArgs = process.env.KTV_MPV_FULLSCREEN === '1'
       ? ['--fullscreen', `--screen=${Number(process.env.KTV_MPV_SCREEN) || 0}`]
       : ['--autofit=70%x70%', '--geometry=+20+20'];
-    const executable = resolveMpvExecutable();
-    this.child = spawn(executable, [
+    let executable;
+    try {
+      executable = resolveMpvExecutable();
+    } catch (error) {
+      this.status = 'unavailable';
+      this.error = error.message;
+      throw error;
+    }
+    const child = spawn(executable, [
       '--idle=yes',
       '--force-window=yes',
       '--keep-open=always',
@@ -111,17 +118,19 @@ export class MpvPlayer {
       ...displayArgs,
       `--input-ipc-server=${this.ipcPath}`,
     ], { stdio: 'ignore', windowsHide: false });
-    this.child.once('error', error => {
+    this.child = child;
+    child.once('error', error => {
       this.status = 'unavailable';
       this.error = error.code === 'ENOENT'
         ? 'MPV executable was not found. Install MPV or set KTV_MPV_EXECUTABLE to its full path.'
         : `Could not start MPV: ${error.message}`;
+      if (this.child === child) this.child = null;
     });
-    this.child.once('exit', code => {
+    child.once('exit', code => {
       this.status = 'stopped';
       this.socket?.destroy();
       this.socket = null;
-      this.child = null;
+      if (this.child === child) this.child = null;
       if (code) this.error = `MPV exited with code ${code}`;
     });
     await this.connect();
@@ -169,7 +178,9 @@ export class MpvPlayer {
             });
             socket.on('error', error => {
               this.status = 'unavailable';
-              this.error = error.message;
+              this.error = error.code === 'ENOENT'
+                ? 'MPV executable was not found. Install MPV or set KTV_MPV_EXECUTABLE to its full path.'
+                : `Could not start MPV: ${error.message}`;
               for (const resolve of this.pending.values()) resolve({ error: error.message });
               this.pending.clear();
             });
