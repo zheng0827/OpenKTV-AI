@@ -7,6 +7,7 @@ import fs from 'fs';
 import { timingSafeEqual } from 'crypto';
 import csv from 'csv-parser';
 import MiniSearch from 'minisearch';
+import QRCode from 'qrcode';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -120,7 +121,7 @@ function inverseSearch(songs, inverseIndex, query) {
   return [...(candidates || [])].map(id => byId.get(id)).filter(Boolean);
 }
 
-function findSongs(songs, miniSearch, inverseIndex, query, language, charCount) {
+function findSongs(songs, miniSearch, inverseIndex, query, language, charCount, mode = 'keyword', sort = 'relevance') {
   let results = query ? inverseSearch(songs, inverseIndex, query) : songs;
   if (query && results.length < 5) {
     const fuzzy = miniSearch.search(query.toUpperCase())
@@ -128,8 +129,16 @@ function findSongs(songs, miniSearch, inverseIndex, query, language, charCount) 
       .filter(Boolean);
     results = [...new Map([...results, ...fuzzy].map(song => [song.id, song])).values()];
   }
+  const fieldForMode = { zhuyin: 'zhuyin_abbr', pinyin: 'pinyin_abbr', lyrics: 'lyrics', artist: 'artist' }[mode];
+  if (query && fieldForMode) {
+    const cleanQuery = query.trim().toUpperCase();
+    results = results.filter(song => String(song[fieldForMode] || '').toUpperCase().includes(cleanQuery));
+  }
   if (language) results = results.filter(song => song.language === language);
   if (charCount) results = results.filter(song => song.char_count === Number(charCount));
+  if (sort === 'title') results = [...results].sort((a, b) => a.title.localeCompare(b.title));
+  else if (sort === 'artist') results = [...results].sort((a, b) => a.artist.localeCompare(b.artist));
+  else if (sort === 'duration') results = [...results].sort((a, b) => (a.duration_seconds || 0) - (b.duration_seconds || 0));
   return results;
 }
 
@@ -186,6 +195,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       app.get(['/', '/home'], pageRequestLimiter, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'home.html')));
       app.get('/player', (_req, res) => res.redirect('/player.html'));
       app.get(['/remote', '/queue'], (_req, res) => res.redirect('/remote.html'));
+      app.get('/operator', pageRequestLimiter, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'console.html')));
       app.get(['/console', '/ktv'], pageRequestLimiter, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'console.html')));
       app.get('/admin', (req, res) => {
         const host = req.hostname.includes(':') ? `[${req.hostname}]` : req.hostname;
@@ -193,6 +203,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       });
       app.get('/api/room', (_req, res) => res.json({
         songCount: songs.length,
+        clientCount: io.engine.clientsCount,
         isPlaying: playerState.isPlaying,
         currentSong: currentSong(),
         queueCount: queue.length,
@@ -212,6 +223,35 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           return res.status(503).json({ node: { ok: true }, python: { ok: false } });
         }
       });
+      app.get('/api/qr', pageRequestLimiter, async (req, res) => {
+        const requestedUrl = String(req.query.url || '');
+        let target;
+        try {
+          target = new URL(requestedUrl);
+        } catch {
+          return res.status(400).json({ error: '無效的遙控器網址' });
+        }
+        const allowedHost = req.get('host')?.split(':')[0];
+        if (!['http:', 'https:'].includes(target.protocol)
+          || target.pathname !== '/remote'
+          || target.hostname !== allowedHost) {
+          return res.status(400).json({ error: '遙控器網址必須指向本機服務' });
+        }
+        const dataUrl = await QRCode.toDataURL(target.toString(), { margin: 1, width: 440 });
+        return res.json({ dataUrl, url: target.toString() });
+      });
+      app.get('/api/resolve_yt_title', pageRequestLimiter, async (req, res) => {
+        const pythonPort = Number(process.env.KTV_PORT) || 5000;
+        try {
+          const target = new URL(`http://127.0.0.1:${pythonPort}/api/resolve_yt_title`);
+          target.searchParams.set('url', String(req.query.url || ''));
+          const response = await fetch(target, { signal: AbortSignal.timeout(30000) });
+          const payload = await response.json();
+          return res.status(response.status).json(payload);
+        } catch {
+          return res.status(503).json({ ok: false, error: 'Python 處理服務目前無法使用' });
+        }
+      });
       app.get('/api/songs', pageRequestLimiter, (req, res) => {
         const query = String(req.query.q || '').trim();
         const language = String(req.query.language || '');
@@ -219,10 +259,8 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         const offset = Math.max(0, Number.parseInt(req.query.offset, 10) || 0);
         const limit = Math.max(1, Math.min(100, Number.parseInt(req.query.limit, 10) || 50));
         const sort = String(req.query.sort || 'relevance');
-        let results = findSongs(songs, miniSearch, inverseIndex, query, language, charCount);
-        if (sort === 'title') results = [...results].sort((a, b) => a.title.localeCompare(b.title));
-        else if (sort === 'artist') results = [...results].sort((a, b) => a.artist.localeCompare(b.artist));
-        else if (sort === 'duration') results = [...results].sort((a, b) => (a.duration_seconds || 0) - (b.duration_seconds || 0));
+        const mode = String(req.query.mode || 'keyword');
+        const results = findSongs(songs, miniSearch, inverseIndex, query, language, charCount, mode, sort);
         return res.json({ items: results.slice(offset, offset + limit), total: results.length, offset, limit });
       });
       app.get('/api/bot/room', botApiLimiter, (req, res) => {
@@ -268,6 +306,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       });
 
       const queue = [];
+      const history = [];
       const playerState = {
         isPlaying: false,
         audioMode: 'original',
@@ -296,6 +335,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       };
       const snapshot = () => ({
         queue: [...queue],
+        history: [...history],
         currentSong: currentSong(),
         state: {
           isPlaying: playerState.isPlaying,
@@ -309,7 +349,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       });
       const emitState = () => {
         const payload = snapshot();
-        io.emit('sync_state', { queue: payload.queue, state: payload.state });
+        io.emit('sync_state', { queue: payload.queue, history: payload.history, state: payload.state });
         io.emit('queue_updated', payload.queue);
         io.emit('playback_snapshot', payload);
       };
@@ -329,14 +369,14 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
 
       io.on('connection', socket => {
         const payload = snapshot();
-        socket.emit('sync_state', { queue: payload.queue, state: payload.state });
+        socket.emit('sync_state', { queue: payload.queue, history: payload.history, state: payload.state });
         socket.emit('playback_snapshot', payload);
         socket.on('time_ping', clientSentAt => {
           socket.emit('time_pong', { clientSentAt: Number(clientSentAt), serverTime: Date.now() });
         });
-        socket.on('search_songs', ({ query = '', language = '', charCount = 0, offset = 0, limit = 50, paginated = false, requestId } = {}) => {
+        socket.on('search_songs', ({ query = '', language = '', charCount = 0, offset = 0, limit = 50, paginated = false, requestId, mode = 'keyword', sort = 'relevance' } = {}) => {
           const cleanQuery = String(query).trim();
-          const results = findSongs(songs, miniSearch, inverseIndex, cleanQuery, language, charCount);
+          const results = findSongs(songs, miniSearch, inverseIndex, cleanQuery, language, charCount, mode, sort);
           if (paginated) {
             const safeOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
             const safeLimit = Math.max(1, Math.min(100, Number.parseInt(limit, 10) || 50));
@@ -354,14 +394,22 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         socket.on('add_to_queue', payloadSong => {
           const song = findSong(payloadSong);
           if (!song || !song.video_filename) return;
-          queue.push({ ...song, queueId: `${song.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}` });
+          queue.push({
+            ...song,
+            requestedBy: String(payloadSong?.requestedBy || '').trim().slice(0, 24),
+            queueId: `${song.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          });
           if (queue.length === 1) startCurrent();
           emitState();
         });
         socket.on('insert_to_top', payloadSong => {
           const song = findSong(payloadSong);
           if (!song || !song.video_filename) return;
-          const item = { ...song, queueId: `${song.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}` };
+          const item = {
+            ...song,
+            requestedBy: String(payloadSong?.requestedBy || '').trim().slice(0, 24),
+            queueId: `${song.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          };
           queue.splice(queue.length ? 1 : 0, 0, item);
           if (queue.length === 1) startCurrent();
           emitState();
@@ -370,8 +418,32 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           const index = queue.findIndex(item => item.queueId === queueId);
           if (index < 0) return;
           const wasCurrent = index === 0;
-          queue.splice(index, 1);
-          if (wasCurrent) startCurrent();
+          const [removed] = queue.splice(index, 1);
+          if (wasCurrent) {
+            history.unshift(removed);
+            history.splice(100);
+            startCurrent();
+          }
+          emitState();
+        });
+        socket.on('move_to_top', queueId => {
+          const index = queue.findIndex(item => item.queueId === queueId);
+          if (index <= 1) return;
+          const [item] = queue.splice(index, 1);
+          queue.splice(1, 0, item);
+          emitState();
+        });
+        socket.on('shuffle_queue', () => {
+          for (let index = queue.length - 1; index > 1; index--) {
+            const target = 1 + Math.floor(Math.random() * index);
+            [queue[index], queue[target]] = [queue[target], queue[index]];
+          }
+          emitState();
+        });
+        socket.on('clear_queue', () => {
+          history.unshift(...queue.slice(1));
+          history.splice(100);
+          queue.splice(1);
           emitState();
         });
         socket.on('reorder_queue', ids => {
@@ -382,7 +454,10 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           emitState();
         });
         socket.on('next_song', () => {
-          if (queue.length) queue.shift();
+          if (queue.length) {
+            history.unshift(queue.shift());
+            history.splice(100);
+          }
           startCurrent();
           emitState();
         });
@@ -426,6 +501,17 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           emitState();
         });
         socket.on('report_score', scorePayload => socket.broadcast.emit('score_updated', scorePayload));
+        socket.on('crowd_interaction', payload => {
+          if (!payload || !['applause', 'cheer', 'message'].includes(payload.type)) return;
+          const text = String(payload.text || '').trim().slice(0, 100);
+          if (payload.type === 'message' && !text) return;
+          io.emit('crowd_interaction', {
+            type: payload.type,
+            text,
+            user: String(payload.user || '來賓').trim().slice(0, 24),
+            serverTime: Date.now(),
+          });
+        });
       });
 
       setInterval(async () => {

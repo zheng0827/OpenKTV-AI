@@ -176,6 +176,55 @@
             background: linear-gradient(90deg, #10b981, #38bdf8);
             transition: width 0.1s ease;
         }
+
+        #crowd-toast {
+            position: absolute;
+            z-index: 20;
+            top: 78px;
+            left: 50%;
+            transform: translateX(-50%);
+            max-width: min(80vw, 720px);
+            padding: 14px 22px;
+            border: 1px solid rgba(118, 237, 206, .5);
+            border-radius: 999px;
+            background: rgba(0, 0, 0, .78);
+            color: #f4f6fa;
+            font-size: clamp(18px, 2.4vw, 32px);
+            text-align: center;
+            opacity: 0;
+            transition: opacity .2s ease;
+            pointer-events: none;
+        }
+
+        #crowd-toast.show {
+            opacity: 1;
+        }
+
+        #remote-qr {
+            position: absolute;
+            z-index: 8;
+            right: 24px;
+            bottom: 26px;
+            width: 132px;
+            padding: 7px;
+            border-radius: 10px;
+            background: rgba(0, 0, 0, .78);
+            text-align: center;
+            font-size: 11px;
+            color: #fff;
+        }
+
+        #remote-qr[hidden] {
+            display: none;
+        }
+
+        #remote-qr img {
+            display: block;
+            width: 118px;
+            height: 118px;
+            border-radius: 5px;
+            background: #fff;
+        }
     </style>
     <script src="/socket.io/socket.io.js"></script>
 </head>
@@ -184,6 +233,8 @@
     <div id="root">
         <!-- 原唱視訊與人聲音訊軌 -->
         <video id="video" playsinline crossorigin="anonymous"></video>
+        <div id="crowd-toast" role="status"></div>
+        <aside id="remote-qr" hidden><img alt="掃描加入手機遙控器"><span>掃碼點歌</span></aside>
         <!-- 純伴奏音訊軌 (.instrumental.m4a) -->
         <audio id="instrumental" preload="auto" crossorigin="anonymous"></audio>
 
@@ -251,6 +302,25 @@
         // 1. 全域狀態與變數
         // ==========================================
         const socket = io();
+        const remoteQr = document.getElementById('remote-qr');
+        if (localStorage.getItem('ktvShowQr') !== 'false') {
+            fetch(`/api/qr?url=${encodeURIComponent(`${location.origin}/remote`)}`)
+                .then(response => response.ok ? response.json() : Promise.reject())
+                .then(data => {
+                    remoteQr.querySelector('img').src = data.dataUrl;
+                    remoteQr.hidden = false;
+                })
+                .catch(() => {});
+        }
+        let crowdToastTimer;
+        socket.on('crowd_interaction', payload => {
+            const toast = document.getElementById('crowd-toast');
+            const prefix = payload?.type === 'message' ? '💬' : payload?.type === 'cheer' ? '🎉' : '👏';
+            toast.textContent = `${prefix} ${payload?.user || '來賓'}：${payload?.text || '為演出加油！'}`;
+            toast.classList.add('show');
+            clearTimeout(crowdToastTimer);
+            crowdToastTimer = setTimeout(() => toast.classList.remove('show'), 4500);
+        });
         const video = document.getElementById('video');
         const instrumental = document.getElementById('instrumental');
         const waiting = document.getElementById('waiting');

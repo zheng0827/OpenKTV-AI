@@ -1,866 +1,193 @@
 <!doctype html>
 <html lang="zh-Hant">
-
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#10131c">
-  <title>OpenKTV｜包廂主控台</title>
+  <meta name="theme-color" content="#000000">
+  <title>OpenKTV Master｜中控操作端</title>
   <script src="/socket.io/socket.io.js"></script>
   <style>
-    :root {
-      color-scheme: dark;
-      --bg: #10131c;
-      --panel: #191f2c;
-      --panel2: #202838;
-      --text: #f4f6fb;
-      --muted: #9aa5b7;
-      --line: #2b3547;
-      --mint: #77f0d0;
-      --blue: #8da9ff;
-      --orange: #ffba7b;
-      --red: #ff8290
-    }
-
-    * {
-      box-sizing: border-box
-    }
-
-    body {
-      margin: 0;
-      background: var(--bg);
-      color: var(--text);
-      font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
-      height: 100vh;
-      overflow: hidden
-    }
-
-    button,
-    input {
-      font: inherit
-    }
-
-    button {
-      cursor: pointer
-    }
-
-    a {
-      color: inherit;
-      text-decoration: none
-    }
-
-    .app {
-      display: block;
-      height: 100vh
-    }
-
-    .brand {
-      font-weight: 900;
-      letter-spacing: .1em;
-      font-size: 16px;
-      white-space: nowrap
-    }
-
-    .brand i {
-      font-style: normal;
-      color: var(--mint)
-    }
-
-    .shell {
-      display: grid;
-      grid-template-rows: 68px minmax(0, 1fr);
-      min-width: 0
-    }
-
-    .topbar {
-      border-bottom: 1px solid var(--line);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0 22px;
-      gap: 18px
-    }
-
-    .top-title {
-      font-size: 15px;
-      font-weight: 800
-    }
-
-    .top-sub {
-      font-size: 12px;
-      color: var(--muted);
-      margin-top: 2px
-    }
-
-    .top-right {
-      display: flex;
-      align-items: center;
-      gap: 12px
-    }
-
-    .top-nav {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      min-width: 0;
-      overflow-x: auto;
-      scrollbar-width: none
-    }
-
-    .top-nav::-webkit-scrollbar {
-      display: none
-    }
-
-    .top-nav button {
-      border: 0;
-      border-radius: 10px;
-      padding: 9px 11px;
-      color: var(--muted);
-      background: transparent;
-      white-space: nowrap;
-      font-size: 12px;
-      font-weight: 750
-    }
-
-    .top-nav button:hover,
-    .top-nav button.active {
-      color: var(--mint);
-      background: #ffffff0b
-    }
-
-    .queue-badge {
-      margin-left: 4px;
-      color: var(--mint);
-      font-size: 10px
-    }
-
-    .status {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      color: var(--mint);
-      font-size: 12px
-    }
-
-    .status:before {
-      content: "";
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: currentColor;
-      box-shadow: 0 0 12px currentColor
-    }
-
-    .status.offline {
-      color: var(--orange)
-    }
-
-    .icon-button {
-      width: 38px;
-      height: 38px;
-      border-radius: 11px;
-      border: 1px solid var(--line);
-      color: var(--text);
-      background: #ffffff06
-    }
-
-    .content {
-      padding: 22px 24px 26px;
-      overflow: auto;
-      min-width: 0
-    }
-
-    .workspace {
-      display: grid;
-      grid-template-columns: minmax(0, 1.9fr) minmax(360px, .8fr);
-      gap: 20px;
-      min-height: 100%
-    }
-
-    .left-column,
-    .right-column {
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-      min-width: 0
-    }
-
-    .card {
-      background: var(--panel);
-      border: 1px solid #ffffff0d;
-      border-radius: 18px;
-      min-width: 0
-    }
-
-    .player-card {
-      padding: 12px
-    }
-
-    .player-frame {
-      width: 100%;
-      aspect-ratio: 16/9;
-      border: 0;
-      border-radius: 12px;
-      background: #05070a;
-      display: block
-    }
-
-    .player-placeholder {
-      display: none;
-      aspect-ratio: 16/9;
-      border-radius: 12px;
-      background: radial-gradient(circle at 55% 40%, #253544, #07090e 65%);
-      place-items: center;
-      text-align: center;
-      color: var(--muted)
-    }
-
-    .player-placeholder strong {
-      display: block;
-      color: var(--text);
-      font-size: 20px;
-      margin-top: 9px
-    }
-
-    .now-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 14px;
-      padding: 13px 5px 3px
-    }
-
-    .now-meta {
-      min-width: 0
-    }
-
-    .now-meta small {
-      color: var(--mint);
-      font-size: 10px;
-      font-weight: 850;
-      letter-spacing: .18em
-    }
-
-    .now-meta h2 {
-      font-size: 17px;
-      margin: 2px 0 0;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis
-    }
-
-    .now-meta p {
-      color: var(--muted);
-      font-size: 12px;
-      margin: 1px 0 0
-    }
-
-    .controls {
-      display: flex;
-      gap: 7px;
-      align-items: center
-    }
-
-    .control {
-      border: 1px solid var(--line);
-      border-radius: 11px;
-      background: #ffffff08;
-      color: var(--text);
-      min-width: 39px;
-      height: 39px;
-      font-weight: 800
-    }
-
-    .control:hover {
-      border-color: #ffffff55
-    }
-
-    .control.primary {
-      background: var(--mint);
-      color: #11211d;
-      border-color: var(--mint)
-    }
-
-    .control.skip {
-      color: var(--orange)
-    }
-
-    .seek {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 9px 6px 1px;
-      color: var(--muted);
-      font-size: 11px;
-      font-variant-numeric: tabular-nums
-    }
-
-    .seek input {
-      flex: 1;
-      accent-color: var(--mint);
-      min-width: 40px
-    }
-
-    .tab-card {
-      display: flex;
-      flex-direction: column;
-      min-height: 500px;
-      overflow: hidden
-    }
-
-    .tabs {
-      display: flex;
-      overflow: auto;
-      border-bottom: 1px solid var(--line);
-      padding: 0 12px;
-      gap: 3px
-    }
-
-    .tab {
-      border: 0;
-      background: transparent;
-      color: var(--muted);
-      padding: 13px 12px 11px;
-      white-space: nowrap;
-      font-size: 12px;
-      font-weight: 750;
-      border-bottom: 2px solid transparent
-    }
-
-    .tab.active {
-      color: var(--mint);
-      border-color: var(--mint)
-    }
-
-    .pane {
-      display: none;
-      padding: 17px;
-      min-height: 0;
-      flex: 1
-    }
-
-    .pane.active {
-      display: flex;
-      flex-direction: column
-    }
-
-    .pane-title {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      margin-bottom: 13px
-    }
-
-    .pane-title h2 {
-      font-size: 17px;
-      margin: 0
-    }
-
-    .pane-title span {
-      color: var(--muted);
-      font-size: 11px
-    }
-
-    .search-row {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 12px
-    }
-
-    .search-row input,
-    .search-row select {
-      min-width: 0;
-      background: #10151f;
-      color: var(--text);
-      border: 1px solid var(--line);
-      border-radius: 11px;
-      padding: 11px 12px;
-      outline: none
-    }
-
-    .search-row input {
-      flex: 1
-    }
-
-    .search-row input:focus {
-      border-color: var(--mint)
-    }
-
-    .search-row select {
-      max-width: 105px
-    }
-
-    .list {
-      display: grid;
-      gap: 7px;
-      overflow: auto;
-      align-content: start;
-      min-height: 120px
-    }
-
-    .song-row,
-    .queue-row {
-      border: 1px solid #ffffff0b;
-      background: #ffffff04;
-      border-radius: 12px;
-      padding: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px
-    }
-
-    .song-info {
-      min-width: 0
-    }
-
-    .song-title {
-      font-weight: 750;
-      white-space: nowrap;
-      text-overflow: ellipsis;
-      overflow: hidden
-    }
-
-    .song-sub {
-      font-size: 11px;
-      color: var(--muted);
-      white-space: nowrap;
-      text-overflow: ellipsis;
-      overflow: hidden
-    }
-
-    .song-actions {
-      display: flex;
-      gap: 5px;
-      flex-shrink: 0
-    }
-
-    .small-button {
-      border: 1px solid var(--line);
-      border-radius: 9px;
-      background: #ffffff08;
-      color: var(--text);
-      padding: 7px 9px;
-      font-size: 11px;
-      font-weight: 750
-    }
-
-    .small-button.add {
-      color: var(--mint);
-      border-color: #77f0d025
-    }
-
-    .small-button.remove {
-      color: var(--red)
-    }
-
-    .empty {
-      color: var(--muted);
-      padding: 30px 12px;
-      text-align: center;
-      border: 1px dashed var(--line);
-      border-radius: 12px
-    }
-
-    .mix-stack {
-      display: grid;
-      gap: 20px
-    }
-
-    .slider label {
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      font-size: 12px;
-      font-weight: 750
-    }
-
-    .slider output {
-      font-variant-numeric: tabular-nums;
-      color: var(--mint)
-    }
-
-    .slider input {
-      width: 100%;
-      margin: 11px 0 0;
-      accent-color: var(--mint)
-    }
-
-    .hint {
-      border: 1px solid #ffffff0c;
-      border-radius: 12px;
-      padding: 12px;
-      color: var(--muted);
-      font-size: 11px;
-      margin-top: 18px
-    }
-
-    .error {
-      display: none;
-      margin-bottom: 12px;
-      padding: 10px 12px;
-      border: 1px solid #ff829055;
-      border-radius: 11px;
-      color: #ffb5bc;
-      background: #ff82900c;
-      font-size: 12px
-    }
-
-    .error.show {
-      display: block
-    }
-
-    .admin-frame {
-      width: 100%;
-      height: 690px;
-      border: 0;
-      border-radius: 12px;
-      background: #10151f
-    }
-
-    .lyrics-note {
-      font-size: 11px;
-      color: var(--muted);
-      margin: -6px 0 12px
-    }
-
-    @media(max-width:1000px) {
-      .topbar {
-        min-height: 104px;
-        height: auto;
-        padding: 10px 18px;
-        flex-wrap: wrap
-      }
-
-      .top-nav {
-        order: 3;
-        flex-basis: 100%
-      }
-
-      .content {
-        padding: 16px
-      }
-
-      .workspace {
-        grid-template-columns: minmax(0, 1fr)
-      }
-
-      .right-column {
-        min-height: 520px
-      }
-    }
-
-    @media(max-width:600px) {
-      body {
-        height: auto;
-        min-height: 100vh;
-        overflow: auto
-      }
-
-      .app {
-        display: block;
-        height: auto;
-        min-height: 100vh
-      }
-
-      .shell {
-        display: block
-      }
-
-      .topbar {
-        min-height: 106px;
-        padding: 10px 13px;
-        gap: 7px
-      }
-
-      .top-title {
-        font-size: 13px
-      }
-
-      .top-sub {
-        font-size: 10px
-      }
-
-      .top-right {
-        gap: 8px
-      }
-
-      .top-nav {
-        gap: 2px
-      }
-
-      .top-nav button {
-        padding: 8px 9px;
-        font-size: 11px
-      }
-
-      .content {
-        padding: 12px
-      }
-
-      .workspace {
-        gap: 12px
-      }
-
-      .left-column,
-      .right-column {
-        gap: 12px
-      }
-
-      .player-card {
-        padding: 8px;
-        border-radius: 15px
-      }
-
-      .now-row {
-        align-items: flex-start;
-        padding: 10px 3px 2px
-      }
-
-      .now-meta h2 {
-        font-size: 14px
-      }
-
-      .controls {
-        gap: 4px
-      }
-
-      .control {
-        min-width: 34px;
-        height: 35px
-      }
-
-      .seek {
-        gap: 6px;
-        padding-top: 7px
-      }
-
-      .tab-card {
-        min-height: 430px
-      }
-
-      .pane {
-        padding: 13px
-      }
-
-      .tabs {
-        padding: 0 5px
-      }
-
-      .tab {
-        padding: 12px 9px 10px
-      }
-
-      .admin-frame {
-        height: 720px
-      }
-
-      .right-column {
-        min-height: 430px
-      }
-    }
+    :root{color-scheme:dark;--bg:#10131b;--panel:#191f2a;--panel2:#222b39;--line:#303b4c;--text:#f4f6fa;--muted:#9ba7b8;--mint:#76edce;--blue:#83a7ff;--red:#ff8290;--orange:#ffc078}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;height:100vh;overflow:hidden}button,input,select,textarea{font:inherit}button{cursor:pointer;color:inherit}button:disabled{opacity:.4;cursor:not-allowed}.app{height:100vh;display:grid;grid-template-rows:58px minmax(0,1fr) 74px}.topbar{background:#000;display:flex;align-items:center;gap:16px;padding:0 22px;border-bottom:1px solid #292929;z-index:5}.brand{font-weight:900;letter-spacing:.08em;white-space:nowrap}.brand i{font-style:normal;color:var(--mint)}.system-status{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;white-space:nowrap}.dot{width:8px;height:8px;background:var(--mint);border-radius:50%}.offline .dot{background:var(--orange)}.spacer{flex:1}.top-actions{display:flex;gap:7px;align-items:center}.top-actions button,.secondary{border:1px solid #30333a;border-radius:9px;background:#151515;padding:8px 11px;font-size:12px}.top-actions button.active{color:var(--mint);border-color:#427668}.work-area{min-height:0;display:grid;grid-template-columns:minmax(260px,35fr) minmax(0,65fr);gap:14px;padding:14px 16px}.work-area.no-preview{grid-template-columns:minmax(0,1fr)}.preview,.page{min-width:0;min-height:0;background:var(--panel);border:1px solid #ffffff12;border-radius:15px;overflow:hidden}.preview{display:flex;flex-direction:column;padding:10px}.preview-head,.section-head,.song-row,.queue-row,.controller-row,.library-toolbar,.settings-tabs,.history-switch{display:flex;align-items:center;justify-content:space-between;gap:10px}.preview-head{padding:1px 3px 9px;color:var(--muted);font-size:12px}.player-frame{width:100%;height:100%;min-height:0;border:0;border-radius:10px;background:#000;aspect-ratio:16/9}.preview-placeholder{height:100%;display:grid;place-items:center;text-align:center;color:var(--muted);background:radial-gradient(circle,#203341,#07090d 68%);border-radius:10px}.page{overflow:auto;padding:20px}.page[hidden]{display:none}.page.fullscreen-page{padding:0;border:0;border-radius:0;background:#000;overflow:hidden}.page.fullscreen-page .player-frame{height:100%;aspect-ratio:auto}.bottom-nav{display:grid;grid-template-columns:repeat(6,1fr);background:#08090c;border-top:1px solid var(--line);padding:6px max(10px,env(safe-area-inset-right)) max(6px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left));z-index:5}.bottom-nav button{border:0;background:none;color:var(--muted);font-size:11px;font-weight:750;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-radius:10px}.bottom-nav button span{font-size:19px}.bottom-nav button.active{color:var(--mint);background:#76edce12}    .fullscreen-mode{display:block}.fullscreen-mode .topbar{position:fixed;top:0;left:0;right:0;transition:opacity .35s}.fullscreen-mode .bottom-nav{position:fixed;bottom:0;left:0;right:0;transition:opacity .35s}.fullscreen-mode .preview{display:none}.fullscreen-mode .work-area{height:100vh;padding:0;display:block}.fullscreen-mode .page{position:absolute;inset:0;height:100vh}.fullscreen-mode #view-full{display:block}.fullscreen-mode.controls-hidden .topbar,.fullscreen-mode.controls-hidden .bottom-nav{opacity:0;pointer-events:none}
+    h1,h2,h3,p{margin-top:0}.section-head{margin-bottom:14px}.section-head h1,.section-head h2{font-size:20px;margin:0}.muted{color:var(--muted)}.eyebrow{color:var(--mint);font-size:10px;letter-spacing:.15em;font-weight:850}.card{background:#ffffff05;border:1px solid #ffffff10;border-radius:13px;padding:16px;margin-bottom:13px}.current-title{font-size:24px;font-weight:850;margin:4px 0}.current-sub{color:var(--muted)}.play-controls{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:16px 0}.play-controls button,.action{border:1px solid var(--line);border-radius:10px;background:#ffffff08;padding:10px 14px;font-weight:750}.play-controls .primary,.action.primary{background:var(--mint);color:#10221d;border-color:var(--mint)}.play-controls .next{color:var(--orange)}.seek-row{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px}.seek-row input,.slider input{width:100%;accent-color:var(--mint)}.controller-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:12px}.slider{padding:9px 0}.slider label{display:flex;justify-content:space-between;font-size:12px;font-weight:700}.slider output{color:var(--mint)}.button-row{display:flex;gap:8px;flex-wrap:wrap}.song-list,.queue-list,.history-list,.library-list{display:grid;gap:8px;overflow:auto}.song-row,.queue-row{background:#ffffff05;border:1px solid #ffffff0e;border-radius:11px;padding:11px}.song-info{min-width:0}.song-title{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.song-sub{color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.song-actions{display:flex;gap:5px;flex-shrink:0}.small{border:1px solid var(--line);border-radius:8px;background:#ffffff08;padding:7px 9px;font-size:11px;font-weight:750}.small.add{color:var(--mint)}.small.remove{color:var(--red)}.search-tools{display:grid;grid-template-columns:1fr auto auto;gap:8px;margin-bottom:10px}.search-tools input,.search-tools select,.settings input,.settings select,.manual textarea{min-width:0;border:1px solid var(--line);border-radius:9px;background:#10151e;color:var(--text);padding:10px}.mode-tabs,.filter-chips,.keyboard{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}.mode-tabs button,.chip,.key{border:1px solid var(--line);background:#ffffff06;border-radius:9px;padding:8px 10px;font-size:11px}.mode-tabs button.active,.chip.active{color:var(--mint);border-color:#76edce88}.keyboard{max-width:420px}.key{min-width:38px}.paging{display:flex;align-items:center;justify-content:space-between;margin-top:10px}.status-note{font-size:12px;color:var(--muted)}.split{display:grid;grid-template-columns:1fr 1fr;gap:14px}.settings-tabs{justify-content:flex-start;flex-direction:column;align-items:stretch;min-width:185px}.settings-tabs button{text-align:left;border:1px solid transparent;background:none;color:var(--muted);padding:10px;border-radius:9px}.settings-tabs button.active{color:var(--mint);background:#76edce10;border-color:#76edce30}.setting-layout{display:grid;grid-template-columns:200px minmax(0,1fr);gap:16px}.setting-row{padding:13px 0;border-bottom:1px solid #ffffff10}.setting-row label{font-weight:750}.setting-row p{font-size:11px;color:var(--muted);margin:4px 0}.pill{display:inline-block;border:1px solid var(--line);border-radius:99px;padding:3px 8px;color:var(--muted);font-size:10px}.table-wrap{overflow:auto}.library-table{border-collapse:collapse;width:100%;font-size:12px;min-width:850px}.library-table th,.library-table td{text-align:left;padding:10px;border-bottom:1px solid #ffffff12;white-space:nowrap}.library-table th{color:var(--muted);position:sticky;top:0;background:var(--panel)}.library-toolbar{margin-bottom:11px}.ingest{display:grid;grid-template-columns:1fr auto;gap:8px}.ingest input{min-width:0;background:#10151e;border:1px solid var(--line);border-radius:9px;padding:10px;color:var(--text)}.progress{height:8px;background:#080b11;border-radius:99px;overflow:hidden;margin:8px 0}.progress i{display:block;height:100%;width:0;background:var(--mint);transition:width .2s}.message{padding:12px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);font-size:12px}.overlay{position:fixed;inset:0;background:#000b;z-index:20;display:grid;place-items:center;padding:18px}.modal{width:min(540px,100%);max-height:90vh;overflow:auto;background:#171d27;border:1px solid var(--line);border-radius:16px;padding:18px}.modal-head{display:flex;justify-content:space-between;align-items:center}.qr{display:block;width:220px;height:220px;margin:14px auto;background:white;border-radius:8px}.manual-layout{display:grid;grid-template-columns:minmax(250px,.85fr) minmax(0,1.15fr);gap:12px}.manual video{width:100%;background:#000;border-radius:10px}.tokens{display:flex;flex-wrap:wrap;gap:5px}.token{display:flex;flex-direction:column;gap:5px;background:#222d3c;border:1px solid #60718a;border-radius:7px;padding:7px;font-size:11px}.token input{width:90px;background:#111;color:var(--text);border:1px solid var(--line);padding:4px}.wave{width:100%;height:110px;background:#0b1017;border-radius:8px}.toast{position:fixed;right:18px;top:72px;z-index:30;padding:12px 16px;border-radius:10px;background:#203c34;color:var(--mint);display:none}.toast.show{display:block}
+    @media(max-width:900px){.work-area{grid-template-columns:1fr}.preview{display:none!important}.controller-grid,.split,.manual-layout{grid-template-columns:1fr}.setting-layout{grid-template-columns:1fr}.settings-tabs{flex-direction:row;overflow:auto}.topbar{padding:0 10px;gap:8px}.top-actions button{padding:7px;font-size:10px}.system-status{font-size:10px}.page{padding:13px}.app{grid-template-rows:55px minmax(0,1fr) 68px}}@media(max-width:520px){.brand{font-size:11px}.top-actions button:nth-child(3),.top-actions button:nth-child(4){display:none}.system-status{max-width:90px;overflow:hidden}.bottom-nav button{font-size:9px}.bottom-nav button span{font-size:16px}.song-actions{flex-direction:column}.search-tools{grid-template-columns:1fr auto}.search-tools select:last-child{grid-column:1/-1}.section-head h1,.section-head h2{font-size:17px}}
   </style>
 </head>
-
 <body>
-  <div class="app">
-    <div class="shell">
-      <header class="topbar">
-        <div>
-          <a href="/" class="brand">OPEN<i>KTV</i></a>
-          <div class="top-title">包廂主控台</div>
-          <div id="topDescription" class="top-sub">搜尋歌曲，管理播放，一切都在這裡。</div>
+  <div class="app" id="app">
+    <header class="topbar">
+      <a class="brand" href="/">🎤 OPEN<i>KTV</i> MASTER</a>
+      <span id="networkStatus" class="system-status"><i class="dot"></i><span>區域網路連線中</span></span>
+      <span id="clientStatus" class="system-status"><i class="dot"></i><span>等待播放服務</span></span>
+      <span class="spacer"></span>
+      <div class="top-actions">
+        <button id="previewToggle" class="active">👁️ 預覽：開</button>
+        <button id="qrOpen">📱 QR Code</button>
+        <button id="playerOpen">🖥️ 全屏播放器</button>
+        <button id="playerClose">❌ 關閉播放器</button>
+      </div>
+    </header>
+    <main class="work-area" id="workArea">
+      <aside class="preview" id="preview">
+        <div class="preview-head"><span>📺 電視端即時預覽</span><span id="previewState">同步播放</span></div>
+        <canvas id="playerMirror" class="player-frame" hidden aria-label="電視端即時畫面"></canvas>
+        <iframe id="playerFrame" class="player-frame" title="播放器預覽" src="/player.html?embed=1" allow="autoplay;fullscreen"></iframe>
+      </aside>
+      <section class="page" id="view-controller" data-view="controller">
+        <div class="section-head"><div><div class="eyebrow">MASTER CONTROLLER</div><h1>🎛️ 控制器主控台</h1></div><span id="serviceBadge" class="pill">Python 處理服務檢查中</span></div>
+        <div class="controller-grid">
+          <article class="card"><div class="eyebrow">NOW PLAYING</div><div class="current-title" id="currentTitle">尚未點歌</div><div class="current-sub" id="currentSub">選一首歌開始今晚的演出</div>
+            <div class="seek-row"><span id="elapsed">0:00</span><input id="seek" type="range" min="0" max="100" value="0" step=".1" aria-label="播放位置"><span id="duration">0:00</span></div>
+            <div class="play-controls"><button id="replay" title="重新開始">⏮ 重新開始</button><button id="togglePlay" class="primary">▶ 播放</button><button id="next" class="next">⏭ 切歌</button><button id="audioMode">🎤 原唱模式</button></div>
+            <p class="status-note" id="nowQueue">目前佇列 0 首</p>
+          </article>
+          <article class="card"><div class="eyebrow">SOUND CONTROL</div>
+            <div class="slider"><label for="music"><span>🎵 伴奏主音量</span><output id="musicOut">80%</output></label><input id="music" type="range" min="0" max="1.5" step=".05" value=".8"></div>
+            <div class="slider"><label for="mic"><span>🎤 麥克風音量</span><output id="micOut">100%</output></label><input id="mic" type="range" min="0" max="2.5" step=".05" value="1"></div>
+            <div class="slider"><label for="reverb"><span>✨ 麥克風混響</span><output id="reverbOut">0%</output></label><input id="reverb" type="range" min="0" max="1.2" step=".02" value="0"></div>
+            <div class="button-row"><button class="secondary" disabled title="目前沒有可用升降調音訊處理器">➖ 降 Key</button><span class="pill">Key 0 · 尚未啟用</span><button class="secondary" disabled>➕ 升 Key</button></div>
+            <p class="status-note">歌曲與麥克風音量分開控制。升降調及現場音效待音訊引擎支援後啟用，不會顯示為已生效。</p>
+          </article>
         </div>
-        <nav class="top-nav" aria-label="主控台內容">
-          <button class="active" data-pane="search">⌕ 點歌</button>
-          <button data-pane="queue">▤ 佇列<span id="queueBadge" class="queue-badge"></span></button>
-          <button data-pane="lyrics">♫ 歌詞</button>
-          <button data-pane="mix">◉ 調音</button>
-          <button data-pane="admin">＋ 新增</button>
-        </nav>
-        <div class="top-right"><span id="backendConnection" class="status offline">處理服務檢查中</span><span id="connection" class="status offline">連線中</span><button id="fullscreen"
-            class="icon-button" title="全螢幕" aria-label="全螢幕">⛶</button></div>
-      </header>
-      <main class="content">
-        <div id="playbackError" class="error" role="status"></div>
-        <div class="workspace">
-          <section class="left-column">
-            <article class="card player-card">
-              <iframe id="player" class="player-frame" src="/player.html?embed=1" title="KTV 主播放器"
-                allow="autoplay; microphone; fullscreen"></iframe>
-              <div id="playerPlaceholder" class="player-placeholder">
-                <div>♫<strong>播放畫面準備中</strong><span>連線後會自動同步包廂播放狀態</span></div>
-              </div>
-              <div class="now-row">
-                <div class="now-meta"><small>正在播放</small>
-                  <h2 id="currentTitle">尚未點歌</h2>
-                  <p id="currentArtist">選首歌開始今晚的演出</p>
-                </div>
-                <div class="controls"><button id="mode" class="control" title="切換原唱／伴奏">原唱</button><button id="replay"
-                    class="control" title="重唱">↺</button><button id="togglePlay" class="control primary"
-                    title="播放／暫停">▶</button><button id="next" class="control skip" title="下一首">⏭</button></div>
-              </div>
-              <div class="seek"><span id="elapsed">0:00</span><input id="seek" type="range" min="0" max="100" value="0"
-                  step=".1" aria-label="播放位置"><span id="duration">0:00</span></div>
-            </article>
-          </section>
-          <section class="right-column">
-            <article class="card tab-card">
-              <div class="tabs" role="tablist">
-                <button class="tab active" data-tab="search" role="tab">點歌</button>
-                <button class="tab" data-tab="queue" role="tab">佇列</button>
-                <button class="tab" data-tab="lyrics" role="tab">歌詞</button>
-                <button class="tab" data-tab="mix" role="tab">調音</button>
-                <button class="tab" data-tab="admin" role="tab">新增</button>
-              </div>
-              <section id="pane-search" class="pane active" role="tabpanel">
-                <div class="pane-title">
-                  <h2>歌曲曲庫</h2><span id="resultCount">搜尋歌名或歌手</span>
-                </div>
-                <div class="search-row"><input id="query" type="search" placeholder="歌名、歌手、拼音、注音" autocomplete="off"
-                    aria-label="搜尋歌曲"><select id="language" aria-label="語言">
-                    <option value="">全部</option>
-                    <option>國語</option>
-                    <option>台語</option>
-                    <option>粵語</option>
-                    <option>英語</option>
-                    <option>日語</option>
-                    <option>韓語</option>
-                  </select></div>
-                <div id="searchResults" class="list">
-                  <div class="empty">正在載入歌曲…</div>
-                </div>
-                <button id="loadMoreSongs" class="small-button" type="button" hidden>載入更多歌曲</button>
-              </section>
-              <section id="pane-queue" class="pane" role="tabpanel">
-                <div class="pane-title">
-                  <h2>播放佇列</h2><span id="queueCount">0 首</span>
-                </div>
-                <div id="queueList" class="list">
-                  <div class="empty">目前沒有歌曲</div>
-                </div>
-              </section>
-              <section id="pane-lyrics" class="pane" role="tabpanel">
-                <div class="pane-title">
-                  <h2>歌詞索引</h2><span>搜尋歌詞內容</span>
-                </div>
-                <p class="lyrics-note">輸入歌詞片段，從曲庫歌詞中尋找歌曲。</p>
-                <div class="search-row"><input id="lyricsQuery" type="search" placeholder="例如：我想要……" autocomplete="off"
-                    aria-label="搜尋歌詞"></div>
-                <div id="lyricsResults" class="list">
-                  <div class="empty">輸入歌詞即可搜尋</div>
-                </div>
-              </section>
-              <section id="pane-mix" class="pane" role="tabpanel">
-                <div class="pane-title">
-                  <h2>音量與混音</h2><span>即時同步到播放器</span>
-                </div>
-                <div class="mix-stack">
-                  <div class="slider"><label for="music">🎵 歌曲音量 <output id="musicOut">80%</output></label><input
-                      id="music" type="range" min="0" max="1.5" step=".05" value=".8"></div>
-                  <div class="slider"><label for="mic">🎤 麥克風音量 <output id="micOut">120%</output></label><input id="mic"
-                      type="range" min="0" max="2.5" step=".05" value="1.2"></div>
-                  <div class="slider"><label for="reverb">✨ 麥克風混響（預設關閉） <output id="reverbOut">0%</output></label><input
-                      id="reverb" type="range" min="0" max="1.2" step=".02" value="0"></div>
-                </div>
-                <div class="hint">歌曲／伴奏不會直接回送麥克風輸入。麥克風效果在播放器端處理；喇叭仍可能經空氣回授，建議使用耳機。首次使用時請在播放器畫面授予麥克風權限。</div>
-              </section>
-              <section id="pane-admin" class="pane" role="tabpanel">
-                <div class="pane-title">
-                  <h2>新增歌曲</h2><span>Python 處理服務</span>
-                </div>
-                <p class="lyrics-note">處理工作由 Python 服務執行，完成後播放器會從正式曲庫載入新歌曲。</p>
-                <iframe class="admin-frame" src="/admin" title="歌曲處理管理介面" loading="lazy"></iframe>
-              </section>
-            </article>
-          </section>
+        <article class="card"><div class="section-head"><h2>現場氣氛音效</h2><span class="pill">尚未設定音效素材</span></div><div class="button-row"><button class="secondary" disabled>👏 掌聲</button><button class="secondary" disabled>🎉 歡呼</button><button class="secondary" disabled>🥁 綜藝音效</button></div></article>
+      </section>
+      <section class="page" id="view-queue" data-view="queue" hidden>
+        <div class="section-head"><div><div class="eyebrow">PLAYLIST</div><h1>📋 管理佇列</h1></div><div class="history-switch"><button class="small active" data-queue-tab="upcoming">🎵 待播清單</button><button class="small" data-queue-tab="history">🕒 已播歷史</button></div></div>
+        <div id="upcomingPane"><div class="card"><div class="library-toolbar"><span id="queueSummary">待播 0 首</span><div class="button-row"><button id="shuffleQueue" class="small">🔀 隨機打亂</button><button id="clearQueue" class="small remove">清空待播</button></div></div><div id="queueList" class="queue-list"></div></div></div>
+        <div id="historyPane" hidden><div id="historyList" class="history-list"></div></div>
+      </section>
+      <section class="page" id="view-search" data-view="search" hidden>
+        <div class="section-head"><div><div class="eyebrow">SONG BROWSER</div><h1>🔍 點播歌曲</h1></div><span id="resultCount" class="pill">曲庫載入中</span></div>
+        <div class="mode-tabs" id="searchModes"><button class="active" data-mode="keyword">🔤 關鍵字</button><button data-mode="zhuyin">ㄅ 注音首字</button><button data-mode="pinyin">🅰️ 拼音首字</button><button data-mode="lyrics">📝 歌詞片段</button><button data-mode="artist">🧑‍🎤 歌手分類</button></div>
+        <div class="search-tools"><input id="query" type="search" placeholder="搜尋歌名、歌手、拼音、注音或歌詞" autocomplete="off" aria-label="搜尋曲庫"><button id="voiceSearch" class="small">🎤 語音</button><button id="clearSearch" class="small">✖ 清除</button></div>
+        <div class="filter-chips" id="languageFilters"><button class="chip active" data-language="">全部語種</button><button class="chip" data-language="國語">華語流行</button><button class="chip" data-language="台語">台語經典</button><button class="chip" data-language="粵語">粵語</button><button class="chip" data-language="韓語">K-POP</button><button class="chip" data-language="英語">英語流行</button><button class="chip" data-language="日語">日本動漫</button><select id="sortSongs" class="small" aria-label="排序"><option value="relevance">相關度排序</option><option value="title">歌名排序</option><option value="artist">歌手排序</option><option value="duration">時長排序</option></select></div>
+        <div id="keyboard" class="keyboard" hidden></div>
+        <div id="searchResults" class="song-list"><div class="message">正在載入曲庫…</div></div>
+        <div class="paging"><span id="pageLabel" class="status-note"></span><button id="loadMoreSongs" class="action">載入更多</button></div>
+      </section>
+      <section class="page" id="view-settings" data-view="settings" hidden>
+        <div class="section-head"><div><div class="eyebrow">SYSTEM PREFERENCES</div><h1>⚙️ 系統設定</h1></div><span class="pill">未支援的設定會標示為停用</span></div>
+        <div class="setting-layout"><nav class="settings-tabs" aria-label="設定分類"><button class="active" data-setting="output">🖥️ 播放器輸出</button><button data-setting="audio">🔊 音訊與麥克風</button><button data-setting="processing">📥 下載與曲庫處理</button><button data-setting="network">🌐 網路與遙控端</button></nav>
+          <div class="card settings">
+            <section data-setting-pane="output"><h2>播放器輸出設定</h2><div class="setting-row"><label>全屏播放器視窗</label><p>連接第二螢幕時可將播放器移至外接螢幕，否則可使用「全屏顯示」頁。</p><button id="settingsPlayerOpen" class="action">開啟播放器視窗</button></div><div class="setting-row"><label><input id="settingPreview" type="checkbox" checked> 在中控顯示播放器預覽</label><p>預覽會載入播放端，隱藏預覽不會停止實際播放器。</p></div><div class="setting-row"><label><input id="settingQr" type="checkbox" checked> 電視端顯示點歌 QR 提示</label><p>播放器 HUD 是否顯示 QR 由播放器現有功能決定。</p></div></section>
+            <section data-setting-pane="audio" hidden><h2>音訊與麥克風設定</h2><div class="setting-row"><label>音訊輸出裝置</label><p>音訊輸出裝置由作業系統與瀏覽器選擇；本頁不會假稱已切換裝置。</p><button class="secondary" disabled>瀏覽器尚未提供安全的輸出裝置切換</button></div><div class="setting-row"><label><input type="checkbox" disabled> 啟用手機端語音接收</label><p>目前只支援本機播放器擷取麥克風，不支援跨裝置傳送即時麥克風音訊。</p></div><div class="setting-row"><label>音訊緩衝區</label><p>由瀏覽器音訊引擎管理；不提供無效的自訂 buffer 數字。</p></div><div class="setting-row"><label>麥克風處理</label><p>預設乾聲、混響關閉以降低延遲；請戴耳機避免喇叭聲回灌。</p></div></section>
+            <section data-setting-pane="processing" hidden><h2>下載與曲庫處理</h2><div class="setting-row"><label><input id="enableIngest" type="checkbox" checked> 顯示新增歌曲面板</label><p>關閉後會隱藏曲庫頁的入庫區域，不會停止正在處理的工作。</p></div><div class="setting-row"><label>處理後端</label><p>處理模式與模型由現有 Python 服務設定；維持其既有流程與參數。</p><a class="action" href="/admin" target="_blank" rel="noopener">開啟處理設定</a></div><div class="setting-row"><label>遠端處理伺服器</label><p>跨機工作派送尚無協定，設定入口保留停用。</p><input disabled placeholder="未實作遠端工作派送"></div><div class="setting-row"><label>曲庫實體路徑</label><p id="catalogPath">由現有 KTV_SONGS_DIR 設定決定。</p></div></section>
+            <section data-setting-pane="network" hidden><h2>網路與遙控端設定</h2><div class="setting-row"><label>此裝置可連線網址</label><p id="remoteAddress">讀取目前瀏覽器網址…</p><button id="copyRemote" class="small">複製遙控網址</button></div><div class="setting-row"><label>Socket.IO 服務</label><p id="socketStatus">連線中</p></div><div class="setting-row"><label><input id="allowRemoteNext" type="checkbox" checked> 遙控端允許切歌</label><p>目前既有伺服器控制權限設定不由此 UI 改寫；此選項僅作本機偏好提示。</p></div><div class="setting-row"><label>網卡綁定與連接埠</label><p>連接埠由 KTV_NODE_PORT 設定；服務目前綁定所有網卡。請將裝置保持在可信任區域網路。</p></div></section>
+          </div>
         </div>
-      </main>
-    </div>
+      </section>
+      <section class="page" id="view-library" data-view="library" hidden>
+        <div class="section-head"><div><div class="eyebrow">CANONICAL CATALOG</div><h1>🗂️ 管理曲庫</h1></div><span id="libraryCount" class="pill">0 首</span></div>
+        <article class="card" id="ingestCard"><h2>➕ 添加新歌曲至曲庫</h2><p class="status-note">處理仍由既有 Python 服務執行；使用原有入庫流程與 CSV 欄位。</p><div class="ingest"><input id="ingestUrl" type="url" placeholder="貼上 YouTube 影片／播放清單網址"><button id="startIngest" class="action primary">🚀 開始入庫</button></div><div class="progress"><i id="ingestProgress"></i></div><p id="ingestStatus" class="status-note">等待新工作</p><iframe title="既有 Python 入庫流程" src="/admin" style="width:100%;height:540px;border:0;border-radius:10px;margin-top:10px;background:#10151e"></iframe></article>
+        <article class="card"><div class="library-toolbar"><h2>📚 曲庫歌曲總覽</h2><div class="button-row"><input id="libraryQuery" type="search" placeholder="搜尋歌名／歌手／ID" class="small"><button id="exportCatalog" class="small">📤 匯出目前結果</button></div></div><div class="table-wrap"><table class="library-table"><thead><tr><th>ID</th><th>歌曲名稱</th><th>歌手</th><th>專輯</th><th>年份</th><th>時長</th><th>語種</th><th>分離／對齊</th><th>影音狀態</th><th>操作</th></tr></thead><tbody id="libraryRows"></tbody></table></div><div class="paging"><span id="libraryPageLabel" class="status-note"></span><button id="libraryMore" class="small">載入更多</button></div></article>
+      </section>
+      <section class="page fullscreen-page" id="view-full" data-view="full" hidden><iframe id="fullPlayerFrame" class="player-frame" title="全屏播放端" allow="autoplay;fullscreen"></iframe></section>
+      <section class="page manual" id="view-manual" hidden><div class="section-head"><div><div class="eyebrow">MANUAL LYRICS STUDIO</div><h1 id="manualTitle">🎯 人工對齊歌詞工作台</h1></div><div class="button-row"><button id="manualBack" class="small">⬅ 返回曲庫</button><button id="manualExport" class="action primary">💾 匯出 LRC 草稿</button></div></div><div class="message">此工作台只產生獨立 LRC 草稿，不修改自動辨識／對齊流程，也不會覆寫正式曲庫。匯出後由管理者自行審核。</div><div class="manual-layout"><article class="card"><video id="manualVideo" controls preload="metadata"></video><div class="button-row"><button data-rate=".5" class="small">0.5×</button><button data-rate=".75" class="small">0.75×</button><button data-rate="1" class="small">1.0×</button><button id="loopLine" class="small">🔁 單句循環：關</button></div><p id="manualLineText" class="status-note">先選擇一行歌詞</p></article><article class="card"><div class="button-row"><button id="newLine" class="small">＋ 新增句</button><button id="splitLine" class="small">✂️ 拆分句</button><button id="mergeLine" class="small">🔗 合併下一句</button><button id="editLine" class="small">📝 純文字編輯</button></div><textarea id="manualText" hidden rows="3" style="width:100%;margin:8px 0;background:#10151e;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:10px"></textarea><div id="lineNavigator" class="library-list"></div><div class="tokens" id="tokenEditor"></div><div class="button-row"><button id="tapToken" class="action">SPACE｜記錄字詞起點</button><button id="tokenEnd" class="small">設定選中字詞尾</button></div></article></div><article class="card"><h3>人聲波形與字詞時間微調</h3><canvas id="waveCanvas" class="wave"></canvas><p class="status-note">拖曳波形中的字詞邊界微調時間；精度為 10ms。無可用人聲 WAV 時可直接編輯起訖時間。</p></article></section>
+    </main>
+    <nav class="bottom-nav" id="bottomNav" aria-label="主要功能">
+      <button data-view-button="full"><span>🖥️</span>全屏顯示</button><button class="active" data-view-button="controller"><span>🎛️</span>控制器主控台</button><button data-view-button="queue"><span>📋</span>管理佇列</button><button data-view-button="search"><span>🔍</span>點播歌曲</button><button data-view-button="settings"><span>⚙️</span>系統設定</button><button data-view-button="library"><span>🗂️</span>管理曲庫</button>
+    </nav>
   </div>
+  <div id="overlay" class="overlay" hidden><div class="modal"><div class="modal-head"><h2 id="modalTitle">QR Code</h2><button id="modalClose" class="small">✕ 關閉</button></div><div id="modalContent"></div></div></div>
+  <div id="toast" class="toast" role="status"></div>
   <script>
-    const socket = io({ query: { role: 'remote' } }), $ = id => document.getElementById(id);
-    let searchSongs = [], queue = [], state = {}, searchTimer, lyricsTimer, position = 0, duration = 0, dragging = false;
-    let searchOffset = 0, searchTotal = 0, searchLoading = false, searchRequestId = 0;
-    const searchPageSize = 50;
-    const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-    const formatTime = value => { const seconds = Math.max(0, Math.floor(Number(value) || 0)); return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` };
-    function selectPane(name) { document.querySelectorAll('[data-pane]').forEach(button => button.classList.toggle('active', button.dataset.pane === name)); document.querySelectorAll('[data-tab]').forEach(button => button.classList.toggle('active', button.dataset.tab === name)); document.querySelectorAll('.pane').forEach(pane => pane.classList.toggle('active', pane.id === `pane-${name}`)); const descriptions = { search: '搜尋歌曲，管理播放，一切都在這裡。', queue: '調整接下來要唱的歌曲。', lyrics: '透過記得的歌詞找到歌曲。', mix: '調整歌曲音量與麥克風效果。', admin: '新增歌曲並追蹤處理進度。' }; $('topDescription').textContent = descriptions[name] || descriptions.search }
-    document.querySelectorAll('[data-pane],[data-tab]').forEach(button => button.addEventListener('click', () => selectPane(button.dataset.pane || button.dataset.tab)));
-    $('fullscreen').onclick = () => document.documentElement.requestFullscreen?.();
-    function requestSongs(reset = false) {
-      if (reset) {
-        searchOffset = 0;
-        searchSongs = [];
-        searchTotal = 0;
-        searchLoading = false;
-        searchRequestId += 1;
-        $('searchResults').innerHTML = '<div class="empty">正在搜尋…</div>';
-      }
-      if (searchLoading) return;
-      searchLoading = true;
-      $('loadMoreSongs').disabled = true;
-      socket.emit('search_songs', {
-        query: $('query').value,
-        language: $('language').value,
-        offset: searchOffset,
-        limit: searchPageSize,
-        paginated: true,
-        requestId: searchRequestId,
-      });
-    }
-    $('query').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(() => requestSongs(true), 160) });
-    $('language').onchange = () => requestSongs(true);
-    $('loadMoreSongs').onclick = () => requestSongs();
-    $('lyricsQuery').addEventListener('input', () => { clearTimeout(lyricsTimer); lyricsTimer = setTimeout(() => { const query = $('lyricsQuery').value.trim(); if (query) socket.emit('search_songs', { query }); else $('lyricsResults').innerHTML = '<div class="empty">輸入歌詞即可搜尋</div>' }, 180) });
-    function songMarkup(song, target) { return `<article class="song-row"><div class="song-info"><div class="song-title">${esc(song.title)}</div><div class="song-sub">${esc(song.artist || '未知歌手')} · ${esc(song.language || '')}</div></div><div class="song-actions"><button class="small-button add" data-id="${esc(song.id)}" data-target="${target}">＋ 點歌</button><button class="small-button" data-insert="${esc(song.id)}" data-target="${target}">插播</button></div></article>` }
-    function bindSongActions(container) { container.querySelectorAll('[data-id]').forEach(button => button.onclick = () => { const song = searchSongs.find(item => item.id === button.dataset.id); if (song) socket.emit('add_to_queue', song); button.textContent = '✓ 已加入'; setTimeout(() => button.textContent = '＋ 點歌', 900) }); container.querySelectorAll('[data-insert]').forEach(button => button.onclick = () => { const song = searchSongs.find(item => item.id === button.dataset.insert); if (song) socket.emit('insert_to_top', song); button.textContent = '已插播'; setTimeout(() => button.textContent = '插播', 900) }) }
-    function renderSearch(rows, target = 'searchResults') { const container = $(target); container.innerHTML = rows?.length ? rows.map(song => songMarkup(song, target)).join('') : '<div class="empty">沒有找到歌曲，試試其他關鍵字。</div>'; bindSongActions(container); if (target === 'searchResults') $('resultCount').textContent = `${rows?.length || 0} 首結果` }
-    function renderQueue() { const container = $('queueList'); $('queueCount').textContent = `${queue.length} 首`; $('queueBadge').textContent = queue.length ? String(queue.length) : ''; container.innerHTML = queue.length ? queue.map((song, index) => `<article class="queue-row"><div class="song-info"><div class="song-title">${index === 0 ? '<span style="color:var(--mint)">▶　</span>' : ''}${esc(song.title)}</div><div class="song-sub">${index === 0 ? '正在播放' : `第 ${index} 首`} · ${esc(song.artist || '未知歌手')}</div></div>${index ? `<button class="small-button remove" data-remove="${esc(song.queueId)}" aria-label="移除歌曲">移除</button>` : ''}</article>`).join('') : '<div class="empty">佇列還是空的，先去點一首歌吧。</div>'; container.querySelectorAll('[data-remove]').forEach(button => button.onclick = () => socket.emit('remove_from_queue', button.dataset.remove)) }
-    function applyPlayback(payload) { queue = payload.queue || []; state = payload.state || {}; const current = queue[0]; $('currentTitle').textContent = current?.title || '尚未點歌'; $('currentArtist').textContent = current ? `${current.artist || '未知歌手'} · ${queue.length} 首在佇列中` : '選首歌開始今晚的演出'; $('togglePlay').textContent = state.isPlaying ? 'Ⅱ' : '▶'; $('mode').textContent = state.audioMode === 'accompaniment' ? '伴奏' : '原唱'; position = Number(state.position) || 0; duration = Number(current?.duration_seconds) || 0; $('duration').textContent = formatTime(duration); if (!dragging) { $('seek').max = duration || 100; $('seek').value = Math.min(position, duration || 100); $('elapsed').textContent = formatTime(position) }; renderQueue();['music', 'mic', 'reverb'].forEach(id => { const key = { music: 'musicVol', mic: 'micVol', reverb: 'reverbVol' }[id]; if (state[key] !== undefined) { $(id).value = state[key]; $(`${id}Out`).textContent = `${Math.round(state[key] * 100)}%` } }) }
-    socket.on('connect', () => { $('connection').textContent = '已連線'; $('connection').classList.remove('offline') });
-    socket.on('disconnect', () => { $('connection').textContent = '重新連線中'; $('connection').classList.add('offline') });
-    socket.on('search_results', rows => { if ($('lyricsQuery').value.trim()) renderSearch(rows || [], 'lyricsResults') });
-    socket.on('search_page_results', page => {
-      if (page?.requestId !== searchRequestId) return;
-      const rows = page?.items || [];
-      searchSongs = page?.offset ? [...searchSongs, ...rows] : rows;
-      searchOffset = searchSongs.length;
-      searchTotal = Number(page?.total) || 0;
-      searchLoading = false;
-      renderSearch(searchSongs);
-      $('resultCount').textContent = `${searchTotal} 首歌曲`;
-      $('loadMoreSongs').hidden = searchOffset >= searchTotal;
-      $('loadMoreSongs').disabled = false;
-    });
-    socket.on('sync_state', payload => applyPlayback(payload || {}));
-    socket.on('playback_snapshot', payload => applyPlayback(payload || {}));
-    socket.on('queue_updated', items => { queue = items || []; renderQueue() });
-    socket.on('playback_error', payload => { $('playbackError').textContent = payload?.message || '播放錯誤'; $('playbackError').classList.add('show'); setTimeout(() => $('playbackError').classList.remove('show'), 6000) });
-    async function refreshBackendStatus() {
-      try {
-        const response = await fetch('/api/services');
-        const services = await response.json();
-        const ready = response.ok && services.python?.ok;
-        $('backendConnection').textContent = ready ? '處理服務就緒' : '處理服務離線';
-        $('backendConnection').classList.toggle('offline', !ready);
-      } catch {
-        $('backendConnection').textContent = '處理服務離線';
-        $('backendConnection').classList.add('offline');
-      }
-    }
-    $('togglePlay').onclick = () => socket.emit('player_command', { isPlaying: !state.isPlaying });
-    $('next').onclick = () => socket.emit('next_song');
-    $('replay').onclick = () => socket.emit('replay_current');
-    $('mode').onclick = () => socket.emit('player_command', { audioMode: state.audioMode === 'accompaniment' ? 'original' : 'accompaniment' });
-    $('seek').addEventListener('input', () => { dragging = true; $('elapsed').textContent = formatTime($('seek').value) });
-    $('seek').addEventListener('change', () => { socket.emit('seek', { position: Number($('seek').value) }); dragging = false });
-    [['music', 'musicVol'], ['mic', 'micVol'], ['reverb', 'reverbVol']].forEach(([id, key]) => $(id).addEventListener('input', () => { $(`${id}Out`).textContent = `${Math.round(Number($(id).value) * 100)}%`; socket.emit('player_command', { [key]: Number($(id).value) }) }));
-    setInterval(() => { if (state.isPlaying && !dragging && duration) { position += 1; $('seek').value = Math.min(position, duration); $('elapsed').textContent = formatTime(position) } }, 1000);
-    socket.on('connect', () => requestSongs(true));
-    refreshBackendStatus();
-    setInterval(refreshBackendStatus, 5000);
+    const socket = io({query:{role:'admin'}}), $ = id => document.getElementById(id);
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const fmt = value => {const s=Math.max(0,Math.floor(Number(value)||0));return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`};
+    const fmtClock = value => {const n=Math.max(0,Number(value)||0),m=Math.floor(n/60),s=(n%60).toFixed(2).padStart(5,'0');return `[${String(m).padStart(2,'0')}:${s}]`};
+    let songs=[],queue=[],history=[],state={},searchOffset=0,searchTotal=0,libraryOffset=0,libraryTotal=0;
+    let searchTimer,searchMode='keyword',searchLanguage='',searchRequest=0,searchBusy=false,libraryBusy=false,duration=0,position=0,dragging=false;
+    let manualSong=null,manualLines=[],selectedLine=0,loopEnabled=false,loopTimer=null;
+    const PAGE=50;
+    function toast(message){$('toast').textContent=message;$('toast').classList.add('show');setTimeout(()=>$('toast').classList.remove('show'),2300)}
+    let fullscreenIdle;
+    function wakeFullscreen(){if(!$('app').classList.contains('fullscreen-mode'))return;$('app').classList.remove('controls-hidden');clearTimeout(fullscreenIdle);fullscreenIdle=setTimeout(()=>$('app').classList.add('controls-hidden'),3000)}
+    function showView(name){document.querySelectorAll('[data-view]').forEach(el=>el.hidden=el.dataset.view!==name);document.querySelectorAll('[data-view-button]').forEach(el=>el.classList.toggle('active',el.dataset.viewButton===name));$('app').classList.toggle('fullscreen-mode',name==='full');if(name==='full'){$('fullPlayerFrame').src='/player.html?embed=1';$('fullPlayerFrame').focus();wakeFullscreen()}else if($('fullPlayerFrame').src) $('fullPlayerFrame').src='about:blank';if(name==='library')loadLibrary(true)}
+    document.addEventListener('mousemove',wakeFullscreen);document.addEventListener('touchstart',wakeFullscreen,{passive:true});
+    document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!$('view-full').hidden){event.preventDefault();showView('controller')}});
+    document.querySelectorAll('[data-view-button]').forEach(button=>button.addEventListener('click',()=>showView(button.dataset.viewButton)));
+    function setPreview(enabled){$('preview').hidden=!enabled;$('workArea').classList.toggle('no-preview',!enabled);$('previewToggle').classList.toggle('active',enabled);$('previewToggle').textContent=`👁️ 預覽：${enabled?'開':'關'}`;localStorage.setItem('ktvPreview',String(enabled));$('settingPreview').checked=enabled}
+    $('previewToggle').onclick=()=>setPreview($('preview').hidden);
+    $('settingPreview').onchange=event=>setPreview(event.target.checked);
+    setPreview(localStorage.getItem('ktvPreview')!=='false');
+    $('qrOpen').onclick=async()=>{ $('modalTitle').textContent='📱 手機掃碼點歌';$('modalContent').innerHTML='<p class="status-note">正在產生遙控器 QR Code…</p>';$('overlay').hidden=false;try{const response=await fetch(`/api/qr?url=${encodeURIComponent(`${location.origin}/remote`)}`);if(!response.ok)throw Error('QR Code 服務無法使用');const data=await response.json();$('modalContent').innerHTML=`<img class="qr" alt="手機遙控器 QR Code" src="${esc(data.dataUrl)}"><p class="status-note" style="text-align:center">請讓手機連上同一個 Wi-Fi／熱點，再掃描或開啟：<br><a href="${esc(data.url)}">${esc(data.url)}</a></p>`}catch(error){$('modalContent').innerHTML=`<div class="message">${esc(error.message)}<br><a href="${esc(`${location.origin}/remote`)}">${esc(`${location.origin}/remote`)}</a></div>`}};
+    $('modalClose').onclick=()=>{$('overlay').hidden=true};$('overlay').onclick=e=>{if(e.target===$('overlay'))$('overlay').hidden=true};
+    async function desktopAction(name){if(!window.ktvDesktop?.[name]){if(name==='openPlayer')window.open('/player','_blank','noopener');else toast('請在播放器視窗執行此操作');return}try{await window.ktvDesktop[name]()}catch(error){toast(error.message||'操作失敗')}}
+    $('playerOpen').onclick=$('settingsPlayerOpen').onclick=()=>desktopAction('openPlayer');
+    $('playerClose').onclick=()=>desktopAction('closePlayer');
+    if(window.ktvDesktop?.capturePlayer){$('playerFrame').hidden=true;$('playerMirror').hidden=false;const mirrorContext=$('playerMirror').getContext('2d');setInterval(async()=>{if($('preview').hidden)return;try{const dataUrl=await window.ktvDesktop.capturePlayer();if(!dataUrl)return;const image=new Image();image.onload=()=>{const canvas=$('playerMirror');canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;mirrorContext.drawImage(image,0,0,canvas.width,canvas.height)};image.src=dataUrl}catch{}},250)}
+    function requestSearch(reset=false){if(reset){searchOffset=0;searchTotal=0;searchBusy=false;searchRequest++;$('searchResults').innerHTML='<div class="message">搜尋中…</div>'}if(searchBusy)return;searchBusy=true;$('loadMoreSongs').disabled=true;socket.emit('search_songs',{query:$('query').value.trim(),language:searchLanguage,mode:searchMode,sort:$('sortSongs').value,offset:searchOffset,limit:PAGE,paginated:true,requestId:searchRequest})}
+    $('query').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>requestSearch(true),180)};
+    $('clearSearch').onclick=()=>{$('query').value='';searchLanguage='';document.querySelectorAll('[data-language]').forEach(b=>b.classList.toggle('active',!b.dataset.language));requestSearch(true)};
+    $('loadMoreSongs').onclick=()=>requestSearch();
+    $('sortSongs').onchange=()=>requestSearch(true);
+    document.querySelectorAll('[data-language]').forEach(button=>button.onclick=()=>{searchLanguage=button.dataset.language;document.querySelectorAll('[data-language]').forEach(b=>b.classList.toggle('active',b===button));requestSearch(true)});
+    document.querySelectorAll('[data-mode]').forEach(button=>button.onclick=()=>{searchMode=button.dataset.mode;document.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('active',b===button));$('query').placeholder=({keyword:'搜尋歌名、歌手、拼音或注音',zhuyin:'輸入注音首字，例如 ㄓㄐㄌ',pinyin:'輸入拼音首字，例如 ZJL',lyrics:'輸入記得的歌詞片段',artist:'搜尋歌手姓名'})[searchMode];$('keyboard').hidden=searchMode!=='zhuyin';requestSearch(true)});
+    const zhuyinKeys='ㄅㄆㄇㄈㄉㄊㄋㄌㄍㄎㄏㄐㄑㄒㄓㄔㄕㄖㄗㄘㄙㄧㄨㄩㄚㄛㄜㄝㄞㄟㄠㄡㄢㄣㄤㄥㄦ';
+    $('keyboard').innerHTML=[...zhuyinKeys].map(char=>`<button class="key" data-key="${char}">${char}</button>`).join('');
+    $('keyboard').onclick=e=>{const key=e.target.closest('[data-key]');if(key){$('query').value+=key.dataset.key;requestSearch(true)}};
+    $('voiceSearch').onclick=()=>{const Speech=window.SpeechRecognition||window.webkitSpeechRecognition;if(!Speech){toast('此瀏覽器不支援語音搜尋');return}const recognition=new Speech();recognition.lang='zh-TW';recognition.onresult=e=>{$('query').value=e.results[0][0].transcript;requestSearch(true)};recognition.onerror=()=>toast('無法辨識語音，請檢查麥克風權限');recognition.start()};
+    function songMarkup(song,library=false){return `<article class="song-row"><div class="song-info"><div class="song-title">${esc(song.title||'未命名歌曲')}</div><div class="song-sub">${esc(song.artist||'未知歌手')} · ${esc(song.language||'未標語種')} · ${esc(song.duration_seconds?fmt(song.duration_seconds):'時長未知')}</div></div><div class="song-actions"><button class="small add" data-add="${esc(song.id)}">＋ 點歌</button><button class="small" data-insert="${esc(song.id)}">⬆ 插播</button>${library?`<button class="small" data-manual="${esc(song.id)}">🎯 歌詞工作台</button>`:''}</div></article>`}
+    function renderSongs(rows,append=false){const target=$('searchResults');if(!append)target.innerHTML='';if(rows.length)target.insertAdjacentHTML('beforeend',rows.map(row=>songMarkup(row)).join(''));else if(!append)target.innerHTML='<div class="message">沒有找到歌曲，試試其他搜尋模式或關鍵字。</div>';target.querySelectorAll('[data-add]').forEach(btn=>btn.onclick=()=>{const song=songs.find(item=>item.id===btn.dataset.add);if(song)socket.emit('add_to_queue',song);toast('已加入待播清單')});target.querySelectorAll('[data-insert]').forEach(btn=>btn.onclick=()=>{const song=songs.find(item=>item.id===btn.dataset.insert);if(song)socket.emit('insert_to_top',song);toast('已插入下一首');showView('queue')})}
+    socket.on('search_page_results',page=>{if(page?.requestId!==searchRequest)return;searchBusy=false;const rows=page.items||[];songs=page.offset?[...songs,...rows]:rows;searchOffset=songs.length;searchTotal=Number(page.total)||0;renderSongs(rows,Boolean(page.offset));$('resultCount').textContent=`${searchTotal.toLocaleString()} 首歌曲`;$('pageLabel').textContent=`顯示 ${searchOffset} / ${searchTotal} 首`;$('loadMoreSongs').hidden=searchOffset>=searchTotal;$('loadMoreSongs').disabled=false});
+    function loadSongsHttp(reset=false){requestSearch(reset)}
+    function renderQueue(){const pane=$('queueList');$('queueSummary').textContent=`待播 ${Math.max(0,queue.length-1)} 首`;pane.innerHTML=queue.length?queue.map((song,index)=>`<article class="queue-row"><div class="song-info"><div class="song-title">${index===0?'▶ NOW · ':`#${String(index).padStart(2,'0')} · `}${esc(song.title)}</div><div class="song-sub">${esc(song.artist||'未知歌手')} · ${index===0?'正在播放':'播放設定沿用歌曲預設'}</div></div><div class="song-actions">${index===0?'<button class="small remove" data-next>⏭ 立即切歌</button>':`<button class="small" data-top="${esc(song.queueId)}">⬆ 置頂</button><button class="small remove" data-remove="${esc(song.queueId)}">移除</button>`}</div></article>`).join(''):'<div class="message">佇列空空的，前往點歌頁加入歌曲。</div>';pane.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>socket.emit('remove_from_queue',b.dataset.remove));pane.querySelectorAll('[data-top]').forEach(b=>b.onclick=()=>socket.emit('move_to_top',b.dataset.top));pane.querySelector('[data-next]')?.addEventListener('click',()=>socket.emit('next_song'));$('historyList').innerHTML=history.length?history.map((s,i)=>`<article class="queue-row"><div class="song-info"><div class="song-title">${i+1}. ${esc(s.title)}</div><div class="song-sub">${esc(s.artist||'未知歌手')}</div></div><button class="small add" data-replay="${esc(s.id)}">重新點播</button></article>`).join(''):'<div class="message">尚無本次執行期間的播放歷史。</div>';$('historyList').querySelectorAll('[data-replay]').forEach(b=>b.onclick=()=>{const song=history.find(s=>s.id===b.dataset.replay);if(song)socket.emit('add_to_queue',song)})}
+    document.querySelectorAll('[data-queue-tab]').forEach(button=>button.onclick=()=>{const show=button.dataset.queueTab==='history';$('upcomingPane').hidden=show;$('historyPane').hidden=!show;document.querySelectorAll('[data-queue-tab]').forEach(b=>b.classList.toggle('active',b===button))});
+    $('shuffleQueue').onclick=()=>socket.emit('shuffle_queue');$('clearQueue').onclick=()=>{if(confirm('清除所有待播歌曲？目前播放中的歌曲會繼續。'))socket.emit('clear_queue')};
+    function applyPlayback(payload){queue=payload.queue||[];history=payload.history||history;state=payload.state||{};const current=queue[0];$('currentTitle').textContent=current?.title||'尚未點歌';$('currentSub').textContent=current?`${current.artist||'未知歌手'} · 下一首：${queue[1]?.title||'無'}`:'選一首歌開始今晚的演出';$('togglePlay').textContent=state.isPlaying?'⏸ 暫停':'▶ 播放';$('audioMode').textContent=state.audioMode==='accompaniment'?'🎤 伴唱模式':'🗣️ 原唱模式';$('nowQueue').textContent=`待播 ${Math.max(0,queue.length-1)} 首${history.length?` · 已播 ${history.length} 首`:''}`;duration=Number(current?.duration_seconds)||0;position=Number(state.position)||0;$('duration').textContent=fmt(duration);if(!dragging){$('seek').max=duration||100;$('seek').value=Math.min(position,duration||100);$('elapsed').textContent=fmt(position)}[['music','musicVol'],['mic','micVol'],['reverb','reverbVol']].forEach(([id,key])=>{if(state[key]!==undefined){$(id).value=state[key];$(`${id}Out`).textContent=`${Math.round(state[key]*100)}%`}});renderQueue()}
+    socket.on('sync_state',payload=>applyPlayback(payload||{}));socket.on('playback_snapshot',applyPlayback);socket.on('queue_updated',items=>{queue=items||[];renderQueue()});socket.on('playback_error',data=>toast(data?.message||'播放錯誤'));
+    socket.on('crowd_interaction',data=>toast(`${data?.type==='message'?'💬':data?.type==='cheer'?'🎉':'👏'} ${data?.user||'來賓'}：${data?.text||'為演出加油！'}`));
+    socket.on('connect',()=>{$('clientStatus').classList.remove('offline');$('clientStatus').lastElementChild.textContent='播放服務已連線';$('socketStatus').textContent='Socket.IO 已連線';requestSearch(true);checkServices()});socket.on('disconnect',()=>{$('clientStatus').classList.add('offline');$('clientStatus').lastElementChild.textContent='播放服務重新連線中';$('socketStatus').textContent='Socket.IO 離線'});
+    $('togglePlay').onclick=()=>socket.emit('player_command',{isPlaying:!state.isPlaying});$('next').onclick=()=>socket.emit('next_song');$('replay').onclick=()=>socket.emit('replay_current');$('audioMode').onclick=()=>socket.emit('player_command',{audioMode:state.audioMode==='accompaniment'?'original':'accompaniment'});
+    $('seek').oninput=()=>{dragging=true;$('elapsed').textContent=fmt($('seek').value)};$('seek').onchange=()=>{socket.emit('seek',{position:Number($('seek').value)});dragging=false};
+    [['music','musicVol'],['mic','micVol'],['reverb','reverbVol']].forEach(([id,key])=>$(id).oninput=()=>{$(`${id}Out`).textContent=`${Math.round(Number($(id).value)*100)}%`;socket.emit('player_command',{[key]:Number($(id).value)})});
+    setInterval(()=>{if(state.isPlaying&&!dragging&&duration){position=Math.min(duration,position+.25);$('seek').value=position;$('elapsed').textContent=fmt(position)}},250);
+    async function checkServices(){try{const r=await fetch('/api/services'),data=await r.json();const ok=r.ok&&data.python?.ok;$('serviceBadge').textContent=ok?'Python 處理服務就緒':'Python 處理服務離線';$('serviceBadge').style.color=ok?'var(--mint)':'var(--orange)'}catch{$('serviceBadge').textContent='Python 處理服務離線'}}
+    async function updateNetwork(){const url=`${location.origin}/remote`;$('remoteAddress').textContent=url;try{const response=await fetch('/api/room');const room=await response.json();$('networkStatus').lastElementChild.textContent=`區域網路 ${location.host}`;$('clientStatus').lastElementChild.textContent=`${room.clientCount||0} 台裝置 · ${room.songCount||0} 首歌曲`}catch{$('networkStatus').classList.add('offline')}}
+    $('copyRemote').onclick=async()=>{try{await navigator.clipboard.writeText(`${location.origin}/remote`);toast('遙控網址已複製')}catch{toast(`${location.origin}/remote`)}};
+    $('settingQr').onchange=e=>localStorage.setItem('ktvShowQr',String(e.target.checked));$('allowRemoteNext').onchange=e=>localStorage.setItem('ktvAllowRemoteNext',String(e.target.checked));
+    $('enableIngest').onchange=e=>{$('ingestCard').hidden=!e.target.checked;localStorage.setItem('ktvEnableIngest',String(e.target.checked))};$('enableIngest').checked=localStorage.getItem('ktvEnableIngest')!=='false';$('ingestCard').hidden=!$('enableIngest').checked;
+    document.querySelectorAll('[data-setting]').forEach(button=>button.onclick=()=>{document.querySelectorAll('[data-setting]').forEach(b=>b.classList.toggle('active',b===button));document.querySelectorAll('[data-setting-pane]').forEach(p=>p.hidden=p.dataset.settingPane!==button.dataset.setting)});
+    $('ingestUrl').addEventListener('change',async()=>{const url=$('ingestUrl').value.trim();if(!url)return;try{const r=await fetch(`/api/resolve_yt_title?url=${encodeURIComponent(url)}`);const data=await r.json();$('ingestStatus').textContent=data.ok?`偵測到：${data.song} — ${data.singer}`:(data.error||'無法預覽影片標題')}catch{$('ingestStatus').textContent='無法連線至 Python 處理服務'}});
+    $('startIngest').onclick=()=>{if(!$('ingestUrl').value.trim()){toast('請先貼上 YouTube 網址');return}showView('library');document.querySelector('iframe[title="既有 Python 入庫流程"]')?.scrollIntoView({behavior:'smooth'});toast('請在下方既有處理面板確認並送出工作')};
+    let libraryRows=[];
+    function loadLibrary(reset=false){if(libraryBusy)return;if(reset){libraryOffset=0;libraryRows=[]}libraryBusy=true;const q=$('libraryQuery').value.trim();fetch(`/api/songs?q=${encodeURIComponent(q)}&limit=${PAGE}&offset=${libraryOffset}&sort=title`).then(r=>r.json()).then(data=>{libraryRows=libraryOffset?[...libraryRows,...data.items]:data.items;libraryOffset=libraryRows.length;libraryTotal=data.total;renderLibrary();libraryBusy=false}).catch(()=>{libraryBusy=false;$('libraryRows').innerHTML='<tr><td colspan="10">無法載入正式曲庫</td></tr>'})}
+    function renderLibrary(){ $('libraryCount').textContent=`${libraryTotal.toLocaleString()} 首`; $('libraryPageLabel').textContent=`顯示 ${libraryOffset} / ${libraryTotal} 首`; $('libraryMore').hidden=libraryOffset>=libraryTotal;$('libraryRows').innerHTML=libraryRows.map(song=>`<tr><td title="${esc(song.id)}">${esc(song.id?.slice(0,10))}</td><td>${esc(song.title)}</td><td>${esc(song.artist)}</td><td>${esc(song.album||'—')}</td><td>${esc(song.release_year||'—')}</td><td>${esc(song.duration_seconds?fmt(song.duration_seconds):'—')}</td><td>${esc(song.language||'—')}</td><td>${esc([song.separator_mode||song.separator_model,song.alignment_model].filter(Boolean).join(' / ')||'—')}</td><td>${song.video_filename?`🎬 ${esc(song.instrumental_filename?'原／伴':'原唱')}`:'缺影音'}</td><td><button class="small" data-export="${esc(song.id)}">匯出</button><button class="small" data-manual="${esc(song.id)}">🎯 對齊</button></td></tr>`).join('');$('libraryRows').querySelectorAll('[data-export]').forEach(b=>b.onclick=()=>exportSong(b.dataset.export));$('libraryRows').querySelectorAll('[data-manual]').forEach(b=>b.onclick=()=>openManual(b.dataset.manual))}
+    $('libraryQuery').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>loadLibrary(true),180)};$('libraryMore').onclick=()=>loadLibrary();$('exportCatalog').onclick=()=>{const blob=new Blob([JSON.stringify(libraryRows,null,2)],{type:'application/json'});download(blob,'openktv-catalog-export.json')};
+    function download(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+    function exportSong(id){const song=libraryRows.find(row=>row.id===id);if(song)download(new Blob([JSON.stringify(song,null,2)],{type:'application/json'}),`${song.id}.json`)}
+    $('manualBack').onclick=()=>showView('library');
+    function parseLrc(text){const rows=[];let current=null;for(const raw of text.split(/\r?\n/)){const line=raw.trim();const timed=/^\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\](.*)$/.exec(line);if(timed){rows.push({time:Number(timed[1])*60+Number(timed[2])+Number(`0.${timed[3]||0}`),end:null,text:timed[4].trim(),tokens:[]});current=rows.at(-1);continue}const lineMatch=/^%([\d.]+)\s+([\d.]+)\s+(.*)$/.exec(line);if(lineMatch){current={time:Number(lineMatch[1]),end:Number(lineMatch[2]),text:lineMatch[3],tokens:[]};rows.push(current);continue}const wordMatch=/^\$([\d.]+)\s+([\d.]+)\s+(.*)$/.exec(line);if(wordMatch&&current)current.tokens.push({text:wordMatch[3],start:Number(wordMatch[1]),end:Number(wordMatch[2])})}return rows.map(row=>({...row,tokens:row.tokens.length?row.tokens:tokenize(row.text).map((text,i,a)=>({text,start:row.time+(row.end?((row.end-row.time)*i/a.length):i*.3),end:row.time+(row.end?((row.end-row.time)*(i+1)/a.length):(i+1)*.3)}))}))}
+    function tokenize(text){return text.match(/[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af]|[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*\s*/gu)||[]}
+    async function openManual(id){manualSong=libraryRows.find(row=>row.id===id)||songs.find(row=>row.id===id);if(!manualSong)return;showView('manual');$('manualTitle').textContent=`🎯 人工對齊｜${manualSong.title} — ${manualSong.artist}`;$('manualVideo').src=manualSong.path||'';try{if(manualSong.lyrics_filename){const response=await fetch(`/media/${encodeURIComponent(manualSong.lyrics_filename)}`);manualLines=parseLrc(await response.text())}else manualLines=parseLrc(manualSong.lyrics||'')}catch{manualLines=parseLrc(manualSong.lyrics||'')}selectedLine=0;renderManual();loadVocalWave()}
+    function renderManual(){const nav=$('lineNavigator');nav.innerHTML=manualLines.map((line,i)=>`<button class="small" data-line="${i}" style="text-align:left;color:${i===selectedLine?'var(--mint)':'var(--text)'}">${i===selectedLine?'▶ ':''}${fmtClock(line.time)} ${esc(line.text||'[間奏]')}</button>`).join('');nav.querySelectorAll('[data-line]').forEach(b=>b.onclick=()=>{selectedLine=Number(b.dataset.line);$('manualVideo').currentTime=manualLines[selectedLine]?.time||0;renderManual()});const line=manualLines[selectedLine];$('manualLineText').textContent=line?`${fmtClock(line.time)} ${line.text}`:'沒有歌詞句子';$('manualText').value=line?.text||'';$('tokenEditor').innerHTML=(line?.tokens||[]).map((token,i)=>`<label class="token" data-token-wrap="${i}"><span>${esc(token.text)}</span><span>起點</span><input data-token="${i}" data-edge="start" type="number" min="0" step=".01" value="${Number(token.start).toFixed(2)}" aria-label="${esc(token.text)} 起點"><span>終點</span><input data-token="${i}" data-edge="end" type="number" min="0" step=".01" value="${Number(token.end).toFixed(2)}" aria-label="${esc(token.text)} 終點"></label>`).join('');$('tokenEditor').querySelectorAll('[data-token-wrap]').forEach(w=>w.onclick=()=>{document.querySelectorAll('[data-token-wrap]').forEach(x=>x.style.borderColor='');w.style.borderColor='var(--mint)';selectedToken=Number(w.dataset.tokenWrap)});drawWave()}
+    $('manualVideo').onended=()=>{if(loopEnabled&&manualLines[selectedLine])$('manualVideo').currentTime=manualLines[selectedLine].time};
+    document.querySelectorAll('[data-rate]').forEach(b=>b.onclick=()=>{$('manualVideo').playbackRate=Number(b.dataset.rate);$('manualVideo').preservesPitch=true});
+    $('loopLine').onclick=()=>{loopEnabled=!loopEnabled;$('loopLine').textContent=`🔁 單句循環：${loopEnabled?'開':'關'}`;if(loopEnabled&&manualLines[selectedLine])$('manualVideo').currentTime=manualLines[selectedLine].time};
+    $('manualVideo').ontimeupdate=()=>{if(loopEnabled&&manualLines[selectedLine]){const next=manualLines[selectedLine+1]?.time||manualSong?.duration_seconds||Infinity;if($('manualVideo').currentTime>=next)$('manualVideo').currentTime=manualLines[selectedLine].time}};
+    $('newLine').onclick=()=>{const time=$('manualVideo').currentTime||0;manualLines.splice(selectedLine+1,0,{time,end:time+.5,text:'',tokens:[]});selectedLine++;renderManual()};
+    $('editLine').onclick=()=>{$('manualText').hidden=!$('manualText').hidden};
+    $('manualText').onchange=()=>{const line=manualLines[selectedLine];if(!line)return;line.text=$('manualText').value;const tokens=tokenize(line.text),end=line.end||line.tokens.at(-1)?.end||line.time+tokens.length*.3;line.tokens=tokens.map((text,i)=>({text,start:line.time+(end-line.time)*i/Math.max(1,tokens.length),end:line.time+(end-line.time)*(i+1)/Math.max(1,tokens.length)}));line.end=end;renderManual()};
+    $('splitLine').onclick=()=>{const line=manualLines[selectedLine];if(!line)return;const mid=Math.ceil(line.text.length/2),textA=line.text.slice(0,mid),textB=line.text.slice(mid),splitAt=line.time+Math.max(.1,(line.end-line.time)/2);manualLines.splice(selectedLine,1,{time:line.time,end:splitAt,text:textA,tokens:tokenize(textA).map((text,i,a)=>({text,start:line.time+(splitAt-line.time)*i/a.length,end:line.time+(splitAt-line.time)*(i+1)/a.length}))},{time:splitAt,end:line.end,text:textB,tokens:tokenize(textB).map((text,i,a)=>({text,start:splitAt+(line.end-splitAt)*i/a.length,end:splitAt+(line.end-splitAt)*(i+1)/a.length}))});renderManual()};
+    $('mergeLine').onclick=()=>{if(manualLines[selectedLine+1]){const next=manualLines.splice(selectedLine+1,1)[0];manualLines[selectedLine].text+=next.text;manualLines[selectedLine].tokens.push(...next.tokens);manualLines[selectedLine].end=next.end;renderManual()}};
+    let selectedToken=0,heldToken=null;
+    function setTokenEdge(edge,time){const line=manualLines[selectedLine],token=line?.tokens[selectedToken];if(!token)return;token[edge]=time;if(edge==='start'&&selectedToken>0)line.tokens[selectedToken-1].end=time;if(edge==='end'&&line.tokens[selectedToken+1])line.tokens[selectedToken+1].start=time;renderManual()}
+    $('tokenEditor').addEventListener('change',e=>{if(e.target.matches('[data-token]')){const i=Number(e.target.dataset.token),edge=e.target.dataset.edge;manualLines[selectedLine].tokens[i][edge]=Number(e.target.value);selectedToken=i}});
+    $('tapToken').onclick=()=>{setTokenEdge('start',$('manualVideo').currentTime);heldToken=selectedToken};
+    $('tokenEnd').onclick=()=>setTokenEdge('end',$('manualVideo').currentTime);
+    window.addEventListener('keydown',e=>{if(!$('view-manual').hidden&&e.code==='Space'&&!['INPUT','TEXTAREA'].includes(document.activeElement.tagName)){e.preventDefault();setTokenEdge('start',$('manualVideo').currentTime);heldToken=selectedToken}});
+    window.addEventListener('keyup',e=>{if(e.code==='Space'&&heldToken!==null&&!$('view-manual').hidden){setTokenEdge('end',$('manualVideo').currentTime);heldToken=null;selectedToken=Math.min(selectedToken+1,(manualLines[selectedLine]?.tokens.length||1)-1)}});
+    $('manualExport').onclick=()=>{const rows=['@format ktv-lrc','@version 1','','@id 000000','',`@song_name ${manualSong?.title||''}, zh-tw`,`@singer ${manualSong?.artist||'Unknown'}, zh-tw`,`@duration ${Math.floor(manualSong?.duration_seconds||0)}`,'','@lyrics zh-tw','@lyric_synced word','','@lyric zh-tw',...manualLines.flatMap(line=>[`%${Number(line.time).toFixed(3)} ${Number(line.end||line.tokens.at(-1)?.end||line.time).toFixed(3)} ${line.text}`,...line.tokens.map(token=>`$${Number(token.start).toFixed(3)} ${Number(token.end).toFixed(3)} ${token.text}`),'']),'@dialogue'];download(new Blob([rows.join('\n')],{type:'text/plain;charset=utf-8'}),`${manualSong?.id||'lyrics'}-manual-draft.lrc`);toast('已匯出人工歌詞草稿；未覆寫正式曲庫')};
+    async function loadVocalWave(){const filename=manualSong?.vocals_filename;if(!filename){drawWave('曲庫沒有 vocals_filename，無法載入原始人聲波形');return}try{const response=await fetch(`/media/${encodeURIComponent(filename)}`);if(!response.ok)throw Error('人聲 WAV 無法讀取');drawWaveFromWav(await response.arrayBuffer())}catch{drawWave('無法載入人聲 WAV 波形')}}
+    function drawWaveFromWav(buffer){const view=new DataView(buffer);let offset=12,format=1,channels=1,bits=16,dataOffset=0,dataSize=0;while(offset+8<view.byteLength){const id=String.fromCharCode(view.getUint8(offset),view.getUint8(offset+1),view.getUint8(offset+2),view.getUint8(offset+3)),size=view.getUint32(offset+4,true);if(id==='fmt '){format=view.getUint16(offset+8,true);channels=view.getUint16(offset+10,true);bits=view.getUint16(offset+22,true)}if(id==='data'){dataOffset=offset+8;dataSize=size;break}offset+=8+size+(size%2)}if(!dataOffset||![16,24,32].includes(bits)||![1,3].includes(format)){drawWave('此 WAV 編碼格式目前無法繪製');return}const samples=Math.floor(dataSize/(bits/8)/channels),bins=900,values=[];for(let bin=0;bin<bins;bin++){const start=Math.floor(bin*samples/bins),end=Math.max(start+1,Math.floor((bin+1)*samples/bins));let peak=0;for(let i=start;i<end;i+=Math.max(1,Math.floor((end-start)/60))){const at=dataOffset+i*channels*(bits/8);let value;if(format===3&&bits===32)value=Math.abs(view.getFloat32(at,true));else if(bits===16)value=Math.abs(view.getInt16(at,true)/32768);else if(bits===24){let raw=view.getUint8(at)|(view.getUint8(at+1)<<8)|(view.getUint8(at+2)<<16);if(raw&0x800000)raw|=0xff000000;value=Math.abs(raw/8388608)}else value=Math.abs(view.getInt32(at,true)/2147483648);peak=Math.max(peak,value)}values.push(peak)}drawWave(null,values)}
+    let waveformValues=[],dragBoundary=null;
+    function drawWave(message='',values=waveformValues){if(values.length)waveformValues=values;const canvas=$('waveCanvas'),ctx=canvas.getContext('2d'),ratio=window.devicePixelRatio||1;canvas.width=Math.max(1,canvas.clientWidth)*ratio;canvas.height=Math.max(1,canvas.clientHeight)*ratio;ctx.setTransform(ratio,0,0,ratio,0,0);ctx.fillStyle='#0b1017';ctx.fillRect(0,0,canvas.clientWidth,canvas.clientHeight);if(!waveformValues.length){ctx.fillStyle='#9ba7b8';ctx.font='11px system-ui';ctx.fillText(message||'載入 vocals.wav 後顯示實際人聲波形',8,18);return}ctx.strokeStyle='#76edce';ctx.beginPath();const mid=canvas.clientHeight/2;waveformValues.forEach((value,i)=>{const x=i/waveformValues.length*canvas.clientWidth,y=Math.max(1,value*mid);ctx.moveTo(x,mid-y);ctx.lineTo(x,mid+y)});ctx.stroke();const tokens=manualLines[selectedLine]?.tokens||[],total=Number(manualSong?.duration_seconds)||1;tokens.forEach((token,i)=>{const x=token.start/total*canvas.clientWidth,end=token.end/total*canvas.clientWidth;ctx.fillStyle=i===selectedToken?'#83a7ff42':'#76edce25';ctx.fillRect(x,0,Math.max(2,end-x),canvas.clientHeight);ctx.strokeStyle='#b8f7e5';ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,canvas.clientHeight);ctx.moveTo(end,0);ctx.lineTo(end,canvas.clientHeight);ctx.stroke()})}
+    $('waveCanvas').onpointerdown=e=>{const canvas=$('waveCanvas'),rect=canvas.getBoundingClientRect(),x=e.clientX-rect.left,total=Number(manualSong?.duration_seconds)||1,tokens=manualLines[selectedLine]?.tokens||[];let closest=null,distance=13;tokens.forEach((token,i)=>['start','end'].forEach(edge=>{const dx=Math.abs(token[edge]/total*rect.width-x);if(dx<distance){distance=dx;closest={index:i,edge}}}));if(closest){selectedToken=closest.index;dragBoundary=closest.edge;canvas.setPointerCapture(e.pointerId)}};
+    $('waveCanvas').onpointermove=e=>{if(!dragBoundary)return;const rect=$('waveCanvas').getBoundingClientRect(),time=Math.max(0,Math.min(Number(manualSong?.duration_seconds)||Infinity,(e.clientX-rect.left)/rect.width*(Number(manualSong?.duration_seconds)||1)));manualLines[selectedLine].tokens[selectedToken][dragBoundary]=Math.round(time*100)/100;drawWave()};
+    $('waveCanvas').onpointerup=()=>{if(dragBoundary){const edge=dragBoundary;dragBoundary=null;renderManual();drawWave();toast(`已微調字詞${edge==='start'?'起點':'終點'}`)}};
+    $('manualVideo').addEventListener('loadedmetadata',drawWave);window.addEventListener('resize',drawWave);
+    $('searchResults').addEventListener('click',e=>{const button=e.target.closest('[data-manual]');if(button)openManual(button.dataset.manual)});
+    showView('controller');updateNetwork();checkServices();setInterval(checkServices,6000);$('settingQr').checked=localStorage.getItem('ktvShowQr')!=='false';$('allowRemoteNext').checked=localStorage.getItem('ktvAllowRemoteNext')!=='false';
   </script>
 </body>
-
 </html>

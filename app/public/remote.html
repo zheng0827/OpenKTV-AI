@@ -1,348 +1,58 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
-
+<!doctype html>
+<html lang="zh-Hant">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>KTV 行動點歌遙控器</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <script src="/socket.io/socket.io.js"></script>
-    <style>
-        body {
-            background: #09090b;
-        }
-
-        .glass-header {
-            background: rgba(24, 24, 27, 0.85);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-        }
-
-        .glass-card {
-            background: rgba(39, 39, 42, 0.55);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-        }
-
-        .hide-scrollbar::-webkit-scrollbar {
-            display: none;
-        }
-    </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#090b10">
+  <title>OpenKTV｜手機遙控器</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    :root{color-scheme:dark;--bg:#090b10;--panel:#171c25;--panel2:#222a37;--line:#303949;--text:#f4f6fb;--muted:#9aa5b5;--blue:#7fa9ff;--mint:#75e8c9;--rose:#ff7894}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh;padding-bottom:224px}.header{position:sticky;top:0;z-index:4;background:#11151ceF;backdrop-filter:blur(15px);border-bottom:1px solid #ffffff10;padding:14px 15px 10px}.brand-row,.search-row,.section-head,.song-row,.queue-row,.controls,.profile-row{display:flex;align-items:center;justify-content:space-between;gap:9px}.brand{font-weight:900;letter-spacing:.12em}.brand i{font-style:normal;color:var(--blue)}.connection{font-size:11px;color:var(--mint)}.connection.offline{color:#ffbe72}.profile-row{margin-top:9px;justify-content:flex-start;color:var(--muted);font-size:11px}.profile-row input{width:130px;background:#0d1118;border:1px solid var(--line);border-radius:99px;color:white;padding:7px 10px}.search-row{margin-top:10px}.search-row input{flex:1;min-width:0;background:#090c12;border:1px solid var(--line);border-radius:12px;padding:12px;color:white}.button{border:1px solid var(--line);background:#ffffff08;border-radius:10px;padding:9px 11px;color:var(--text);font-weight:700}.button.primary{background:var(--blue);color:#07101f;border-color:var(--blue)}.chips{display:flex;gap:7px;overflow:auto;padding:10px 0 2px;scrollbar-width:none}.chip{flex-shrink:0;border:1px solid transparent;border-radius:99px;padding:7px 12px;background:#252b35;color:var(--muted);font-size:11px;font-weight:750}.chip.active{background:#4875dd;color:white}.tabs{display:grid;grid-template-columns:repeat(3,1fr);padding:10px 12px;gap:7px}.tabs button{background:transparent;border:0;border-radius:10px;color:var(--muted);padding:10px;font-weight:750}.tabs button.active{background:#ffffff0e;color:var(--blue)}main{padding:0 12px}.pane[hidden]{display:none}.list{display:grid;gap:8px}.song-row,.queue-row{background:var(--panel);border:1px solid #ffffff0c;border-radius:13px;padding:12px}.song-info{min-width:0;flex:1}.title{font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sub{color:var(--muted);font-size:11px;margin-top:3px}.song-actions{display:flex;gap:5px}.song-actions button{font-size:10px;padding:8px}.add{color:var(--mint)}.insert{color:var(--rose)}.empty{border:1px dashed var(--line);border-radius:12px;text-align:center;color:var(--muted);padding:36px 10px}.bottom{position:fixed;bottom:0;left:0;right:0;z-index:5;background:#11151cf2;backdrop-filter:blur(16px);border-top:1px solid #ffffff14;padding:8px 12px max(10px,env(safe-area-inset-bottom))}.seek{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;color:var(--muted);font-size:10px}.seek input{width:100%;accent-color:var(--blue)}.now{font-size:11px;font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:6px 2px}.controls{justify-content:space-around}.controls button{border:0;background:transparent;padding:7px 4px;color:var(--text);font-size:11px;font-weight:750}.controls .play{height:45px;width:45px;border-radius:50%;background:var(--blue);color:#06101f;font-size:17px}.quick-row{display:flex;align-items:center;justify-content:space-between;border-top:1px solid #ffffff10;margin-top:5px;padding-top:6px}.quick-row button{background:none;border:0;color:var(--muted);font-size:11px}.notice{margin:10px 0;padding:10px;border:1px solid #ffffff12;border-radius:10px;color:var(--muted);font-size:11px}.interaction-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.interaction-grid button{height:62px;font-size:15px}.message-form{display:flex;gap:7px;margin-top:10px}.message-form input{flex:1;min-width:0;background:#11151c;border:1px solid var(--line);border-radius:10px;padding:10px;color:#fff}.confirm{position:fixed;inset:0;background:#000b;z-index:10;display:grid;place-items:center;padding:20px}.confirm[hidden]{display:none}.confirm-box{width:min(340px,100%);background:var(--panel);padding:18px;border-radius:15px;border:1px solid var(--line)}.confirm-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}.badge{color:var(--mint);font-size:10px}.result-count{color:var(--muted);font-size:11px;text-align:right;padding:7px}
+    @media(min-width:720px){body{max-width:700px;margin:auto;border-left:1px solid #ffffff0c;border-right:1px solid #ffffff0c}.header{position:relative}}
+  </style>
 </head>
-
-<body class="text-zinc-100 font-sans h-screen flex flex-col overflow-hidden select-none" id="app">
-
-    <!-- 頂部搜尋與分類導覽列 -->
-    <div class="glass-header p-4 space-y-3 z-30 shadow-xl">
-        <div class="flex items-center justify-between">
-            <h1
-                class="text-lg font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-indigo-400">
-                KTV REMOTE</h1>
-            <div
-                class="text-xs font-bold px-3 py-1 bg-zinc-800/80 rounded-full text-zinc-300 flex items-center gap-2 border border-zinc-700/50">
-                <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div> 主機已連線
-            </div>
-        </div>
-
-        <div class="flex gap-2">
-            <input v-model="searchQuery" @input="fetchSongs" type="text" placeholder="拼音 (ZJL)、注音或歌名..."
-                class="flex-1 bg-zinc-900/90 border border-zinc-700/50 rounded-2xl px-5 py-2.5 text-sm text-white focus:outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition placeholder-zinc-500">
-            <button v-show="searchQuery" @click="searchQuery = ''; fetchSongs()"
-                class="px-4 bg-zinc-800 rounded-2xl text-xs text-zinc-400 font-bold active:scale-95 transition">清除</button>
-        </div>
-
-        <div class="flex gap-2 overflow-x-auto hide-scrollbar pb-1 text-xs">
-            <button @click="selectedLang = ''; fetchSongs()"
-                :class="!selectedLang ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30' : 'bg-zinc-800/60 text-zinc-400'"
-                class="px-4 py-2 rounded-full font-bold whitespace-nowrap transition">全部語種</button>
-            <button @click="selectedLang = '國語'; fetchSongs()"
-                :class="selectedLang === '國語' ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30' : 'bg-zinc-800/60 text-zinc-400'"
-                class="px-4 py-2 rounded-full font-bold whitespace-nowrap transition">國語</button>
-            <button @click="selectedLang = '台語'; fetchSongs()"
-                :class="selectedLang === '台語' ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30' : 'bg-zinc-800/60 text-zinc-400'"
-                class="px-4 py-2 rounded-full font-bold whitespace-nowrap transition">台語</button>
-            <button @click="selectedLang = '粵語'; fetchSongs()"
-                :class="selectedLang === '粵語' ? 'bg-sky-600 text-white shadow-md shadow-sky-600/30' : 'bg-zinc-800/60 text-zinc-400'"
-                class="px-4 py-2 rounded-full font-bold whitespace-nowrap transition">粵語</button>
-        </div>
-    </div>
-
-    <div v-if="playbackError"
-        class="mx-4 mt-3 rounded-xl border border-rose-700/50 bg-rose-950/70 px-4 py-3 text-sm text-rose-200">
-        {{ playbackError }}
-        <button @click="playbackError = ''" class="float-right ml-3 font-bold">✕</button>
-    </div>
-
-    <!-- 主內容滑動分頁 -->
-    <div class="flex-1 overflow-y-auto p-4 space-y-3 pb-40">
-        <!-- 點歌大廳清單 -->
-        <div v-show="tab === 'search'" class="space-y-3">
-            <div v-for="song in searchResults" :key="song.id"
-                class="glass-card rounded-2xl p-4 flex justify-between items-center shadow-lg active:scale-[0.98] transition-transform">
-                <div class="flex-1 min-w-0 pr-4">
-                    <h3 class="font-bold text-base text-white truncate">{{ song.title }}</h3>
-                    <p class="text-xs text-zinc-400 mt-1 truncate">
-                        {{ song.artist }}
-                        <span class="text-[10px] bg-zinc-700/60 text-zinc-300 px-2 py-0.5 rounded ml-2">{{ song.language
-                            }}</span>
-                        <span class="text-[10px] text-zinc-500 ml-1">{{ song.char_count }}字</span>
-                    </p>
-                </div>
-                <div class="flex items-center gap-2 shrink-0">
-                    <button @click="addQueue(song)"
-                        class="px-4 py-2 bg-gradient-to-r from-sky-600 to-blue-600 active:from-sky-500 active:to-blue-500 rounded-xl font-bold text-xs shadow-md transition">點歌</button>
-                    <button @click="insertTop(song)"
-                        class="px-3 py-2 bg-zinc-800 text-rose-400 active:bg-zinc-700 rounded-xl font-bold text-xs shadow-md transition border border-rose-900/30">插播</button>
-                </div>
-            </div>
-            <div v-if="searchResults.length === 0" class="text-center text-zinc-500 py-16 font-medium">找不到相關歌曲</div>
-        </div>
-
-        <!-- 已點清單佇列管理 -->
-        <div v-show="tab === 'queue'" class="space-y-3">
-            <div v-for="(song, index) in queue" :key="song.queueId"
-                class="glass-card rounded-2xl p-4 flex justify-between items-center shadow-lg transition-all"
-                :class="index === 0 ? 'border-emerald-500/50 bg-emerald-950/20' : ''">
-                <div class="flex-1 min-w-0 pr-4">
-                    <h3 class="font-bold text-base text-white flex items-center gap-2 truncate">
-                        <span v-if="index === 0"
-                            class="shrink-0 text-[10px] bg-emerald-500 text-black px-2 py-0.5 rounded-md font-black animate-pulse">播放中</span>
-                        <span v-else class="shrink-0 text-xs text-zinc-500 w-5 font-bold">{{ index }}</span>
-                        <span class="truncate">{{ song.title }}</span>
-                    </h3>
-                    <p class="text-xs text-zinc-400 mt-1 ml-7 truncate">{{ song.artist }}</p>
-                </div>
-                <button v-if="index !== 0" @click="removeQueue(song.queueId)"
-                    class="w-8 h-8 shrink-0 bg-zinc-800/80 rounded-full flex items-center justify-center text-zinc-400 active:bg-rose-900 active:text-rose-400 transition text-xs">✕</button>
-            </div>
-            <div v-if="queue.length === 0" class="text-center text-zinc-500 py-20 flex flex-col items-center gap-3">
-                <span class="text-4xl">📜</span>
-                <span class="font-medium">佇列空空如也，趕快點首歌展現歌喉！</span>
-            </div>
-        </div>
-
-        <!-- 專業調音與評分設定 -->
-        <div v-show="tab === 'settings'" class="space-y-4">
-            <div class="glass-card rounded-2xl p-5 space-y-5">
-                <h3 class="font-black text-sm text-sky-400 flex items-center gap-2"><span>🎛️</span> 專業混音與音量控制</h3>
-                <p class="text-[11px] text-zinc-400">歌曲／伴奏不會直接回送麥克風輸入；麥克風效果獨立混音。喇叭仍可能造成空氣回授，建議使用耳機。</p>
-
-                <!-- 音樂/伴奏音量 -->
-                <div class="space-y-2">
-                    <div class="flex justify-between text-xs font-bold text-zinc-200">
-                        <span>🎵 音樂/伴奏大小</span>
-                        <span class="text-sky-400">{{ Math.round(musicVol * 100) }}%</span>
-                    </div>
-                    <input type="range" min="0" max="1.5" step="0.05" v-model="musicVol" @input="updateMixer"
-                        class="w-full accent-sky-500">
-                </div>
-
-                <!-- 麥克風音量 (支援高達 250% 增益放大) -->
-                <div class="space-y-2">
-                    <div class="flex justify-between text-xs font-bold text-zinc-200">
-                        <span>🎤 麥克風增益量 (人聲大小)</span>
-                        <span class="text-emerald-400">{{ Math.round(micVol * 100) }}%</span>
-                    </div>
-                    <input type="range" min="0" max="2.5" step="0.05" v-model="micVol" @input="updateMixer"
-                        class="w-full accent-emerald-500">
-                </div>
-
-                <!-- KTV 空間殘響效果 -->
-                <div class="space-y-2">
-                    <div class="flex justify-between text-xs font-bold text-zinc-200">
-                        <span>✨ KTV 空間殘響 (混響效果)</span>
-                        <span class="text-indigo-400">{{ Math.round(reverbVol * 100) }}%</span>
-                    </div>
-                    <input type="range" min="0" max="1.2" step="0.02" v-model="reverbVol" @input="updateMixer"
-                        class="w-full accent-indigo-500">
-                </div>
-            </div>
-
-            <div class="glass-card rounded-2xl p-5 flex items-center justify-between">
-                <div>
-                    <h4 class="font-bold text-sm text-white">主機實時評分</h4>
-                    <p class="text-xs text-zinc-400 mt-0.5">即時分析麥克風輸入音準與原音頻段</p>
-                </div>
-                <span class="text-3xl font-black text-amber-400">{{ currentScore }} 分</span>
-            </div>
-        </div>
-    </div>
-
-    <div v-if="durationSeconds > 0" class="fixed bottom-[112px] left-0 right-0 z-20 px-5">
-        <div class="glass-header rounded-xl px-3 py-2 flex items-center gap-3 text-[10px] font-mono text-zinc-300">
-            <span>{{ formatTime(playbackPosition) }}</span>
-            <input type="range" min="0" :max="durationSeconds" step="0.1"
-                :value="Math.min(playbackPosition, durationSeconds)" @change="seekTo" class="flex-1 accent-sky-500"
-                aria-label="播放位置">
-            <span>{{ formatTime(durationSeconds) }}</span>
-        </div>
-    </div>
-
-    <!-- 底部固定控制面板 (遙控器主幹) -->
-    <div class="fixed bottom-0 w-full glass-header z-30 pb-safe">
-        <!-- 快速原唱/伴奏與重唱列 -->
-        <div class="flex justify-between items-center px-5 py-2 border-b border-zinc-800/40 text-xs">
-            <button @click="toggleAudioMode"
-                class="flex items-center gap-1.5 px-3 py-1.5 rounded-full font-bold active:scale-95 transition"
-                :class="audioMode === 'accompaniment' ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40' : 'bg-sky-600/30 text-sky-300 border border-sky-500/40'">
-                <span>🎙️</span> {{ audioMode === 'accompaniment' ? '伴奏模式' : '原唱模式' }}
-            </button>
-
-            <!-- 快捷音量微調按鈕 -->
-            <div class="flex items-center gap-1 bg-zinc-800/60 rounded-full px-2 py-1 border border-zinc-700/40">
-                <span class="text-[10px] text-zinc-400 font-bold">🎵 音樂</span>
-                <button @click="adjustMusic(-0.1)"
-                    class="w-5 h-5 flex items-center justify-center rounded-full bg-zinc-700 text-xs font-bold active:scale-90">-</button>
-                <span class="text-[11px] font-mono w-8 text-center text-sky-400 font-bold">{{ Math.round(musicVol * 100)
-                    }}%</span>
-                <button @click="adjustMusic(0.1)"
-                    class="w-5 h-5 flex items-center justify-center rounded-full bg-zinc-700 text-xs font-bold active:scale-90">+</button>
-            </div>
-
-            <button @click="replaySong" class="text-zinc-400 active:text-white font-bold flex items-center gap-1">
-                <span>🔄</span> 重唱
-            </button>
-        </div>
-
-        <!-- 底部導覽分頁與播放控制 -->
-        <div class="flex justify-around items-center p-2.5">
-            <button @click="tab = 'search'" :class="tab === 'search' ? 'text-sky-400' : 'text-zinc-500'"
-                class="flex flex-col items-center gap-1 font-bold text-[11px] p-2 transition">
-                <span class="text-xl">🔍</span> 點歌
-            </button>
-            <button @click="tab = 'queue'" :class="tab === 'queue' ? 'text-emerald-400' : 'text-zinc-500'"
-                class="flex flex-col items-center gap-1 font-bold text-[11px] p-2 relative transition">
-                <span class="text-xl">📜</span> 佇列
-                <span v-if="queue.length > 0"
-                    class="absolute top-1 right-1 bg-rose-500 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-black border border-zinc-900 shadow-md">{{
-                    queue.length }}</span>
-            </button>
-
-            <div class="w-px h-8 bg-zinc-800 mx-1"></div>
-
-            <button @click="togglePlay"
-                class="w-12 h-12 bg-zinc-800 active:bg-zinc-700 rounded-full flex items-center justify-center text-lg shadow-lg active:scale-90 transition border border-zinc-700/60">
-                <span v-if="isPlaying">⏸️</span>
-                <span v-else class="ml-0.5">▶️</span>
-            </button>
-            <button @click="nextSong"
-                class="flex flex-col items-center gap-1 text-rose-400 active:scale-90 font-bold text-[11px] p-2 transition">
-                <span class="text-xl">⏭️</span> 切歌
-            </button>
-
-            <button @click="tab = 'settings'" :class="tab === 'settings' ? 'text-teal-400' : 'text-zinc-500'"
-                class="flex flex-col items-center gap-1 font-bold text-[11px] p-2 transition">
-                <span class="text-xl">🎛️</span> 調音
-            </button>
-        </div>
-    </div>
-
-    <script>
-        const { createApp } = Vue;
-        const socket = io();
-
-        createApp({
-            data() {
-                return {
-                    tab: 'search',
-                    searchQuery: '',
-                    selectedLang: '',
-                    searchResults: [],
-                    queue: [],
-                    isPlaying: true,
-                    audioMode: 'original',
-                    musicVol: 0.8,
-                    micVol: 1.2,
-                    reverbVol: 0,
-                    currentScore: 85,
-                    playbackError: '',
-                    playbackPosition: 0,
-                    durationSeconds: 0
-                }
-            },
-            mounted() {
-                socket.on('sync_state', ({ queue, state }) => {
-                    this.queue = queue;
-                    if (state) {
-                        this.isPlaying = state.isPlaying;
-                        this.audioMode = state.audioMode;
-                        this.playbackPosition = Number(state.position) || 0;
-                        this.durationSeconds = Number(queue?.[0]?.duration_seconds) || 0;
-                        if (state.musicVol !== undefined) this.musicVol = state.musicVol;
-                        if (state.micVol !== undefined) this.micVol = state.micVol;
-                        if (state.reverbVol !== undefined) this.reverbVol = state.reverbVol;
-                    }
-                });
-                socket.on('queue_updated', (q) => { this.queue = q; });
-                socket.on('search_results', (res) => { this.searchResults = res; });
-                socket.on('score_updated', ({ score }) => { this.currentScore = score; });
-                socket.on('playback_error', ({ message }) => { this.playbackError = message || '播放失敗'; });
-                socket.on('execute_command', (cmd) => {
-                    if (cmd.isPlaying !== undefined) this.isPlaying = cmd.isPlaying;
-                    if (cmd.audioMode) this.audioMode = cmd.audioMode;
-                    if (cmd.musicVol !== undefined) this.musicVol = cmd.musicVol;
-                    if (cmd.micVol !== undefined) this.micVol = cmd.micVol;
-                    if (cmd.reverbVol !== undefined) this.reverbVol = cmd.reverbVol;
-                });
-                this.fetchSongs();
-            },
-            methods: {
-                fetchSongs() {
-                    socket.emit('search_songs', { query: this.searchQuery, language: this.selectedLang });
-                },
-                addQueue(song) {
-                    socket.emit('add_to_queue', song);
-                    if (navigator.vibrate) navigator.vibrate(40);
-                },
-                insertTop(song) {
-                    socket.emit('insert_to_top', song);
-                    if (navigator.vibrate) navigator.vibrate([40, 40, 40]);
-                    this.tab = 'queue';
-                },
-                removeQueue(queueId) {
-                    socket.emit('remove_from_queue', queueId);
-                },
-                nextSong() {
-                    socket.emit('next_song');
-                    if (navigator.vibrate) navigator.vibrate(80);
-                },
-                replaySong() {
-                    socket.emit('replay_current');
-                },
-                seekTo(event) {
-                    socket.emit('seek', { position: Number(event.target.value) });
-                },
-                formatTime(seconds) {
-                    const value = Math.max(0, Math.floor(Number(seconds) || 0));
-                    return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, '0')}`;
-                },
-                togglePlay() {
-                    this.isPlaying = !this.isPlaying;
-                    socket.emit('player_command', { isPlaying: this.isPlaying });
-                },
-                toggleAudioMode() {
-                    this.audioMode = this.audioMode === 'original' ? 'accompaniment' : 'original';
-                    socket.emit('player_command', { audioMode: this.audioMode });
-                },
-                updateMixer() {
-                    socket.emit('player_command', {
-                        musicVol: parseFloat(this.musicVol),
-                        micVol: parseFloat(this.micVol),
-                        reverbVol: parseFloat(this.reverbVol)
-                    });
-                },
-                adjustMusic(delta) {
-                    let nextVal = Math.round((parseFloat(this.musicVol) + delta) * 10) / 10;
-                    if (nextVal < 0) nextVal = 0;
-                    if (nextVal > 1.5) nextVal = 1.5;
-                    this.musicVol = nextVal;
-                    this.updateMixer();
-                }
-            }
-        }).mount('#app');
-    </script>
+<body>
+  <header class="header">
+    <div class="brand-row"><div class="brand">OPEN<i>KTV</i> REMOTE</div><span id="connection" class="connection offline">● 連線中</span></div>
+    <div class="profile-row"><span>🎤 今晚我是</span><input id="nickname" maxlength="24" placeholder="輸入暱稱"><span class="badge">點歌時顯示</span></div>
+    <div class="search-row"><input id="query" type="search" placeholder="拼音、注音、歌名、歌詞…" autocomplete="off"><button id="voice" class="button">🎤 語音</button><button id="clear" class="button">清除</button></div>
+    <div class="chips" id="languages"><button class="chip active" data-language="">全部語種</button><button class="chip" data-language="國語">華語</button><button class="chip" data-language="台語">台語</button><button class="chip" data-language="粵語">粵語</button><button class="chip" data-language="韓語">K-POP</button><button class="chip" data-language="英語">英語</button><button class="chip" data-language="日語">日語</button></div>
+  </header>
+  <nav class="tabs" aria-label="遙控器頁面"><button class="active" data-tab="search">🔍 找歌</button><button data-tab="queue">📋 待播佇列 <span id="queueBadge"></span></button><button data-tab="fun">🎉 氣氛互動</button></nav>
+  <main>
+    <section id="pane-search" class="pane"><div class="result-count" id="resultCount"></div><div id="songs" class="list"><div class="empty">正在載入曲庫…</div></div><button id="more" class="button" style="width:100%;margin-top:10px">載入更多歌曲</button></section>
+    <section id="pane-queue" class="pane" hidden><div id="queue" class="list"></div></section>
+    <section id="pane-fun" class="pane" hidden><article class="notice">向電視送出即時氣氛訊息。語音互動僅使用文字辨識，不會串流手機麥克風音訊。</article><div class="interaction-grid"><button class="button" data-interaction="applause">👏 掌聲</button><button class="button" data-interaction="cheer">🎉 歡呼</button></div><div class="message-form"><input id="message" maxlength="100" placeholder="送一句應援訊息…"><button id="sendMessage" class="button primary">送出</button></div><article class="notice">現場音效素材尚未安裝；Key 升降調需播放端音訊引擎支援，未支援時不會假裝生效。</article></section>
+  </main>
+  <footer class="bottom">
+    <div id="current" class="now">尚未點歌</div>
+    <div class="seek"><span id="elapsed">0:00</span><input id="seek" type="range" min="0" max="100" value="0" step=".1" aria-label="播放位置"><span id="duration">0:00</span></div>
+    <div class="controls"><button id="replay">⏮ 重唱</button><button id="mode">原唱</button><button id="play" class="play">▶</button><button id="next" style="color:var(--rose)">⏭ 切歌</button></div>
+    <div class="quick-row"><button id="musicDown">🎵 −</button><span id="musicLabel">歌曲音量 80%</span><button id="musicUp">＋</button><button disabled title="播放端目前不支援 Key 變更">Key − / +</button></div>
+  </footer>
+  <div id="confirm" class="confirm" hidden><div class="confirm-box"><strong>確定切換下一首？</strong><p class="sub">目前歌曲會加入已播歷史。</p><div class="confirm-actions"><button id="cancelNext" class="button">取消</button><button id="confirmNext" class="button primary">切歌</button></div></div></div>
+  <script>
+    const socket=io({query:{role:'remote'}}),$=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const time=v=>{const n=Math.max(0,Math.floor(Number(v)||0));return `${Math.floor(n/60)}:${String(n%60).padStart(2,'0')}`};
+    let queue=[],songs=[],state={},history=[],queryTimer,offset=0,total=0,requestId=0,busy=false,language='',duration=0,position=0,dragging=false;
+    $('nickname').value=localStorage.getItem('ktvNickname')||'';$('nickname').oninput=()=>localStorage.setItem('ktvNickname',$('nickname').value.slice(0,24));
+    document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b===button));document.querySelectorAll('.pane').forEach(p=>p.hidden=p.id!==`pane-${button.dataset.tab}`)});
+    function search(reset=false){if(reset){offset=0;total=0;busy=false;requestId++;songs=[];$('songs').innerHTML='<div class="empty">搜尋中…</div>'}if(busy)return;busy=true;$('more').disabled=true;socket.emit('search_songs',{query:$('query').value.trim(),language,offset,limit:40,paginated:true,requestId})}
+    $('query').oninput=()=>{clearTimeout(queryTimer);queryTimer=setTimeout(()=>search(true),180)};$('clear').onclick=()=>{$('query').value='';language='';document.querySelectorAll('[data-language]').forEach(b=>b.classList.toggle('active',!b.dataset.language));search(true)};$('more').onclick=()=>search();
+    document.querySelectorAll('[data-language]').forEach(button=>button.onclick=()=>{language=button.dataset.language;document.querySelectorAll('[data-language]').forEach(b=>b.classList.toggle('active',b===button));search(true)});
+    function renderSongs(rows,append=false){if(!append)$('songs').innerHTML='';if(rows.length)$('songs').insertAdjacentHTML('beforeend',rows.map(song=>`<article class="song-row"><div class="song-info"><div class="title">${esc(song.title)}</div><div class="sub">${esc(song.artist||'未知歌手')} · ${esc(song.language||'')} · ${esc(song.duration_seconds?time(song.duration_seconds):'時長未知')}</div></div><div class="song-actions"><button class="button add" data-add="${esc(song.id)}">點歌</button><button class="button insert" data-insert="${esc(song.id)}">插播</button></div></article>`).join(''));else if(!append)$('songs').innerHTML='<div class="empty">沒有找到歌曲，換個關鍵字再試試。</div>';document.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>{const song=songs.find(s=>s.id===b.dataset.add);if(song)socket.emit('add_to_queue',{...song,requestedBy:$('nickname').value.trim()||'來賓'});if(navigator.vibrate)navigator.vibrate(40);toast('已加入待播')});document.querySelectorAll('[data-insert]').forEach(b=>b.onclick=()=>{const song=songs.find(s=>s.id===b.dataset.insert);if(song)socket.emit('insert_to_top',{...song,requestedBy:$('nickname').value.trim()||'來賓'});document.querySelector('[data-tab="queue"]').click();toast('已插入下一首')})}
+    socket.on('search_page_results',page=>{if(page?.requestId!==requestId)return;busy=false;const rows=page.items||[];songs=page.offset?[...songs,...rows]:rows;offset=songs.length;total=page.total||0;renderSongs(rows,Boolean(page.offset));$('resultCount').textContent=`${total.toLocaleString()} 首歌曲 · 已載入 ${offset} 首`;$('more').hidden=offset>=total;$('more').disabled=false});
+    function renderQueue(){ $('queueBadge').textContent=queue.length?`(${Math.max(0,queue.length-1)})`:'';$('queue').innerHTML=queue.length?queue.map((song,i)=>`<article class="queue-row"><div class="song-info"><div class="title">${i===0?'▶ 播放中 · ':`#${i} · `}${esc(song.title)}</div><div class="sub">${esc(song.artist||'未知歌手')} · ${i===0?'現在播放':esc(song.requestedBy||'點播者')}</div></div>${i?`<button class="button" data-remove="${esc(song.queueId)}">移除</button>`:''}</article>`).join(''):'<div class="empty">佇列還沒有歌曲。回到找歌頁點一首歌吧！</div>';document.querySelectorAll('[data-remove]').forEach(b=>b.onclick=()=>socket.emit('remove_from_queue',b.dataset.remove))}
+    function apply(payload){queue=payload.queue||[];history=payload.history||history;state=payload.state||{};const current=queue[0];$('current').textContent=current?`${current.title} — ${current.artist||'未知歌手'}${queue[1]?`　｜　下一首：${queue[1].title}`:''}`:'尚未點歌';$('play').textContent=state.isPlaying?'Ⅱ':'▶';$('mode').textContent=state.audioMode==='accompaniment'?'伴奏':'原唱';duration=Number(current?.duration_seconds)||0;position=Number(state.position)||0;$('duration').textContent=time(duration);$('musicLabel').textContent=`歌曲音量 ${Math.round((state.musicVol??.8)*100)}%`;if(!dragging){$('seek').max=duration||100;$('seek').value=Math.min(position,duration||100);$('elapsed').textContent=time(position)}renderQueue()}
+    socket.on('sync_state',apply);socket.on('playback_snapshot',apply);socket.on('queue_updated',items=>{queue=items||[];renderQueue()});socket.on('playback_error',data=>toast(data?.message||'播放錯誤'));socket.on('connect',()=>{$('connection').textContent='● 主機已連線';$('connection').classList.remove('offline');search(true)});socket.on('disconnect',()=>{$('connection').textContent='● 重新連線中';$('connection').classList.add('offline')});
+    $('play').onclick=()=>socket.emit('player_command',{isPlaying:!state.isPlaying});$('mode').onclick=()=>socket.emit('player_command',{audioMode:state.audioMode==='accompaniment'?'original':'accompaniment'});$('replay').onclick=()=>socket.emit('replay_current');$('next').onclick=()=>{$('confirm').hidden=false};$('cancelNext').onclick=()=>{$('confirm').hidden=true};$('confirmNext').onclick=()=>{socket.emit('next_song');$('confirm').hidden=true};
+    $('seek').oninput=()=>{dragging=true;$('elapsed').textContent=time($('seek').value)};$('seek').onchange=()=>{socket.emit('seek',{position:Number($('seek').value)});dragging=false};setInterval(()=>{if(state.isPlaying&&!dragging&&duration){position=Math.min(duration,position+.25);$('seek').value=position;$('elapsed').textContent=time(position)}},250);
+    function setMusic(value){value=Math.max(0,Math.min(1.5,value));socket.emit('player_command',{musicVol:value})}$('musicDown').onclick=()=>setMusic((state.musicVol??.8)-.1);$('musicUp').onclick=()=>setMusic((state.musicVol??.8)+.1);
+    document.querySelectorAll('[data-interaction]').forEach(b=>b.onclick=()=>{socket.emit('crowd_interaction',{type:b.dataset.interaction,user:$('nickname').value.trim()||'來賓'});toast('已送出現場互動')});
+    $('sendMessage').onclick=()=>{const text=$('message').value.trim();if(!text)return;socket.emit('crowd_interaction',{type:'message',text,user:$('nickname').value.trim()||'來賓'});$('message').value='';toast('應援訊息已送出')};$('message').onkeydown=e=>{if(e.key==='Enter')$('sendMessage').click()};
+    $('voice').onclick=()=>{const Speech=window.SpeechRecognition||window.webkitSpeechRecognition;if(!Speech){toast('瀏覽器不支援語音辨識');return}const recognition=new Speech();recognition.lang='zh-TW';recognition.onresult=e=>{$('query').value=e.results[0][0].transcript;search(true)};recognition.onerror=()=>toast('請檢查麥克風權限');recognition.start()};
+    let toastTimer;function toast(text){$('connection').textContent=`● ${text}`;clearTimeout(toastTimer);toastTimer=setTimeout(()=>{$('connection').textContent=socket.connected?'● 主機已連線':'● 重新連線中'},1800)}
+  </script>
 </body>
-
 </html>
