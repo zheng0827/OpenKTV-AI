@@ -1,4 +1,5 @@
 import csv
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -88,14 +89,14 @@ class CatalogTests(unittest.TestCase):
             response = client.patch(
                 f"/api/catalog/{song_id}",
                 json={"title": "更新"},
-                headers={"Authorization": "******"},
+                headers={"Authorization": " ".join(("Bearer", os.environ["KTV_LIBRARY_ADMIN_TOKEN"]))},
             )
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.get_json()["song"]["title"], "更新")
             self.assertEqual(
                 client.delete(
                     f"/api/catalog/{song_id}",
-                    headers={"Authorization": "******"},
+                    headers={"Authorization": " ".join(("Bearer", os.environ["KTV_LIBRARY_ADMIN_TOKEN"]))},
                 ).status_code,
                 200,
             )

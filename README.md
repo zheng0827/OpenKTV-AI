@@ -75,7 +75,7 @@ Node 首頁 `/` 提供歌曲搜尋與包廂狀態；`/operator`（相容路徑 `
 
 中控端包含控制台、佇列及本次執行期間的播放歷史、多模式曲庫搜尋、分類設定、曲庫列表和人工歌詞編輯工作台。人工編輯器匯出獨立 KTV-LRC 草稿，不會覆寫正式曲庫或呼叫自動對齊流程。尚無播放端支援的升降 Key、罐頭音效及跨裝置麥克風等項目會明確標示未啟用；系統頁中的裝置／網路資訊不會假稱已套用未支援的設定。新增歌曲仍嵌入既有 Flask 管理頁。
 
-Node 直接讀取 `KTV_LIBRARY_INDEX_PATH` 指定的正式 CSV（預設 `ktv_songs/library_index.csv`），並由 `KTV_SONGS_DIR` 讀取媒體檔；搜尋索引與頁面分頁不會改變 CSV schema 或建立第二份正式曲庫。曲庫管理頁的匯出是目前載入歌曲的 JSON 資料，不是正式 CSV 寫入操作。
+Node 直接讀取 `KTV_LIBRARY_INDEX_PATH` 指定的正式 CSV（預設 `ktv_songs/library_index.csv`），並由 `KTV_SONGS_DIR` 讀取媒體檔；搜尋索引與頁面分頁不會改變 CSV schema 或建立第二份正式曲庫。曲庫管理頁可依目前搜尋條件匯出既有欄位的 CSV；管理員可設定 `KTV_LIBRARY_ADMIN_TOKEN` 環境變數，於曲庫頁暫存權杖後編輯 metadata 或移除 CSV 記錄。刪除記錄不會刪除媒體檔案，且 CSV 仍由 Python 原子更新。
 
 若要分別啟動服務供開發使用，可執行 `python -m core.service` 與 `npm --prefix app run server`。既有桌面啟動器 `python main.py` 仍可用。
 
