@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -17,6 +18,10 @@ function delay(milliseconds) {
 export async function startPythonService() {
   const port = Number(process.env.KTV_PORT) || 5000;
   const healthUrl = `http://127.0.0.1:${port}/health`;
+  const logDirectory = process.env.KTV_LOG_DIR || path.join(projectRoot, 'logs');
+  fs.mkdirSync(logDirectory, { recursive: true });
+  const logStream = fs.createWriteStream(path.join(logDirectory, 'python-service.log'), { flags: 'w', encoding: 'utf8' });
+  logStream.on('error', () => console.error('[Python] Could not write service logs.'));
   const childEnv = { ...process.env };
   if (process.platform === 'win32') {
     childEnv.PYTHONUTF8 = '1';
@@ -25,13 +30,18 @@ export async function startPythonService() {
   const child = spawn(pythonCommand(), ['-m', 'core.service'], {
     cwd: projectRoot,
     env: childEnv,
-    stdio: 'inherit',
+    stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
     detached: process.platform !== 'win32',
   });
+  for (const [label, stream] of [['OUT', child.stdout], ['ERR', child.stderr]]) {
+    stream.setEncoding('utf8');
+    stream.on('data', text => logStream.write(`[${new Date().toISOString()}][${label}] ${text}`));
+  }
   let exitCode = null;
   child.once('exit', code => { exitCode = code ?? 1; });
-  child.once('error', error => { exitCode = 1; console.error('[Python] 無法啟動處理服務：', error.message); });
+  child.once('error', error => { exitCode = 1; console.error('[Python] Failed to start processing service:', error.message); });
+  child.once('exit', () => logStream.end());
 
   const deadline = Date.now() + startupTimeoutMs;
   while (Date.now() < deadline) {

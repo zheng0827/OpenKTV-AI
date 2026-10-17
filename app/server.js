@@ -6,6 +6,7 @@ import { rateLimit } from 'express-rate-limit';
 import fs from 'fs';
 import os from 'os';
 import { timingSafeEqual } from 'crypto';
+import { MpvPlayer } from './mpv-player.js';
 import csv from 'csv-parser';
 import MiniSearch from 'minisearch';
 import QRCode from 'qrcode';
@@ -173,6 +174,8 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       const app = express();
       const httpServer = createServer(app);
       const io = new Server(httpServer, { cors: { origin: "*", methods: ["GET", "POST"] } });
+      let advanceQueue = () => {};
+      const mpvPlayer = new MpvPlayer({ onEnded: () => advanceQueue() });
       app.use(express.json({ limit: '32kb' }));
       const mediaRequestLimiter = rateLimit({
         windowMs: 60 * 1000,
@@ -199,10 +202,6 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       app.get(['/remote', '/queue'], (_req, res) => res.redirect('/remote.html'));
       app.get('/operator', pageRequestLimiter, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'console.html')));
       app.get(['/console', '/ktv'], pageRequestLimiter, (_req, res) => res.sendFile(path.join(__dirname, 'public', 'console.html')));
-      app.get('/admin', (req, res) => {
-        const host = req.hostname.includes(':') ? `[${req.hostname}]` : req.hostname;
-        res.redirect(`http://${host}:${Number(process.env.KTV_PORT) || 5000}/admin`);
-      });
       app.get('/api/room', (_req, res) => res.json({
         songCount: songs.length,
         clientCount: io.engine.clientsCount,
@@ -220,9 +219,11 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           return res.json({
             node: { ok: true },
             python: { ok: Boolean(health?.ok && health.service === 'python') },
+            pythonPort,
+            player: mpvPlayer.getStatus(),
           });
         } catch {
-          return res.status(503).json({ node: { ok: true }, python: { ok: false } });
+          return res.status(503).json({ node: { ok: true }, python: { ok: false }, pythonPort, player: mpvPlayer.getStatus() });
         }
       });
       app.get('/api/qr', pageRequestLimiter, async (req, res) => {
@@ -382,6 +383,8 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       });
       const emitState = () => {
         const payload = snapshot();
+        mpvPlayer.sync(payload.currentSong || payload.queue[0] || null, payload.state, mediaPath)
+          .catch(error => io.emit('playback_error', { message: error.message }));
         io.emit('sync_state', { queue: payload.queue, history: payload.history, state: payload.state });
         io.emit('queue_updated', payload.queue);
         io.emit('playback_snapshot', payload);
@@ -397,6 +400,14 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         playerState.startedAt = playerState.isPlaying ? Date.now() : null;
       };
       const findSong = song => songs.find(item => item.id === String(song?.id));
+      advanceQueue = () => {
+        if (queue.length) {
+          history.unshift(queue.shift());
+          history.splice(100);
+        }
+        startCurrent();
+        emitState();
+      };
 
       app.get('/health', (_req, res) => res.json({ ok: true, songs: songs.length }));
 
@@ -485,12 +496,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           emitState();
         });
         socket.on('next_song', () => {
-          if (queue.length) {
-            history.unshift(queue.shift());
-            history.splice(100);
-          }
-          startCurrent();
-          emitState();
+          advanceQueue();
         });
         socket.on('replay_current', () => {
           playerState.position = 0;
@@ -503,6 +509,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           const duration = Number(currentSong()?.duration_seconds);
           playerState.position = duration > 0 ? Math.min(position, duration) : position;
           playerState.startedAt = playerState.isPlaying ? Date.now() : null;
+          mpvPlayer.seek(playerState.position).catch(error => io.emit('playback_error', { message: error.message }));
           emitState();
         });
         socket.on('player_command', command => {
@@ -563,9 +570,15 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       let catalogMtime = fs.existsSync(catalogPath) ? fs.statSync(catalogPath).mtimeMs : 0;
       httpServer.once('error', reject);
       httpServer.listen(port, '0.0.0.0', () => {
-        console.log(`[Database] 已載入 ${songs.length} 首歌曲；正式曲庫：${catalogPath}`);
-        console.log(`[Server] KTV 核心服務器啟動成功：http://localhost:${port}`);
-        resolve();
+        console.log(`[Database] Loaded ${songs.length} songs.`);
+        console.log(`[Server] KTV service listening on port ${port}.`);
+        resolve({
+          openCurrent: async () => {
+            const payload = snapshot();
+            await mpvPlayer.open(payload.currentSong, payload.state, mediaPath);
+          },
+          close: () => mpvPlayer.close(),
+        });
       });
     } catch (error) {
       reject(error);
@@ -575,7 +588,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   startServer().catch(error => {
-    console.error('[Server] 啟動失敗：', error);
+    console.error('[Server] Startup failed:', error.message);
     process.exitCode = 1;
   });
 }
