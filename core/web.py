@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import json
+import hmac
 import os
-import re
 import socket
 import subprocess
 import threading
@@ -11,12 +11,12 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, urlparse
 
-from flask import Blueprint, Flask, current_app, render_template, request, send_from_directory
+from flask import Blueprint, Flask, current_app, jsonify, redirect, render_template, request, send_from_directory
 from flask_socketio import SocketIO, emit
 
 from .config import AppSettings, load_settings
-from .library import find_intro_skip_seconds, update_library_index
-from .unified_nightingale import KTVProcessor
+from .library import delete_catalog_entry, find_intro_skip_seconds, update_catalog_entry, update_library_index
+from .metadata import ai_parse_youtube_title, parse_youtube_title
 
 CONTROL_ROLES = {"remote", "queue", "admin", "combo"}
 
@@ -49,37 +49,6 @@ def _validate_youtube_url(url: str) -> str:
     return url.strip()
 
 
-def _extract_title_artist(raw_title: str) -> tuple[str, str]:
-    parsed = _parse_title_model(raw_title)
-    return parsed["song"], parsed["singer"]
-
-
-def _normalize_yt_title(raw_title: str) -> str:
-    text = (raw_title or "").strip()
-    noise_patterns = [
-        r"\[[^\]]*(official|lyrics|mv|music\s*video|karaoke|中字|歌詞)[^\]]*\]",
-        r"\([^\)]*(official|lyrics|mv|music\s*video|karaoke|中字|歌詞)[^\)]*\)",
-    ]
-    for pattern in noise_patterns:
-        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\s+", " ", text).strip(" -|｜_")
-    return text
-
-
-def _parse_title_model(raw_title: str, uploader: str = "") -> dict[str, str]:
-    normalized = _normalize_yt_title(raw_title)
-    separators = [" - ", " – ", " — ", " | ", " ｜ ", " / "]
-    for separator in separators:
-        if separator in normalized:
-            left, right = [part.strip() for part in normalized.split(separator, 1)]
-            if left and right:
-                return {"title": normalized, "song": right, "singer": left}
-
-    if uploader.strip():
-        return {"title": normalized or raw_title.strip(), "song": normalized or raw_title.strip(), "singer": uploader.strip()}
-    return {"title": normalized or raw_title.strip(), "song": normalized or raw_title.strip(), "singer": ""}
-
-
 def _extract_youtube_title(url: str) -> dict[str, str]:
     safe_url = _validate_youtube_url(url)
     try:
@@ -91,7 +60,12 @@ def _extract_youtube_title(url: str) -> dict[str, str]:
         payload = ydl.extract_info(safe_url, download=False)
     title = (payload or {}).get("title") or ""
     uploader = (payload or {}).get("uploader") or ""
-    parsed = _parse_title_model(title, uploader=uploader)
+    parsed = ai_parse_youtube_title(title, uploader)
+    if parsed:
+        parsed = {"title": title, "song": parsed["title"], "singer": parsed["artist"]}
+    else:
+        metadata = parse_youtube_title(title, uploader)
+        parsed = {"title": title, "song": metadata["title"], "singer": metadata["artist"]}
     parsed["raw_title"] = title
     parsed["uploader"] = uploader
     return parsed
@@ -125,9 +99,16 @@ def _playlist_entries(url: str, settings: AppSettings) -> list[dict]:
 def _create_blueprint() -> Blueprint:
     bp = Blueprint("web", __name__)
 
+    def node_page(page: str):
+        settings: AppSettings = current_app.config["APP_SETTINGS"]
+        host = urlparse(request.host_url).hostname or "127.0.0.1"
+        if ":" in host:
+            host = f"[{host}]"
+        return redirect(f"http://{host}:{settings.node_port}/{page}")
+
     @bp.route("/player")
     def page_player():
-        return render_template("player.html")
+        return node_page("player.html")
 
     @bp.route("/lyrics-editor")
     def page_lyrics_editor():
@@ -135,11 +116,11 @@ def _create_blueprint() -> Blueprint:
 
     @bp.route("/remote")
     def page_remote():
-        return render_template("remote.html")
+        return node_page("remote.html")
 
     @bp.route("/queue")
     def page_queue():
-        return render_template("queue.html")
+        return node_page("remote.html")
 
     @bp.route("/admin")
     def page_admin():
@@ -147,7 +128,7 @@ def _create_blueprint() -> Blueprint:
 
     @bp.route("/combo")
     def page_combo():
-        return render_template("combo.html")
+        return node_page("remote.html")
 
     @bp.route("/")
     def page_index():
@@ -167,6 +148,63 @@ def _create_blueprint() -> Blueprint:
             if file_name.lower().endswith(".mp4")
         ]
         return json.dumps(sorted(songs))
+
+    @bp.route("/health")
+    def health():
+        settings: AppSettings = current_app.config["APP_SETTINGS"]
+        return jsonify(
+            ok=True,
+            service="python",
+        )
+
+    def can_edit_catalog() -> bool:
+        expected = os.getenv("KTV_LIBRARY_ADMIN_TOKEN", "")
+        supplied = request.headers.get("Authorization", "")
+        scheme, separator, token = supplied.partition(" ")
+        return bool(
+            expected
+            and separator
+            and scheme.lower() == "bearer"
+            and len(token) == len(expected)
+            and hmac.compare_digest(token, expected)
+        )
+
+    @bp.route("/api/catalog/<song_id>", methods=["PATCH"])
+    def edit_catalog_song(song_id: str):
+        if not can_edit_catalog():
+            return jsonify(ok=False, error="曲庫管理權杖無效或尚未設定"), 401
+        if len(song_id) > 128 or not request.is_json:
+            return jsonify(ok=False, error="歌曲識別碼或更新內容無效"), 400
+        updates = request.get_json(silent=True)
+        editable_fields = {
+            "artist", "title", "album", "release_year", "artist_gender", "genre", "language", "lyrics",
+        }
+        if not isinstance(updates, dict) or not updates or set(updates) - editable_fields:
+            return jsonify(ok=False, error="更新欄位不受支援"), 400
+        if not str(updates.get("artist", "")).strip() and "artist" in updates:
+            return jsonify(ok=False, error="歌手名稱不可為空"), 400
+        if not str(updates.get("title", "")).strip() and "title" in updates:
+            return jsonify(ok=False, error="歌曲名稱不可為空"), 400
+        settings: AppSettings = current_app.config["APP_SETTINGS"]
+        try:
+            row = update_catalog_entry(settings.library_index_path, song_id, updates)
+        except ValueError:
+            return jsonify(ok=False, error="相同歌手與歌名已存在於曲庫"), 409
+        if row is None:
+            return jsonify(ok=False, error="找不到歌曲"), 404
+        return jsonify(ok=True, song=row)
+
+    @bp.route("/api/catalog/<song_id>", methods=["DELETE"])
+    def remove_catalog_song(song_id: str):
+        if not can_edit_catalog():
+            return jsonify(ok=False, error="曲庫管理權杖無效或尚未設定"), 401
+        if len(song_id) > 128:
+            return jsonify(ok=False, error="歌曲識別碼無效"), 400
+        settings: AppSettings = current_app.config["APP_SETTINGS"]
+        row = delete_catalog_entry(settings.library_index_path, song_id)
+        if row is None:
+            return jsonify(ok=False, error="找不到歌曲"), 404
+        return jsonify(ok=True, song=row, media_files_deleted=False)
 
     @bp.route("/api/playlist_preview")
     def playlist_preview():
@@ -516,11 +554,22 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
                             "url": _validate_youtube_url(item_url),
                             "title": item.get("title") or item.get("id") or manual_title,
                             "singer": (item.get("singer") or "").strip(),
+                            "singer_is_manual": False,
+                            "youtube_title": (item.get("title") or "").strip(),
+                            "title_is_auto": True,
                             "lyrics_text": "",
                         }
                     )
             else:
-                tasks = [{"url": url, "title": manual_title, "singer": manual_singer, "lyrics_text": manual_lyrics}]
+                tasks = [{
+                    "url": url,
+                    "title": manual_title,
+                    "singer": manual_singer,
+                    "singer_is_manual": bool(data.get("singer_is_manual")),
+                    "youtube_title": str(data.get("youtube_title") or ""),
+                    "title_is_auto": False,
+                    "lyrics_text": manual_lyrics,
+                }]
         except Exception as error:
             broadcast_log(f"❌ playlist 讀取失敗: {error}")
             return
@@ -529,6 +578,8 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
 
         def run_process():
             try:
+                from .unified_nightingale import KTVProcessor  # pylint: disable=import-outside-toplevel
+
                 socketio.emit("task_status", {"status": "busy"})
                 processor = KTVProcessor(settings=settings, log_cb=broadcast_log)
                 total = len(tasks)
@@ -537,8 +588,7 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
 
                 for index, task in enumerate(tasks, start=1):
                     title = task["title"]
-                    _song_name, singer = _extract_title_artist(title)
-                    provided_singer = (task.get("singer") or singer or "").strip()
+                    provided_singer = (task.get("singer") or "").strip()
                     provided_lyrics = (task.get("lyrics_text") or "").strip()
                     socketio.emit(
                         "task_progress",
@@ -568,6 +618,9 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
                             options={
                                 **options,
                                 "singer": provided_singer,
+                                "singer_is_manual": task.get("singer_is_manual", False),
+                                "youtube_title": task.get("youtube_title", ""),
+                                "title_is_auto": task.get("title_is_auto", False),
                                 "lyrics_text": provided_lyrics,
                             },
                         )

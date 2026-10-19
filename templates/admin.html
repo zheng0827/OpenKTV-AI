@@ -108,6 +108,9 @@
         const logArea = document.getElementById('log');
         let playlistSelection = [];
         let pendingSingle = null;
+        let resolvedYoutubeUrl = '';
+        let resolvedYoutubeTitle = '';
+        let resolvedYoutubeSinger = '';
 
         function closeModal(id) { document.getElementById(id).style.display = 'none'; }
         function openModal(id) { document.getElementById(id).style.display = 'flex'; }
@@ -169,7 +172,12 @@
             if (!url) { alert('請輸入連結'); return; }
 
             if (!fromPlaylistSelection && !isPlaylistUrl(url)) {
-                pendingSingle = { url, title };
+                pendingSingle = {
+                    url,
+                    title,
+                    youtubeTitle: resolvedYoutubeUrl === url ? resolvedYoutubeTitle : '',
+                    autoSinger: resolvedYoutubeUrl === url ? resolvedYoutubeSinger : '',
+                };
                 const info = splitArtistTitle(title);
                 document.getElementById('lyricSongName').value = info.song;
                 document.getElementById('lyricSinger').value = info.singer;
@@ -177,7 +185,14 @@
                 return;
             }
 
-            emitStart(url, title, fromPlaylistSelection ? playlistSelection : null);
+            emitStart(
+                url,
+                title,
+                fromPlaylistSelection ? playlistSelection : null,
+                '',
+                '',
+                resolvedYoutubeUrl === url ? resolvedYoutubeTitle : '',
+            );
         }
 
         function confirmSingleWithLyrics() {
@@ -187,14 +202,24 @@
             const lyricText = document.getElementById('lyricText').value || '';
             const mergedTitle = singer ? `${singer} - ${song}` : song;
             closeModal('lyricsModal');
-            emitStart(pendingSingle.url, mergedTitle || pendingSingle.title, null, singer, lyricText);
+            emitStart(
+                pendingSingle.url,
+                mergedTitle || pendingSingle.title,
+                null,
+                singer,
+                lyricText,
+                pendingSingle.youtubeTitle,
+                Boolean(singer && (!pendingSingle.autoSinger || singer !== pendingSingle.autoSinger)),
+            );
             pendingSingle = null;
         }
 
-        function emitStart(url, title, playlistEntries, singer = '', lyricsText = '') {
+        function emitStart(url, title, playlistEntries, singer = '', lyricsText = '', youtubeTitle = '', singerIsManual = false) {
             socket.emit('start_download', {
                 url,
                 title,
+                youtube_title: youtubeTitle,
+                singer_is_manual: singerIsManual,
                 stems: document.getElementById('stems_mode').value,
                 device: document.getElementById('device_mode').value,
                 separator_backend: document.getElementById('separator_backend').value,
@@ -238,6 +263,9 @@
             document.getElementById('yt_title').value = mergedTitle;
             document.getElementById('lyricSongName').value = data.song || '';
             document.getElementById('lyricSinger').value = data.singer || '';
+            resolvedYoutubeUrl = url;
+            resolvedYoutubeTitle = data.raw_title || '';
+            resolvedYoutubeSinger = data.singer || '';
         }
     </script>
 </body>
