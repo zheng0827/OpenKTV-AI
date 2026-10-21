@@ -17,11 +17,20 @@
 - `DISCORD_ACTIVITY_APPLICATION_ID`（給 bot 建立語音房 Activity invite）
 - `DISCORD_BOT_TOKEN`
 - `KTV_BOT_API_TOKEN`
+- `KTV_ROOM_ADMIN_TOKEN`（啟用後，敏感 Socket 控制指令需 control token）
 
 ## 可選環境變數
 
 - `DISCORD_ACTIVITY_PORT`（預設 `4173`）
 - `KTV_BOT_API_URL`（預設 `http://127.0.0.1:${KTV_NODE_PORT|3000}`）
+- `DISCORD_ACTIVITY_ALLOWED_REDIRECT_ORIGINS`（逗號分隔 origin 白名單）
+- `DISCORD_ACTIVITY_AUTH_CHALLENGE_TTL_MS`（一次性 OAuth challenge 存活毫秒，預設 5 分鐘）
+
+## OAuth 安全強化
+
+- 前端會先向 `/api/discord/auth-challenge` 取得一次性 `challengeId/state`
+- 回傳授權碼後，`/api/discord/token` 會驗證 `challengeId + state + redirectUri`
+- challenge 會短時效且用後即焚，降低重放與 CSRF 風險
 
 ## 開發與啟動
 

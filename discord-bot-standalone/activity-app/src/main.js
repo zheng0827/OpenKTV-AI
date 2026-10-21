@@ -122,7 +122,16 @@ async function initDiscordAuth(config) {
 
   const codeVerifier = randomString(96);
   const codeChallenge = await sha256base64url(codeVerifier);
-  const stateParam = randomString(32);
+  const challenge = await fetchJson('/api/discord/auth-challenge', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ redirectUri: window.location.origin }),
+  });
+  const stateParam = String(challenge.state || '');
+  if (!stateParam || !challenge.challengeId) throw new Error('無法建立 Activity OAuth challenge');
+  sessionStorage.setItem('ktvActivityChallengeId', String(challenge.challengeId));
+  sessionStorage.setItem('ktvActivityState', stateParam);
+  sessionStorage.setItem('ktvActivityCodeVerifier', codeVerifier);
 
   const auth = await sdk.commands.authorize({
     client_id: config.clientId,
@@ -134,16 +143,25 @@ async function initDiscordAuth(config) {
     code_challenge_method: 'S256',
     redirect_uri: window.location.origin,
   });
+  if (!auth?.code) throw new Error('Discord OAuth 未回傳授權碼');
+  if (!auth?.state || auth.state !== sessionStorage.getItem('ktvActivityState')) {
+    throw new Error('Discord OAuth state 驗證失敗');
+  }
 
   const tokenPayload = await fetchJson('/api/discord/token', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       code: auth.code,
-      codeVerifier,
+      codeVerifier: sessionStorage.getItem('ktvActivityCodeVerifier') || codeVerifier,
       redirectUri: window.location.origin,
+      challengeId: sessionStorage.getItem('ktvActivityChallengeId') || challenge.challengeId,
+      state: auth.state,
     }),
   });
+  sessionStorage.removeItem('ktvActivityChallengeId');
+  sessionStorage.removeItem('ktvActivityState');
+  sessionStorage.removeItem('ktvActivityCodeVerifier');
 
   await sdk.commands.authenticate({ access_token: tokenPayload.access_token });
   state.authReady = true;

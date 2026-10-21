@@ -266,7 +266,8 @@
         // ==========================================
         // 1. 全域狀態與變數
         // ==========================================
-        const socket = io({ query: { role: 'player' } });
+        const controlToken = (sessionStorage.getItem('ktvControlToken') || localStorage.getItem('ktvControlToken') || '').trim();
+        const socket = io({ query: { role: 'player', controlToken } });
         const remoteQr = document.getElementById('remote-qr');
         if (localStorage.getItem('ktvShowQr') !== 'false') {
             fetch(`/api/qr?url=${encodeURIComponent(`${location.origin}/remote`)}`)

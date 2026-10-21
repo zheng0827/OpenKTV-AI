@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node bot.js",
     "register": "node bot.js --register-only",
+    "test": "node --test test/**/*.test.js",
     "activity:build": "npm --prefix activity-app run build",
     "activity:start": "npm --prefix activity-app run start"
   },

@@ -32,6 +32,7 @@ npm --prefix discord-bot-standalone run start
 - `KTV_ACTIVITY_BASE_URL`：`activity ktv` 要分享的入口網址
 - `KTV_MIC_REMOTE_URL`：`activity mic` 要分享的低延遲 MIC 網址
 - `DISCORD_ACTIVITY_APPLICATION_ID`：建立語音房內嵌 Activity invite 使用
+- `KTV_ROOM_ADMIN_TOKEN`：啟用後，敏感 Socket 控制操作需提供 control token
 - `KTV_LIBRARY_INDEX_PATH` / `KTV_SONGS_DIR`：曲庫 CSV 位置
 - `KTV_PYTHON`：Python 執行檔名稱或路徑
 
@@ -51,3 +52,11 @@ Slash 與 Prefix 對應如下：
 
 請看 `discord-bot-standalone/activity-app/README.md`。  
 這個子專案會在 Discord 語音房以內嵌 Activity 方式執行，不是外跳 OpenKTV 網頁。
+
+若有設定 `KTV_ROOM_ADMIN_TOKEN`，可在瀏覽器 Console 設定：
+
+```js
+localStorage.setItem('ktvControlToken', '你的控制權杖')
+```
+
+之後主控台/遙控器會把 token 帶入 Socket 連線，敏感操作（切歌、暫停、重排等）才會被允許。

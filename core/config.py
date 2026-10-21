@@ -84,6 +84,10 @@ def resolve_base_dir() -> Path:
 def load_settings(base_dir: Path | None = None) -> AppSettings:
     root = base_dir or resolve_base_dir()
     load_dotenv(dotenv_path=root / ".env", override=False)
+    secret_key = os.getenv("KTV_SECRET_KEY", "").strip()
+    if not secret_key:
+        secret_key = os.urandom(32).hex()
+        print("[core:config] WARNING: KTV_SECRET_KEY 未設定，已使用本次程序臨時金鑰。", flush=True)
 
     stems = os.getenv("KTV_SEPARATOR_STEMS", "4").strip()
     separator_stems = 4 if stems == "4" else 2
@@ -98,7 +102,7 @@ def load_settings(base_dir: Path | None = None) -> AppSettings:
         host=os.getenv("KTV_HOST", "0.0.0.0"),
         port=_to_int(os.getenv("KTV_PORT"), 5000),
         node_port=_to_int(os.getenv("KTV_NODE_PORT"), 3000),
-        secret_key=os.getenv("KTV_SECRET_KEY", "ktv_secret"),
+        secret_key=secret_key,
         demucs_cache_dir=_path_value("KTV_DEMUCS_CACHE_DIR", root / "model_cache" / "demucs", root),
         demucs_model=os.getenv("KTV_DEMUCS_MODEL", "htdemucs_ft"),
         uvr_model_dir=_path_value("KTV_UVR_MODEL_DIR", root / "model_cache" / "uvr", root),

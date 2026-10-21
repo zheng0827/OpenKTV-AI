@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from . import unsafe_torch_load_context
 from .config import AppSettings
 from .demucs_separator import ensure_demucs_weights
 from .downloader import download_youtube_video
@@ -55,17 +56,18 @@ def enhanced_fetch_lrclib(song_name: str, singer: str) -> str:
 
     for query in queries:
         url = f"https://lrclib.net/api/search?{query}"
-        print("\t"+url)
+        print("\t" + url)
         req = urllib.request.Request(url, headers={"User-Agent": "OpenKTV-AI/1.0"})
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                print("\t"+data)
+                print("\t" + str(data))
                 for item in data:
-                    print("\t"+item)
+                    print("\t" + str(item))
                     if item.get("plainLyrics"):
                         return item.get("plainLyrics")
-        except Exception:
+        except Exception as error:
+            print(f"[core:lyrics] LRCLIB request failed: {error}", flush=True)
             continue
     return ""
 
@@ -351,7 +353,8 @@ def run_unified_nightingale(
     if not detected_language:
         from .gpu import gpu_model
         with gpu_model(f"whisperx:tiny:{transcription_device}") as held:
-            tiny_model = whisperx.load_model("tiny", device=transcription_device, compute_type=compute_type)
+            with unsafe_torch_load_context():
+                tiny_model = whisperx.load_model("tiny", device=transcription_device, compute_type=compute_type)
             held.append(tiny_model)
             detected_language = detect_language_multiwindow(tiny_model, full_audio)
 

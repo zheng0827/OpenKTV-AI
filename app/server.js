@@ -14,6 +14,7 @@ import MiniSearch from 'minisearch';
 import QRCode from 'qrcode';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { evaluateSocketPermission } from './socket-auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
@@ -108,7 +109,21 @@ function createInverseIndex(songs) {
   return index;
 }
 
-function inverseSearch(songs, inverseIndex, query) {
+function createPrefixIndex(inverseIndex) {
+  const prefixIndex = new Map();
+  for (const token of inverseIndex.keys()) {
+    const upper = String(token || '').toUpperCase();
+    const max = Math.min(upper.length, 6);
+    for (let length = 1; length <= max; length++) {
+      const prefix = upper.slice(0, length);
+      if (!prefixIndex.has(prefix)) prefixIndex.set(prefix, new Set());
+      prefixIndex.get(prefix).add(token);
+    }
+  }
+  return prefixIndex;
+}
+
+function inverseSearch(songs, inverseIndex, prefixIndex, query) {
   const clean = String(query || '').trim().toUpperCase();
   if (!clean) return songs;
   const terms = clean.match(/[\p{L}\p{N}]+/gu) || [...clean].filter(ch => /^[\p{L}\p{N}]$/u.test(ch));
@@ -116,8 +131,11 @@ function inverseSearch(songs, inverseIndex, query) {
   let candidates = null;
   for (const term of terms) {
     const ids = new Set();
-    for (const [token, values] of inverseIndex.entries()) {
-      if (token.startsWith(term) || token.includes(term)) for (const id of values) ids.add(id);
+    const prefixTokens = prefixIndex.get(term.slice(0, Math.min(term.length, 6)));
+    const tokenCandidates = prefixTokens ? [...prefixTokens] : [...inverseIndex.keys()];
+    for (const token of tokenCandidates) {
+      if (!token.startsWith(term) && !token.includes(term)) continue;
+      for (const id of inverseIndex.get(token) || []) ids.add(id);
     }
     candidates = candidates === null ? ids : new Set([...candidates].filter(id => ids.has(id)));
   }
@@ -125,8 +143,8 @@ function inverseSearch(songs, inverseIndex, query) {
   return [...(candidates || [])].map(id => byId.get(id)).filter(Boolean);
 }
 
-function findSongs(songs, miniSearch, inverseIndex, query, language, charCount, mode = 'keyword', sort = 'relevance') {
-  let results = query ? inverseSearch(songs, inverseIndex, query) : songs;
+function findSongs(songs, miniSearch, inverseIndex, prefixIndex, query, language, charCount, mode = 'keyword', sort = 'relevance') {
+  let results = query ? inverseSearch(songs, inverseIndex, prefixIndex, query) : songs;
   if (query && results.length < 5) {
     const fuzzy = miniSearch.search(query.toUpperCase())
       .map(result => songs.find(song => song.id === result.id))
@@ -173,11 +191,13 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       }
       let miniSearch = createSearchIndex(songs);
       let inverseIndex = createInverseIndex(songs);
+      let prefixIndex = createPrefixIndex(inverseIndex);
       const app = express();
       const httpServer = createServer(app);
       const io = new Server(httpServer, { cors: { origin: "*", methods: ["GET", "POST"] } });
       const micRelay = createMicRelay(io);
       let advanceQueue = () => {};
+      const controlToken = String(process.env.KTV_ROOM_ADMIN_TOKEN || '');
       app.use(express.json({ limit: '32kb' }));
       const mediaRequestLimiter = rateLimit({
         windowMs: 60 * 1000,
@@ -329,7 +349,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         const limit = Math.max(1, Math.min(100, Number.parseInt(req.query.limit, 10) || 50));
         const sort = String(req.query.sort || 'relevance');
         const mode = String(req.query.mode || 'keyword');
-        const results = findSongs(songs, miniSearch, inverseIndex, query, language, charCount, mode, sort);
+        const results = findSongs(songs, miniSearch, inverseIndex, prefixIndex, query, language, charCount, mode, sort);
         return res.json({ items: results.slice(offset, offset + limit), total: results.length, offset, limit });
       });
       app.get('/api/bot/room', botApiLimiter, (req, res) => {
@@ -384,6 +404,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         startedAt: null,
         serverTime: Date.now(),
       };
+      let stateDirty = true;
 
       const currentPosition = () => playerState.position + (
         playerState.isPlaying && playerState.startedAt !== null
@@ -413,10 +434,37 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         },
       });
       const emitState = () => {
+        stateDirty = true;
         const payload = snapshot();
         io.emit('sync_state', { queue: payload.queue, history: payload.history, state: payload.state });
         io.emit('queue_updated', payload.queue);
         io.emit('playback_snapshot', payload);
+      };
+      const markStateDirty = () => { stateDirty = true; };
+      const normalizeRole = role => (['admin', 'remote', 'player'].includes(role) ? role : 'viewer');
+      const safeTokenEquals = supplied => {
+        if (!controlToken) return true;
+        const expected = Buffer.from(controlToken);
+        const actual = Buffer.from(String(supplied || ''));
+        return actual.length === expected.length && timingSafeEqual(actual, expected);
+      };
+      const isSocketAuthorized = socket => safeTokenEquals(socket.data.controlToken);
+      const permissionError = (socket, action, reason) => {
+        socket.emit('permission_error', { action, reason });
+      };
+      const canControl = (socket, action, { roles = [], requireToken = false } = {}) => {
+        const role = socket.data.role || 'viewer';
+        const check = evaluateSocketPermission({
+          role,
+          allowedRoles: roles,
+          requireToken,
+          hasValidToken: isSocketAuthorized(socket),
+        });
+        if (!check.ok) {
+          permissionError(socket, action, check.reason);
+          return false;
+        }
+        return true;
       };
       const startCurrent = () => {
         playerState.position = 0;
@@ -441,6 +489,18 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
       app.get('/health', (_req, res) => res.json({ ok: true, songs: songs.length }));
 
       io.on('connection', socket => {
+        socket.data.role = normalizeRole(String(socket.handshake.query.role || '').trim().toLowerCase());
+        socket.data.controlToken = String(
+          socket.handshake.auth?.controlToken
+          || socket.handshake.query.controlToken
+          || socket.handshake.headers['x-ktv-control-token']
+          || '',
+        );
+        socket.emit('auth_status', {
+          role: socket.data.role,
+          requiresControlToken: Boolean(controlToken),
+          isAuthorized: isSocketAuthorized(socket),
+        });
         micRelay.attach(socket);
         const payload = snapshot();
         socket.emit('sync_state', { queue: payload.queue, history: payload.history, state: payload.state });
@@ -450,7 +510,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         });
         socket.on('search_songs', ({ query = '', language = '', charCount = 0, offset = 0, limit = 50, paginated = false, requestId, mode = 'keyword', sort = 'relevance' } = {}) => {
           const cleanQuery = String(query).trim();
-          const results = findSongs(songs, miniSearch, inverseIndex, cleanQuery, language, charCount, mode, sort);
+          const results = findSongs(songs, miniSearch, inverseIndex, prefixIndex, cleanQuery, language, charCount, mode, sort);
           if (paginated) {
             const safeOffset = Math.max(0, Number.parseInt(offset, 10) || 0);
             const safeLimit = Math.max(1, Math.min(100, Number.parseInt(limit, 10) || 50));
@@ -466,6 +526,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           }
         });
         socket.on('add_to_queue', payloadSong => {
+          if (!canControl(socket, 'add_to_queue', { roles: ['admin', 'remote', 'viewer', 'player'] })) return;
           const song = findSong(payloadSong);
           if (!song || !song.video_filename) return;
           queue.push({
@@ -477,6 +538,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           emitState();
         });
         socket.on('insert_to_top', payloadSong => {
+          if (!canControl(socket, 'insert_to_top', { roles: ['admin', 'remote', 'player'] })) return;
           const song = findSong(payloadSong);
           if (!song || !song.video_filename) return;
           const item = {
@@ -489,6 +551,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           emitState();
         });
         socket.on('remove_from_queue', queueId => {
+          if (!canControl(socket, 'remove_from_queue', { roles: ['admin', 'player'], requireToken: true })) return;
           const index = queue.findIndex(item => item.queueId === queueId);
           if (index < 0) return;
           const wasCurrent = index === 0;
@@ -501,6 +564,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           emitState();
         });
         socket.on('move_to_top', queueId => {
+          if (!canControl(socket, 'move_to_top', { roles: ['admin', 'player'], requireToken: true })) return;
           const index = queue.findIndex(item => item.queueId === queueId);
           if (index <= 1) return;
           const [item] = queue.splice(index, 1);
@@ -508,6 +572,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           emitState();
         });
         socket.on('shuffle_queue', () => {
+          if (!canControl(socket, 'shuffle_queue', { roles: ['admin', 'player'], requireToken: true })) return;
           for (let index = queue.length - 1; index > 1; index--) {
             const target = 1 + Math.floor(Math.random() * index);
             [queue[index], queue[target]] = [queue[target], queue[index]];
@@ -515,10 +580,12 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           emitState();
         });
         socket.on('clear_queue', () => {
+          if (!canControl(socket, 'clear_queue', { roles: ['admin', 'player'], requireToken: true })) return;
           queue.splice(1);
           emitState();
         });
         socket.on('reorder_queue', ids => {
+          if (!canControl(socket, 'reorder_queue', { roles: ['admin', 'player'], requireToken: true })) return;
           if (!Array.isArray(ids)) return;
           const byId = new Map(queue.map(item => [item.queueId, item]));
           const reordered = ids.map(item => byId.get(typeof item === 'string' ? item : item?.queueId)).filter(Boolean);
@@ -526,14 +593,17 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           emitState();
         });
         socket.on('next_song', () => {
+          if (!canControl(socket, 'next_song', { roles: ['admin', 'player'], requireToken: true })) return;
           advanceQueue();
         });
         socket.on('replay_current', () => {
+          if (!canControl(socket, 'replay_current', { roles: ['admin', 'player'], requireToken: true })) return;
           playerState.position = 0;
           playerState.startedAt = playerState.isPlaying ? Date.now() : null;
           emitState();
         });
         socket.on('seek', value => {
+          if (!canControl(socket, 'seek', { roles: ['admin', 'player'], requireToken: true })) return;
           const position = Number(value?.position ?? value);
           if (!Number.isFinite(position) || position < 0) return;
           const duration = Number(currentSong()?.duration_seconds);
@@ -542,6 +612,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           emitState();
         });
         socket.on('player_command', command => {
+          if (!canControl(socket, 'player_command', { roles: ['admin', 'player'], requireToken: true })) return;
           if (!command || typeof command !== 'object') return;
           if (command.isPlaying !== undefined) {
             const position = currentPosition();
@@ -568,6 +639,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         });
         socket.on('report_score', scorePayload => socket.broadcast.emit('score_updated', scorePayload));
         socket.on('crowd_interaction', payload => {
+          if (!canControl(socket, 'crowd_interaction', { roles: ['admin', 'remote', 'viewer', 'player'] })) return;
           if (!payload || !['applause', 'cheer', 'message'].includes(payload.type)) return;
           const text = String(payload.text || '').trim().slice(0, 100);
           if (payload.type === 'message' && !text) return;
@@ -580,22 +652,50 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         });
       });
 
-      setInterval(async () => {
+      let catalogMtime = fs.existsSync(catalogPath) ? fs.statSync(catalogPath).mtimeMs : 0;
+      let catalogWatchTimer = null;
+      const reloadCatalog = async () => {
         try {
           const stat = fs.existsSync(catalogPath) ? fs.statSync(catalogPath) : null;
-          if (stat && stat.mtimeMs !== catalogMtime) {
-            songs = await readCatalog(catalogPath);
-            miniSearch = createSearchIndex(songs);
-            inverseIndex = createInverseIndex(songs);
-            catalogMtime = stat.mtimeMs;
-          }
+          if (!stat || stat.mtimeMs === catalogMtime) return;
+          songs = await readCatalog(catalogPath);
+          miniSearch = createSearchIndex(songs);
+          inverseIndex = createInverseIndex(songs);
+          prefixIndex = createPrefixIndex(inverseIndex);
+          catalogMtime = stat.mtimeMs;
+          stateDirty = true;
         } catch (error) {
           console.error('[Database] Catalog reload failed:', error.message);
         }
-        if (currentSong()) emitState();
+      };
+      try {
+        fs.watch(catalogPath, { persistent: false }, () => {
+          if (catalogWatchTimer) clearTimeout(catalogWatchTimer);
+          catalogWatchTimer = setTimeout(() => {
+            catalogWatchTimer = null;
+            reloadCatalog().catch(() => {});
+          }, 250);
+        });
+      } catch {}
+      let playbackSyncCounter = 0;
+      setInterval(async () => {
+        await reloadCatalog();
+        if (currentSong() && playerState.isPlaying) {
+          playbackSyncCounter += 1;
+          if (playbackSyncCounter >= 5) {
+            playbackSyncCounter = 0;
+            markStateDirty();
+          }
+        }
+        if (stateDirty) {
+          stateDirty = false;
+          const payload = snapshot();
+          io.emit('sync_state', { queue: payload.queue, history: payload.history, state: payload.state });
+          io.emit('queue_updated', payload.queue);
+          io.emit('playback_snapshot', payload);
+        }
       }, 1000).unref();
 
-      let catalogMtime = fs.existsSync(catalogPath) ? fs.statSync(catalogPath).mtimeMs : 0;
       httpServer.once('error', reject);
       httpServer.listen(port, '0.0.0.0', () => {
         const httpsPort = Number(process.env.KTV_HTTPS_PORT) || 3443;

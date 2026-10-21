@@ -20,6 +20,7 @@ import { fileURLToPath } from 'url';
 import ytdl from 'ytdl-core';
 import yts from 'yt-search';
 import './environment.js';
+import { classifyActivityInviteError } from './lib/activity-invite.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
@@ -401,7 +402,7 @@ async function createEmbeddedActivityInvite(voiceChannelId) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload?.code) {
-    throw new Error(`建立 Activity 邀請失敗（${response.status}）：${payload?.message || '未知錯誤'}`);
+    throw new Error(classifyActivityInviteError(response.status, payload?.code, payload?.message));
   }
   return `https://discord.gg/${payload.code}`;
 }

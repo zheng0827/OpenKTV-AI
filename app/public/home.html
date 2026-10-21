@@ -414,7 +414,8 @@
   <footer class="wrap footer"><span>OPENKTV · 歌聲與好心情同步</span><span><a href="/console">主控台</a>　·　<a
         href="/player">播放器</a>　·　<a href="/remote">遙控器</a></span></footer>
   <script>
-    const socket = io(), $ = id => document.getElementById(id);
+    const controlToken = (sessionStorage.getItem('ktvControlToken') || localStorage.getItem('ktvControlToken') || '').trim();
+    const socket = io({ query: { role: 'viewer', controlToken } }), $ = id => document.getElementById(id);
     let songs = [], searchTimer;
     const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
     function render(rows) { $('results').innerHTML = rows.length ? rows.slice(0, 8).map(song => `<article class="song"><div style="min-width:0"><div class="song-name">${esc(song.title)}</div><div class="song-artist">${esc(song.artist || '未知歌手')} · ${esc(song.language || '')}</div></div><button class="add" data-id="${esc(song.id)}">＋ 點歌</button></article>`).join('') : '<div class="empty">沒有找到歌曲，試試其他歌名或歌手。</div>'; document.querySelectorAll('.add').forEach(button => button.onclick = () => { const song = songs.find(item => item.id === button.dataset.id); if (song) socket.emit('add_to_queue', song); button.textContent = '✓ 已加入'; setTimeout(() => button.textContent = '＋ 點歌', 1000) }) }

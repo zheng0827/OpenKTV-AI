@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from . import unsafe_torch_load_context
 from .ctc_alignment import ctc_align
 from .gpu import gpu_model, log_vram
 from .runtime import align_device_for, is_oom
@@ -10,11 +11,12 @@ def _run_whisperx(raw_segments, audio, language: str, device: str, model_name=No
 
     key_suffix = model_name or language
     with gpu_model(f"wav2vec2:{key_suffix}:{device}") as held:
-        align_model, metadata = whisperx.load_align_model(
-            language_code=language,
-            device=device,
-            model_name=model_name,
-        )
+        with unsafe_torch_load_context():
+            align_model, metadata = whisperx.load_align_model(
+                language_code=language,
+                device=device,
+                model_name=model_name,
+            )
         held.append(align_model)
         return whisperx.align(
             raw_segments,
@@ -31,11 +33,12 @@ def _run_ctc(raw_segments, audio, language: str, device: str, model_name=None):
 
     key_suffix = model_name or language
     with gpu_model(f"wav2vec2:{key_suffix}:{device}") as held:
-        align_model, metadata = whisperx.load_align_model(
-            language_code=language,
-            device=device,
-            model_name=model_name,
-        )
+        with unsafe_torch_load_context():
+            align_model, metadata = whisperx.load_align_model(
+                language_code=language,
+                device=device,
+                model_name=model_name,
+            )
         held.append(align_model)
         return ctc_align(
             raw_segments,

@@ -4,6 +4,7 @@ import { rateLimit } from 'express-rate-limit';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createChallengeStore, isAllowedRedirectOrigin } from './auth-challenge.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appRoot = path.resolve(__dirname, '..');
@@ -14,6 +15,14 @@ const apiBase = (process.env.KTV_BOT_API_URL || `http://127.0.0.1:${Number(proce
 const botApiToken = process.env.KTV_BOT_API_TOKEN || '';
 const activityClientId = process.env.DISCORD_ACTIVITY_CLIENT_ID || process.env.DISCORD_CLIENT_ID || '';
 const activityClientSecret = process.env.DISCORD_ACTIVITY_CLIENT_SECRET || '';
+const authChallengeTtlMs = Number(process.env.DISCORD_ACTIVITY_AUTH_CHALLENGE_TTL_MS) || 5 * 60 * 1000;
+const allowedRedirectOrigins = new Set(
+  String(process.env.DISCORD_ACTIVITY_ALLOWED_REDIRECT_ORIGINS || '')
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean),
+);
+const authChallengeStore = createChallengeStore(authChallengeTtlMs);
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
@@ -23,6 +32,10 @@ app.use(rateLimit({
   standardHeaders: 'draft-8',
   legacyHeaders: false,
 }));
+
+function redirectOriginAllowed(redirectUri, req) {
+  return isAllowedRedirectOrigin(redirectUri, allowedRedirectOrigins, `${req.protocol}://${req.get('host')}`);
+}
 
 async function fetchKtv(pathname, options = {}) {
   const headers = {
@@ -40,14 +53,27 @@ app.get('/api/activity/config', (_req, res) => {
   });
 });
 
+app.post('/api/discord/auth-challenge', (req, res) => {
+  const { redirectUri } = req.body || {};
+  if (!redirectOriginAllowed(redirectUri, req)) {
+    return res.status(400).json({ error: 'redirect origin not allowed' });
+  }
+  return res.json(authChallengeStore.issue(redirectUri));
+});
+
 app.post('/api/discord/token', async (req, res) => {
   if (!activityClientId || !activityClientSecret) {
     return res.status(500).json({ error: 'Missing DISCORD_ACTIVITY_CLIENT_ID / DISCORD_ACTIVITY_CLIENT_SECRET' });
   }
-  const { code, codeVerifier, redirectUri } = req.body || {};
-  if (!code || !codeVerifier || !redirectUri) {
-    return res.status(400).json({ error: 'code, codeVerifier, redirectUri are required' });
+  const { code, codeVerifier, redirectUri, challengeId, state } = req.body || {};
+  if (!code || !codeVerifier || !redirectUri || !challengeId || !state) {
+    return res.status(400).json({ error: 'code, codeVerifier, redirectUri, challengeId, state are required' });
   }
+  if (!redirectOriginAllowed(redirectUri, req)) {
+    return res.status(400).json({ error: 'redirect origin not allowed' });
+  }
+  const challengeResult = authChallengeStore.consume({ challengeId, state, redirectUri });
+  if (!challengeResult.ok) return res.status(400).json({ error: challengeResult.reason });
   try {
     const body = new URLSearchParams({
       client_id: activityClientId,
