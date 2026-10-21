@@ -16,6 +16,26 @@ const activityClientSecret = process.env.DISCORD_ACTIVITY_CLIENT_SECRET || '';
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
+const rateWindowMs = 60_000;
+const maxPerWindow = 120;
+const rateState = new Map();
+
+function basicRateLimit(req, res, next) {
+  const now = Date.now();
+  const key = req.ip || req.socket.remoteAddress || 'unknown';
+  const entry = rateState.get(key);
+  if (!entry || now - entry.start > rateWindowMs) {
+    rateState.set(key, { start: now, count: 1 });
+    return next();
+  }
+  if (entry.count >= maxPerWindow) {
+    return res.status(429).json({ error: 'Too many requests' });
+  }
+  entry.count += 1;
+  return next();
+}
+
+app.use(basicRateLimit);
 
 async function fetchKtv(pathname, options = {}) {
   const headers = {
