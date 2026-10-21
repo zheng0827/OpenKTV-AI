@@ -6,7 +6,9 @@
   "private": true,
   "scripts": {
     "start": "node bot.js",
-    "register": "node bot.js --register-only"
+    "register": "node bot.js --register-only",
+    "activity:build": "npm --prefix activity-app run build",
+    "activity:start": "npm --prefix activity-app run start"
   },
   "dependencies": {
     "csv-parser": "^3.0.0",

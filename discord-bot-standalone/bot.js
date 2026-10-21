@@ -34,6 +34,7 @@ const catalogPath = path.resolve(
 const prefix = (process.env.DISCORD_BOT_PREFIX || '!ktv').trim();
 const activityBase = (process.env.KTV_ACTIVITY_BASE_URL || `${apiBase}/ktv`).replace(/\/+$/, '');
 const micBase = (process.env.KTV_MIC_REMOTE_URL || `${apiBase}/remote`).replace(/\/+$/, '');
+const embeddedActivityAppId = process.env.DISCORD_ACTIVITY_APPLICATION_ID || process.env.DISCORD_CLIENT_ID || '';
 const intake = new Set();
 
 const commands = [
@@ -45,6 +46,7 @@ const commands = [
     { name: '播放頁', value: 'ktv' },
     { name: '低延遲 MIC', value: 'mic' },
   )),
+  new SlashCommandBuilder().setName('activitylaunch').setDescription('在目前語音房建立 Discord 內嵌 Activity 邀請'),
   new SlashCommandBuilder().setName('add').setDescription('用關鍵字/YouTube 新增歌曲').addStringOption(o => o.setName('query').setDescription('關鍵字或 YouTube 網址').setRequired(true)),
 ].map(c => c.toJSON());
 
@@ -369,6 +371,58 @@ async function runActivityReply(target, mode) {
   else await target.channel.send({ embeds: [embed] });
 }
 
+async function resolveVoiceChannelId(target, userId) {
+  if (target.member?.voice?.channelId) return target.member.voice.channelId;
+  if (!target.guild?.members?.fetch) return '';
+  try {
+    const member = await target.guild.members.fetch(userId);
+    return member?.voice?.channelId || '';
+  } catch {
+    return '';
+  }
+}
+
+async function createEmbeddedActivityInvite(voiceChannelId) {
+  if (!embeddedActivityAppId) throw new Error('尚未設定 DISCORD_ACTIVITY_APPLICATION_ID。');
+  const response = await fetch(`https://discord.com/api/v10/channels/${encodeURIComponent(voiceChannelId)}/invites`, {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bot ' + token,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      max_age: 0,
+      max_uses: 0,
+      temporary: false,
+      target_type: 2,
+      target_application_id: embeddedActivityAppId,
+    }),
+    signal: AbortSignal.timeout(10000),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.code) {
+    throw new Error(`建立 Activity 邀請失敗（${response.status}）：${payload?.message || '未知錯誤'}`);
+  }
+  return `https://discord.gg/${payload.code}`;
+}
+
+async function runActivityLaunchReply(target, userId) {
+  const channelId = await resolveVoiceChannelId(target, userId);
+  if (!channelId) {
+    const text = '請先加入要唱歌的語音房，再執行這個指令。';
+    if (target.deferReply) await target.reply({ content: text, ephemeral: true });
+    else await target.reply(text);
+    return;
+  }
+  const invite = await createEmbeddedActivityInvite(channelId);
+  const embed = new EmbedBuilder()
+    .setColor(0x77e8ce)
+    .setTitle('Discord 內嵌 Activity 邀請已建立')
+    .setDescription(`請在語音房啟用：${invite}\n\n> 這是 Discord 內建 Activity 邀請（不是外跳 OpenKTV 頁面）。`);
+  if (target.deferReply) await target.reply({ embeds: [embed], ephemeral: true });
+  else await target.reply({ embeds: [embed] });
+}
+
 async function registerCommands(clientId, token, guildId) {
   const rest = new REST({ version: '10' }).setToken(token);
   const route = guildId ? Routes.applicationGuildCommands(clientId, guildId) : Routes.applicationCommands(clientId);
@@ -389,7 +443,7 @@ if (process.argv.includes('--register-only')) {
 }
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildVoiceStates],
 });
 
 client.once('ready', () => console.log(`[Standalone Discord Bot] 已登入為 ${client.user.tag}`));
@@ -402,6 +456,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === 'room') return runRoomReply(interaction);
     if (interaction.commandName === 'queue') return runQueueReply(interaction);
     if (interaction.commandName === 'activity') return runActivityReply(interaction, interaction.options.getString('mode') || 'ktv');
+    if (interaction.commandName === 'activitylaunch') return runActivityLaunchReply(interaction, interaction.user.id);
     if (interaction.commandName === 'add') {
       if (intake.size) return interaction.reply({ content: '目前已有歌曲處理工作，請稍後再試。', ephemeral: true });
       intake.add(interaction.user.id);
@@ -442,6 +497,8 @@ client.on('messageCreate', async message => {
       await runQueueReply(message);
     } else if (lower === 'activity') {
       await runActivityReply(message, raw === 'mic' ? 'mic' : 'ktv');
+    } else if (lower === 'activitylaunch') {
+      await runActivityLaunchReply(message, message.author.id);
     } else if (lower === 'add') {
       if (!raw) return void message.reply(`用法：${prefix} add <關鍵字或 YouTube URL>`);
       if (intake.size) return void message.reply('目前已有歌曲處理工作，請稍後再試。');
@@ -454,7 +511,7 @@ client.on('messageCreate', async message => {
         intake.delete(message.author.id);
       }
     } else if (lower === 'help') {
-      await message.reply(`指令：${prefix} songs [keyword] [page] | ${prefix} song <keyword> | ${prefix} room | ${prefix} queue | ${prefix} activity [ktv|mic] | ${prefix} add <query>`);
+      await message.reply(`指令：${prefix} songs [keyword] [page] | ${prefix} song <keyword> | ${prefix} room | ${prefix} queue | ${prefix} activity [ktv|mic] | ${prefix} activitylaunch | ${prefix} add <query>`);
     }
   } catch (error) {
     await message.reply(`指令失敗：${String(error?.message || error).slice(0, 1200)}`);
