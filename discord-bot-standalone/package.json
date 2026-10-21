@@ -1,0 +1,17 @@
+{
+  "name": "openktv-standalone-discord-bot",
+  "version": "1.0.0",
+  "description": "Standalone Discord bot for OpenKTV-AI catalog and ingestion",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node bot.js",
+    "register": "node bot.js --register-only"
+  },
+  "dependencies": {
+    "csv-parser": "^3.0.0",
+    "discord.js": "^14.27.0",
+    "ytdl-core": "^4.11.5",
+    "yt-search": "^2.13.1"
+  }
+}

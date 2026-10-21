@@ -112,6 +112,8 @@ npm --prefix app run bot
 
 機器人提供 `/songs`、`/song`、`/room`、`/queue` 與 `/add`。`/add` 可輸入 YouTube 關鍵字、影片或播放清單網址，會先排除曲庫內歌曲，播放清單以分頁選單預設全選；接著依選擇的語言查 LRCLIB，讓使用者逐首選歌詞結果，再把設定交給獨立 Python 腳本執行。新增流程與長時間處理進度會顯示在呼叫指令的頻道；房間／佇列資訊透過 `KTV_BOT_API_TOKEN` 保護的 Node API 讀取。
 
+另提供獨立於 `app` 與 `core` 的額外機器人資料夾 `discord-bot-standalone/`，可同時支援 slash/prefix 指令、查詢曲庫、建立 KTV/MIC activity 連結、以按鈕分頁多選 YouTube 搜尋結果，並直接呼叫 `script/download_songs.py` 新增歌曲。使用方式請見 `discord-bot-standalone/README.md`。
+
 ## 曲庫與 metadata
 
 Python 維護唯一正式 `library_index.csv`，使用 CSV 跳脫並透過同目錄暫存檔和原子替換更新。欄位包括穩定 ID、歌手、歌名、專輯、年份、音源時長、性別／曲風、純文字歌詞、分離／對齊模型、媒體檔名、來源、原始 YouTube 標題、處理狀態與建立時間。歌曲 ID 依歌手與歌名穩定產生；metadata 不可得時使用空值，重複歌曲合併到同一曲庫項目，檔名衝突則為成品產生唯一檔名。純文字歌詞從 LRC 移除時間戳與 KTV 格式標記後以空格串接。
