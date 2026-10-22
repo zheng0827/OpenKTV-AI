@@ -220,6 +220,21 @@ localStorage.setItem('ktvControlToken', '你的控制權杖')
 
 ---
 
+## 任務治理（下載 / 分離 / 對齊）
+
+- Python 處理服務改為任務佇列模式，支援：
+  - 優先序排程（priority，高優先先執行）
+  - 任務取消（待執行可直接取消；執行中會在安全檢查點停止）
+  - 任務重試（失敗或取消後可重送，受 `max_retries` 限制）
+- 新增 Socket 事件：
+  - `task_queue_status`：取得目前佇列狀態
+  - `task_cancel`：取消指定 `task_id`
+  - `task_retry`：重試指定 `task_id`
+  - `task_set_priority`：調整待執行任務優先序
+- 佇列狀態會透過 `task_queue_state` 廣播（pending/running/recent）
+
+---
+
 ## 主要環境變數（精簡）
 
 - 分離/對齊
