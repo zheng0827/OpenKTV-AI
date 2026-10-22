@@ -255,7 +255,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         const grantedRole = resolveGrantedRole({
           requestedRole: req.body?.requestedRole,
           isLocalClient: isLocalAddress(clientIp),
-          hasValidControlToken: safeTokenEquals(suppliedToken),
+          hasValidControlToken: Boolean(controlToken) && safeTokenEquals(suppliedToken),
         });
         const sessionToken = socketSessionManager.issue({
           role: grantedRole,

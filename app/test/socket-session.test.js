@@ -22,3 +22,8 @@ test('grants admin role when control token is valid', () => {
   const role = resolveGrantedRole({ requestedRole: 'viewer', isLocalClient: false, hasValidControlToken: true });
   assert.equal(role, 'admin');
 });
+
+test('downgrades non-local admin request without valid control token', () => {
+  const role = resolveGrantedRole({ requestedRole: 'admin', isLocalClient: false, hasValidControlToken: false });
+  assert.equal(role, 'viewer');
+});
