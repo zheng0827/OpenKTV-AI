@@ -184,6 +184,9 @@ npm --prefix app run bot
 - `KTV_LIBRARY_ADMIN_TOKEN`：保護曲庫編輯/刪除
 - `KTV_BOT_API_TOKEN`：保護 Bot 狀態 API
 - `KTV_ROOM_ADMIN_TOKEN`（可選）：保護敏感 Socket 控制（切歌、seek、重排、播放控制）
+- `KTV_SOCKET_SESSION_SECRET`：Socket session 簽章金鑰（必填，伺服器簽發角色 session）
+- `KTV_PLAYBACK_STATE_PATH`（可選）：播放狀態落地檔案（預設 `logs/playback-state.json`）
+- `KTV_AUDIT_LOG_PATH`（可選）：敏感操作審計日志（預設 `logs/audit.log`）
 
 若啟用 `KTV_ROOM_ADMIN_TOKEN`，控制端可在瀏覽器設定：
 
@@ -209,6 +212,7 @@ localStorage.setItem('ktvControlToken', '你的控制權杖')
   - `KTV_LIBRARY_INDEX_PATH`
 - 安全
   - `KTV_SECRET_KEY`
+  - `KTV_SOCKET_SESSION_SECRET`
   - `KTV_LIBRARY_ADMIN_TOKEN`
   - `KTV_BOT_API_TOKEN`
   - `KTV_ROOM_ADMIN_TOKEN`（可選）

@@ -267,7 +267,15 @@
         // 1. 全域狀態與變數
         // ==========================================
         const controlToken = (sessionStorage.getItem('ktvControlToken') || localStorage.getItem('ktvControlToken') || '').trim();
-        const socket = io({ query: { role: 'player', controlToken } });
+        const socket = io({ autoConnect: false, auth: { controlToken } });
+        (async () => {
+            try {
+                const response = await fetch('/api/socket/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestedRole: 'player', controlToken }) });
+                const data = await response.json();
+                if (response.ok && data?.sessionToken) socket.auth = { ...socket.auth, sessionToken: data.sessionToken };
+            } catch { }
+            socket.connect();
+        })();
         const remoteQr = document.getElementById('remote-qr');
         if (localStorage.getItem('ktvShowQr') !== 'false') {
             fetch(`/api/qr?url=${encodeURIComponent(`${location.origin}/remote`)}`)

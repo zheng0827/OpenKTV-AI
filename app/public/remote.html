@@ -34,7 +34,15 @@
   <div id="confirm" class="confirm" hidden><div class="confirm-box"><strong>確定切換下一首？</strong><p class="sub">目前歌曲會加入已播歷史。</p><div class="confirm-actions"><button id="cancelNext" class="button">取消</button><button id="confirmNext" class="button primary">切歌</button></div></div></div>
   <script>
     const controlToken=(sessionStorage.getItem('ktvControlToken')||localStorage.getItem('ktvControlToken')||'').trim();
-    const socket=io({query:{role:'remote',controlToken}}),$=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const socket=io({autoConnect:false,auth:{controlToken}}),$=id=>document.getElementById(id),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    (async()=>{
+      try{
+        const response=await fetch('/api/socket/session',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({requestedRole:'remote',controlToken})});
+        const data=await response.json();
+        if(response.ok&&data?.sessionToken)socket.auth={...socket.auth,sessionToken:data.sessionToken};
+      }catch{}
+      socket.connect();
+    })();
     const time=v=>{const n=Math.max(0,Math.floor(Number(v)||0));return `${Math.floor(n/60)}:${String(n%60).padStart(2,'0')}`};
     let queue=[],songs=[],state={},history=[],queryTimer,offset=0,total=0,requestId=0,busy=false,language='',duration=0,position=0,dragging=false;
     $('nickname').value=localStorage.getItem('ktvNickname')||'';$('nickname').oninput=()=>localStorage.setItem('ktvNickname',$('nickname').value.slice(0,24));

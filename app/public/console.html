@@ -86,7 +86,15 @@
   <div id="toast" class="toast" role="status"></div>
   <script>
     const controlToken=(sessionStorage.getItem('ktvControlToken')||localStorage.getItem('ktvControlToken')||'').trim();
-    const socket = io({query:{role:'admin',controlToken}}), $ = id => document.getElementById(id);
+    const socket = io({autoConnect:false,auth:{controlToken}}), $ = id => document.getElementById(id);
+    (async()=>{
+      try{
+        const response=await fetch('/api/socket/session',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({requestedRole:'admin',controlToken})});
+        const data=await response.json();
+        if(response.ok&&data?.sessionToken)socket.auth={...socket.auth,sessionToken:data.sessionToken};
+      }catch{}
+      socket.connect();
+    })();
     const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const fmt = value => {const s=Math.max(0,Math.floor(Number(value)||0));return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`};
     const fmtClock = value => {const n=Math.max(0,Number(value)||0),m=Math.floor(n/60),s=(n%60).toFixed(2).padStart(5,'0');return `[${String(m).padStart(2,'0')}:${s}]`};
