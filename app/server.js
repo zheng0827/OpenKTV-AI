@@ -18,6 +18,8 @@ import { evaluateSocketPermission } from './socket-auth.js';
 import { createSocketSessionManager, resolveGrantedRole } from './socket-session.js';
 import { loadPlaybackState, persistPlaybackState } from './state-store.js';
 import { createAuditLogger } from './audit-log.js';
+import { createRuntimeMetrics } from './metrics.js';
+import { applySecurityHeaders } from './security-headers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
@@ -212,7 +214,11 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         ttlSeconds: Number(process.env.KTV_SOCKET_SESSION_TTL_SECONDS) || 3600,
       });
       const auditLog = createAuditLogger(auditLogPath);
+      const runtimeMetrics = createRuntimeMetrics();
+      const trustProxyValue = String(process.env.KTV_TRUST_PROXY || '').trim();
+      if (trustProxyValue) app.set('trust proxy', trustProxyValue === 'true' ? true : trustProxyValue);
       app.use(express.json({ limit: '32kb' }));
+      app.use(applySecurityHeaders);
       const mediaRequestLimiter = rateLimit({
         windowMs: 60 * 1000,
         limit: 600,
@@ -296,6 +302,46 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         try {
           const response = await fetch(`http://127.0.0.1:${pythonPort}/health`, {
             signal: AbortSignal.timeout(1500),
+          });
+          app.get('/api/health/dashboard', pageRequestLimiter, (_req, res) => {
+            const metrics = runtimeMetrics.toJSON({
+              queueLength: queue.length,
+              isPlaying: playerState.isPlaying,
+              clientCount: io.engine.clientsCount,
+            });
+            const memory = process.memoryUsage();
+            res.setHeader('Cache-Control', 'no-store');
+            return res.json({
+              status: 'ok',
+              now: new Date().toISOString(),
+              songs: songs.length,
+              runtime: {
+                pid: process.pid,
+                nodeVersion: process.version,
+                rssBytes: memory.rss,
+                heapUsedBytes: memory.heapUsed,
+                heapTotalBytes: memory.heapTotal,
+              },
+              metrics,
+            });
+          });
+          app.get('/api/metrics', pageRequestLimiter, (_req, res) => {
+            res.setHeader('Cache-Control', 'no-store');
+            return res.json(runtimeMetrics.toJSON({
+              queueLength: queue.length,
+              isPlaying: playerState.isPlaying,
+              clientCount: io.engine.clientsCount,
+            }));
+          });
+          app.get('/metrics', pageRequestLimiter, (_req, res) => {
+            const snapshot = runtimeMetrics.toJSON({
+              queueLength: queue.length,
+              isPlaying: playerState.isPlaying,
+              clientCount: io.engine.clientsCount,
+            });
+            res.setHeader('Content-Type', 'text/plain; version=0.0.4');
+            res.setHeader('Cache-Control', 'no-store');
+            return res.send(runtimeMetrics.toPrometheusSnapshot(snapshot));
           });
           const health = response.ok ? await response.json() : null;
           return res.json({
@@ -525,10 +571,21 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
         });
         if (!check.ok) {
           permissionError(socket, action, check.reason);
+          runtimeMetrics.trackPermissionDenied(action);
           if (auditableActions.has(action)) auditAction(socket, action, 'denied', check.reason);
           return false;
         }
         return true;
+      };
+      const withActionMetric = (callback, tracker = () => {}) => (...args) => {
+        const start = runtimeMetrics.nowMs();
+        try {
+          const result = callback(...args);
+          if (result) tracker();
+          return result;
+        } finally {
+          runtimeMetrics.trackAction(runtimeMetrics.nowMs() - start);
+        }
       };
       const startCurrent = () => {
         playerState.position = 0;
@@ -576,6 +633,10 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           sessionValid: session.ok,
           sessionReason: session.ok ? '' : session.reason,
         });
+        runtimeMetrics.trackConnection(socket.data.role);
+        socket.on('disconnect', () => {
+          runtimeMetrics.trackDisconnection(socket.data.role || 'viewer');
+        });
         micRelay.attach(socket);
         const payload = snapshot();
         socket.emit('sync_state', { queue: payload.queue, history: payload.history, state: payload.state });
@@ -584,6 +645,7 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           socket.emit('time_pong', { clientSentAt: Number(clientSentAt), serverTime: Date.now() });
         });
         socket.on('search_songs', ({ query = '', language = '', charCount = 0, offset = 0, limit = 50, paginated = false, requestId, mode = 'keyword', sort = 'relevance' } = {}) => {
+          const startedAt = runtimeMetrics.nowMs();
           const cleanQuery = String(query).trim();
           const results = findSongs(songs, miniSearch, inverseIndex, prefixIndex, cleanQuery, language, charCount, mode, sort);
           if (paginated) {
@@ -599,8 +661,9 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           } else {
             socket.emit('search_results', results.slice(0, 50));
           }
+          runtimeMetrics.trackSearch(runtimeMetrics.nowMs() - startedAt);
         });
-        socket.on('add_to_queue', payloadSong => {
+        socket.on('add_to_queue', withActionMetric(payloadSong => {
           if (!canControl(socket, 'add_to_queue', { roles: ['admin', 'remote', 'viewer', 'player'] })) return;
           const song = findSong(payloadSong);
           if (!song || !song.video_filename) return;
@@ -613,8 +676,9 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           auditAction(socket, 'add_to_queue', 'allowed', '', { songId: song.id, queueId: queue[queue.length - 1]?.queueId || '' });
           schedulePersistState();
           emitState();
-        });
-        socket.on('insert_to_top', payloadSong => {
+          return true;
+        }, () => runtimeMetrics.trackQueueMutation()));
+        socket.on('insert_to_top', withActionMetric(payloadSong => {
           if (!canControl(socket, 'insert_to_top', { roles: ['admin', 'remote', 'player'] })) return;
           const song = findSong(payloadSong);
           if (!song || !song.video_filename) return;
@@ -628,8 +692,9 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           auditAction(socket, 'insert_to_top', 'allowed', '', { songId: song.id, queueId: item.queueId });
           schedulePersistState();
           emitState();
-        });
-        socket.on('remove_from_queue', queueId => {
+          return true;
+        }, () => runtimeMetrics.trackQueueMutation()));
+        socket.on('remove_from_queue', withActionMetric(queueId => {
           if (!canControl(socket, 'remove_from_queue', { roles: ['admin', 'player'], requireToken: true })) return;
           const index = queue.findIndex(item => item.queueId === queueId);
           if (index < 0) return;
@@ -643,8 +708,9 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           auditAction(socket, 'remove_from_queue', 'allowed', '', { queueId: String(queueId || ''), removedSongId: removed?.id || '' });
           schedulePersistState();
           emitState();
-        });
-        socket.on('move_to_top', queueId => {
+          return true;
+        }, () => runtimeMetrics.trackQueueMutation()));
+        socket.on('move_to_top', withActionMetric(queueId => {
           if (!canControl(socket, 'move_to_top', { roles: ['admin', 'player'], requireToken: true })) return;
           const index = queue.findIndex(item => item.queueId === queueId);
           if (index <= 1) return;
@@ -653,8 +719,9 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           auditAction(socket, 'move_to_top', 'allowed', '', { queueId: String(queueId || ''), songId: item?.id || '' });
           schedulePersistState();
           emitState();
-        });
-        socket.on('shuffle_queue', () => {
+          return true;
+        }, () => runtimeMetrics.trackQueueMutation()));
+        socket.on('shuffle_queue', withActionMetric(() => {
           if (!canControl(socket, 'shuffle_queue', { roles: ['admin', 'player'], requireToken: true })) return;
           for (let index = queue.length - 1; index > 1; index--) {
             const target = 1 + Math.floor(Math.random() * index);
@@ -663,15 +730,17 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           auditAction(socket, 'shuffle_queue');
           schedulePersistState();
           emitState();
-        });
-        socket.on('clear_queue', () => {
+          return true;
+        }, () => runtimeMetrics.trackQueueMutation()));
+        socket.on('clear_queue', withActionMetric(() => {
           if (!canControl(socket, 'clear_queue', { roles: ['admin', 'player'], requireToken: true })) return;
           queue.splice(1);
           auditAction(socket, 'clear_queue', 'allowed', '', { remaining: queue.length });
           schedulePersistState();
           emitState();
-        });
-        socket.on('reorder_queue', ids => {
+          return true;
+        }, () => runtimeMetrics.trackQueueMutation()));
+        socket.on('reorder_queue', withActionMetric(ids => {
           if (!canControl(socket, 'reorder_queue', { roles: ['admin', 'player'], requireToken: true })) return;
           if (!Array.isArray(ids)) return;
           const byId = new Map(queue.map(item => [item.queueId, item]));
@@ -680,22 +749,25 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           auditAction(socket, 'reorder_queue', 'allowed', '', { orderSize: ids.length });
           schedulePersistState();
           emitState();
-        });
-        socket.on('next_song', () => {
+          return true;
+        }, () => runtimeMetrics.trackQueueMutation()));
+        socket.on('next_song', withActionMetric(() => {
           if (!canControl(socket, 'next_song', { roles: ['admin', 'player'], requireToken: true })) return;
           auditAction(socket, 'next_song');
           schedulePersistState();
           advanceQueue();
-        });
-        socket.on('replay_current', () => {
+          return true;
+        }, () => runtimeMetrics.trackQueueMutation()));
+        socket.on('replay_current', withActionMetric(() => {
           if (!canControl(socket, 'replay_current', { roles: ['admin', 'player'], requireToken: true })) return;
           playerState.position = 0;
           playerState.startedAt = playerState.isPlaying ? Date.now() : null;
           auditAction(socket, 'replay_current');
           schedulePersistState();
           emitState();
-        });
-        socket.on('seek', value => {
+          return true;
+        }));
+        socket.on('seek', withActionMetric(value => {
           if (!canControl(socket, 'seek', { roles: ['admin', 'player'], requireToken: true })) return;
           const position = Number(value?.position ?? value);
           if (!Number.isFinite(position) || position < 0) return;
@@ -705,8 +777,9 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           auditAction(socket, 'seek', 'allowed', '', { position: playerState.position });
           schedulePersistState();
           emitState();
-        });
-        socket.on('player_command', command => {
+          return true;
+        }));
+        socket.on('player_command', withActionMetric(command => {
           if (!canControl(socket, 'player_command', { roles: ['admin', 'player'], requireToken: true })) return;
           if (!command || typeof command !== 'object') return;
           if (command.isPlaying !== undefined) {
@@ -733,9 +806,11 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           auditAction(socket, 'player_command', 'allowed', '', {
             keys: Object.keys(command || {}).filter(key => ['isPlaying', 'audioMode', 'musicVol'].includes(key)),
           });
+          runtimeMetrics.trackPlayerCommand();
           schedulePersistState();
           emitState();
-        });
+          return true;
+        }));
         socket.on('report_score', scorePayload => socket.broadcast.emit('score_updated', scorePayload));
         socket.on('crowd_interaction', payload => {
           if (!canControl(socket, 'crowd_interaction', { roles: ['admin', 'remote', 'viewer', 'player'] })) return;
@@ -763,7 +838,9 @@ export function startServer(port = Number(process.env.KTV_NODE_PORT) || 3000) {
           prefixIndex = createPrefixIndex(inverseIndex);
           catalogMtime = stat.mtimeMs;
           stateDirty = true;
+          runtimeMetrics.trackCatalogReload(true);
         } catch (error) {
+          runtimeMetrics.trackCatalogReload(false);
           console.error('[Database] Catalog reload failed:', error.message);
         }
       };

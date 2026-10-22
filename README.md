@@ -198,6 +198,28 @@ localStorage.setItem('ktvControlToken', '你的控制權杖')
 
 ---
 
+## 對外部署基線（Reverse Proxy / TLS）
+
+- 建議在 Nginx/Caddy/Traefik 後方部署，對外只開放 HTTPS
+- Node 端可設定 `KTV_TRUST_PROXY=true`（或代理層級）以正確處理 `x-forwarded-proto`
+- 服務已內建常見安全回應標頭（HSTS 僅在 HTTPS 請求回應）
+- 建議代理層再加上：
+  - `/media/*` 與 Socket 路徑分流限流
+  - 長連線 timeout（給 Socket/WebRTC 訊號）
+  - access/error log 分離與輪替
+
+---
+
+## 可觀測性與健康檢查
+
+- `GET /health`：基礎存活檢查
+- `GET /api/services`：Node/Python 服務狀態
+- `GET /api/health/dashboard`：執行狀態 + 記憶體 + 佇列 + 即時指標摘要
+- `GET /api/metrics`：JSON 指標（連線數、拒絕次數、搜尋延遲等）
+- `GET /metrics`：Prometheus 文字格式
+
+---
+
 ## 主要環境變數（精簡）
 
 - 分離/對齊
@@ -207,6 +229,7 @@ localStorage.setItem('ktvControlToken', '你的控制權杖')
 - 服務連接埠
   - `KTV_PORT`（Python，預設 5000）
   - `KTV_NODE_PORT`（Node，預設 3000）
+  - `KTV_TRUST_PROXY`（反向代理部署時建議設定）
 - 路徑
   - `KTV_SONGS_DIR`
   - `KTV_LIBRARY_INDEX_PATH`
