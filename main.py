@@ -60,19 +60,24 @@ register_socket_handlers(socketio, settings=settings, log_cb=print)
 
 LOCAL_IP = get_local_ip()
 node_process = None
+node_log_handle = None
 
 
 def start_node_server():
+    global node_log_handle
     node = shutil.which("node")
     if not node:
         raise RuntimeError("找不到 Node.js，請安裝 Node.js 並在 app 資料夾安裝套件。")
+    log_dir = settings.base_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    node_log_handle = open(log_dir / "node-service.log", "a", encoding="utf-8")
     node_process = subprocess.Popen(
         [node, "server.js"],
         cwd=settings.base_dir / "app",
         env=os.environ.copy(),
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=node_log_handle,
+        stderr=node_log_handle,
     )
     health_url = f"http://127.0.0.1:{settings.node_port}/health"
     deadline = time.monotonic() + 20
@@ -92,12 +97,16 @@ def start_node_server():
 
 
 def stop_node_server():
+    global node_log_handle
     if node_process and node_process.poll() is None:
         node_process.terminate()
         try:
             node_process.wait(timeout=5)
         except subprocess.TimeoutExpired:
             node_process.kill()
+    if node_log_handle:
+        node_log_handle.close()
+        node_log_handle = None
 
 
 def run_server_thread():
@@ -173,8 +182,8 @@ class ServerApp(tk.Tk):
             size_mb = total_size / (1024 * 1024)
             self.lbl_count.config(text=f"🎵 總歌曲數: {count} 首")
             self.lbl_size.config(text=f"💾 佔用空間: {size_mb:.2f} MB")
-        except Exception:
-            pass
+        except Exception as error:
+            system_log_queue.put(f"[stats] {error}")
         self.after(5000, self.update_stats)
 
     def check_log_queue(self):
@@ -185,8 +194,8 @@ class ServerApp(tk.Tk):
                 self.log_txt.insert("end", msg + "\n")
                 self.log_txt.see("end")
                 self.log_txt.config(state="disabled")
-        except Exception:
-            pass
+        except Exception as error:
+            system_log_queue.put(f"[ui-log] {error}")
         self.after(100, self.check_log_queue)
 
 

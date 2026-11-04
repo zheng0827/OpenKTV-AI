@@ -1,29 +1,45 @@
-def _patch_torch_load_weights_only_default() -> None:
-    """PyTorch >=2.6 defaults torch.load(weights_only=True), which breaks loading
-    pyannote/whisperx checkpoints that pickle omegaconf config objects (e.g. the VAD
-    model used by whisperx). Some callers (e.g. lightning_fabric) even pass
-    weights_only=True explicitly, so we force it back to False for every torch.load
-    call in this process. We trust these first-party model checkpoints.
-    """
-    try:
-        import torch  # pylint: disable=import-outside-toplevel
-    except Exception:
-        return
+from __future__ import annotations
 
-    original_load = torch.load
-    if getattr(original_load, "_ktv_weights_only_patched", False):
-        return
+from contextlib import contextmanager
 
+
+def _build_unsafe_torch_load(original_load):
     def _patched_load(*args, **kwargs):
         kwargs["weights_only"] = False
         return original_load(*args, **kwargs)
 
-    _patched_load._ktv_weights_only_patched = True  # type: ignore[attr-defined]
-    torch.load = _patched_load
+    return _patched_load
 
 
-_patch_torch_load_weights_only_default()
+@contextmanager
+def unsafe_torch_load_context():
+    """Temporarily force torch.load(weights_only=False) only within a narrow scope.
+
+    PyTorch >=2.6 defaults to weights_only=True, which breaks some whisperx/pyannote
+    checkpoints that include pickled config objects. We avoid process-wide monkey
+    patches and only relax this behavior around known model-loading callsites.
+    """
+
+    try:
+        import torch  # pylint: disable=import-outside-toplevel
+    except Exception:
+        yield
+        return
+
+    original_load = torch.load
+    torch.load = _build_unsafe_torch_load(original_load)
+    try:
+        yield
+    finally:
+        torch.load = original_load
+
 
 from .config import AppSettings, DevelopmentConfig, ProductionConfig, load_settings
 
-__all__ = ["AppSettings", "DevelopmentConfig", "ProductionConfig", "load_settings"]
+__all__ = [
+    "AppSettings",
+    "DevelopmentConfig",
+    "ProductionConfig",
+    "load_settings",
+    "unsafe_torch_load_context",
+]

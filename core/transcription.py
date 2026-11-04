@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from . import unsafe_torch_load_context
+
 from . import cjk
 from .audio import detect_vocal_region, highpass_filter, normalize_rms
 from .gpu import gpu_model
@@ -190,14 +192,15 @@ def transcribe_segments(
     audio = full_audio[start_sample:end_sample]
     audio = normalize_rms(highpass_filter(audio))
     with gpu_model(f"whisperx:{model_name}:{transcription_device}") as held:
-        model = whisperx.load_model(
-            model_name,
-            device=transcription_device,
-            compute_type=compute_type,
-            task="transcribe",
-            language=language,
-            asr_options=_whisper_asr_options(),
-        )
+        with unsafe_torch_load_context():
+            model = whisperx.load_model(
+                model_name,
+                device=transcription_device,
+                compute_type=compute_type,
+                task="transcribe",
+                language=language,
+                asr_options=_whisper_asr_options(),
+            )
         held.append(model)
         detected_language = language or detect_language_multiwindow(model, audio)
         result = model.transcribe(

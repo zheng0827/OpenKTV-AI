@@ -143,8 +143,8 @@ def spotify_track_metadata(title: str, artist: str) -> dict[str, str]:
         try:
             with urllib.request.urlopen(artist_request, timeout=12) as response:  # nosec B310
                 genre = ", ".join(json.loads(response.read().decode("utf-8")).get("genres", []))
-        except (urllib.error.URLError, TimeoutError, ValueError):
-            pass
+        except (urllib.error.URLError, TimeoutError, ValueError) as error:
+            print(f"[core:metadata] Spotify artist genre lookup failed: {error}", flush=True)
     return {
         "title": preferred.get("name") or title,
         "artist": ", ".join(a.get("name", "") for a in artists if a.get("name")),
@@ -184,6 +184,6 @@ def search_metadata(title: str, language: str) -> dict[str, str]:
             syllable[0] for syllable in pinyin(title, style=Style.BOPOMOFO, errors=lambda chars: chars)
             if syllable and syllable[0] >= "\u3100" and syllable[0] <= "\u312f"
         )
-    except Exception:
-        pass
+    except Exception as error:
+        print(f"[core:metadata] CJK metadata transform failed: {error}", flush=True)
     return result

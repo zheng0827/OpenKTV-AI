@@ -15,6 +15,7 @@ from flask import Blueprint, Flask, current_app, jsonify, redirect, render_templ
 from flask_socketio import SocketIO, emit
 
 from .config import AppSettings, load_settings
+from .task_governance import make_retry_task, normalize_priority, queue_state, sort_pending_tasks
 from .library import delete_catalog_entry, find_intro_skip_seconds, update_catalog_entry, update_library_index
 from .metadata import ai_parse_youtube_title, parse_youtube_title
 
@@ -262,7 +263,13 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
         "intro_skip_to": None,
         "intro_skip_hide_after": None,
         "intro_skip_used": False,
+        "processing_tasks": [],
+        "active_task_id": None,
+        "next_task_id": 1,
     }
+    state_lock = threading.Lock()
+    queue_signal = threading.Event()
+    worker_started = {"value": False}
 
     def current_position() -> float:
         if state["is_playing"] and state["started_at"] is not None:
@@ -355,6 +362,53 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
         log_cb(message)
         socketio.emit("admin_log", {"msg": message})
 
+    def emit_task_queue_state():
+        with state_lock:
+            payload = queue_state(state["processing_tasks"], state["active_task_id"])
+        socketio.emit("task_queue_state", payload)
+
+    def create_task_record(tasks: list[dict], options: dict, priority: int, label: str, max_retries: int = 0) -> dict:
+        with state_lock:
+            task_id = state["next_task_id"]
+            state["next_task_id"] += 1
+            record = {
+                "task_id": task_id,
+                "tasks": tasks,
+                "options": options,
+                "priority": normalize_priority(priority),
+                "label": label,
+                "status": "pending",
+                "created_at": time.time(),
+                "started_at": None,
+                "finished_at": None,
+                "cancel_requested": False,
+                "progress": {},
+                "summary": {},
+                "retries": 0,
+                "max_retries": max(0, int(max_retries)),
+            }
+            state["processing_tasks"].append(record)
+        return record
+
+    def find_task_unlocked(task_id: int) -> dict | None:
+        return next((item for item in state["processing_tasks"] if int(item.get("task_id", -1)) == task_id), None)
+
+    def get_task_by_id(task_id: int) -> dict | None:
+        with state_lock:
+            return find_task_unlocked(task_id)
+
+    def trim_task_history(limit: int = 300):
+        finished = [item for item in state["processing_tasks"] if item.get("status") in {"done", "failed", "cancelled"}]
+        if len(finished) <= limit:
+            return
+        finished.sort(key=lambda item: float(item.get("finished_at") or 0.0), reverse=True)
+        keep_ids = {int(item.get("task_id", -1)) for item in finished[:limit]}
+        state["processing_tasks"] = [
+            item
+            for item in state["processing_tasks"]
+            if item.get("status") not in {"done", "failed", "cancelled"} or int(item.get("task_id", -1)) in keep_ids
+        ]
+
     def enqueue_song(filename: str, title: str | None = None, insert_next: bool = False) -> dict:
         entry = {
             "queue_id": state["next_queue_id"],
@@ -397,14 +451,189 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
         state["position"] = max(0.0, float(position))
         state["started_at"] = time.time() if state["is_playing"] else None
 
+    def pick_next_pending_task() -> dict | None:
+        with state_lock:
+            pending = [item for item in state["processing_tasks"] if item.get("status") == "pending"]
+            if not pending:
+                state["active_task_id"] = None
+                state["is_processing"] = False
+                return None
+            ordered = sort_pending_tasks(pending)
+            selected = ordered[0]
+            selected["status"] = "running"
+            selected["started_at"] = time.time()
+            state["active_task_id"] = selected["task_id"]
+            state["is_processing"] = True
+            return selected
+
+    def task_worker_loop():
+        while True:
+            queue_signal.wait()
+            queue_signal.clear()
+            while True:
+                task = pick_next_pending_task()
+                if task is None:
+                    socketio.emit("task_status", {"status": "idle"})
+                    emit_task_queue_state()
+                    break
+                task_id = int(task["task_id"])
+                socketio.emit("task_status", {"status": "busy", "task_id": task_id})
+                emit_task_queue_state()
+                run_task(task)
+
+    def ensure_task_worker_started():
+        if worker_started["value"]:
+            return
+        worker_started["value"] = True
+        threading.Thread(target=task_worker_loop, daemon=True).start()
+
+    def run_task(task: dict):
+        task_id = int(task["task_id"])
+        tasks = list(task.get("tasks") or [])
+        options = dict(task.get("options") or {})
+        processor = None
+        succeeded = 0
+        failed_items = []
+        cancelled = False
+        try:
+            from .unified_nightingale import KTVProcessor  # pylint: disable=import-outside-toplevel
+            processor = KTVProcessor(settings=settings, log_cb=broadcast_log)
+            total = len(tasks)
+            for index, song_task in enumerate(tasks, start=1):
+                with state_lock:
+                    matched = find_task_unlocked(task_id)
+                    cancel_requested = bool(matched and matched.get("cancel_requested"))
+                if cancel_requested:
+                    cancelled = True
+                    break
+
+                title = song_task["title"]
+                provided_singer = (song_task.get("singer") or "").strip()
+                provided_lyrics = (song_task.get("lyrics_text") or "").strip()
+                progress_payload = {
+                    "phase": "processing",
+                    "task_id": task_id,
+                    "current": index,
+                    "total": total,
+                    "title": title,
+                    "attempt": 1,
+                }
+                with state_lock:
+                    matched = find_task_unlocked(task_id)
+                    if matched is not None:
+                        matched["progress"] = progress_payload
+                socketio.emit("task_progress", progress_payload)
+
+                success = False
+                for attempt in range(settings.download_retry_count + 1):
+                    with state_lock:
+                        matched = find_task_unlocked(task_id)
+                        cancel_requested = bool(matched and matched.get("cancel_requested"))
+                    if cancel_requested:
+                        cancelled = True
+                        break
+                    progress_payload = {
+                        "phase": "processing",
+                        "task_id": task_id,
+                        "current": index,
+                        "total": total,
+                        "title": title,
+                        "attempt": attempt + 1,
+                    }
+                    with state_lock:
+                        matched = find_task_unlocked(task_id)
+                        if matched is not None:
+                            matched["progress"] = progress_payload
+                    socketio.emit("task_progress", progress_payload)
+                    success = processor.process_song(
+                        song_task["url"],
+                        title,
+                        options={
+                            **options,
+                            "singer": provided_singer,
+                            "singer_is_manual": song_task.get("singer_is_manual", False),
+                            "youtube_title": song_task.get("youtube_title", ""),
+                            "title_is_auto": song_task.get("title_is_auto", False),
+                            "lyrics_text": provided_lyrics,
+                        },
+                    )
+                    if success:
+                        break
+                    time.sleep(0.8)
+
+                if cancelled:
+                    break
+                if success:
+                    succeeded += 1
+                else:
+                    failed_items.append(title)
+
+            total = len(tasks)
+            status = "done"
+            if cancelled:
+                status = "cancelled"
+            elif failed_items:
+                status = "failed"
+
+            if succeeded:
+                update_library_index(settings.songs_dir, settings.library_index_path)
+                socketio.emit("refresh_list")
+
+            with state_lock:
+                matched = find_task_unlocked(task_id)
+                if matched is not None:
+                    matched["status"] = status
+                    matched["finished_at"] = time.time()
+                    matched["summary"] = {
+                        "total": total,
+                        "success": succeeded,
+                        "failed": failed_items,
+                        "cancelled": cancelled,
+                    }
+                    matched["progress"] = {}
+                    if status == "cancelled":
+                        matched["cancel_requested"] = False
+                    state["active_task_id"] = None
+                    state["is_processing"] = False
+                    trim_task_history()
+
+            socketio.emit(
+                "task_progress",
+                {
+                    "phase": "done",
+                    "task_id": task_id,
+                    "total": total,
+                    "success": succeeded,
+                    "failed": failed_items,
+                    "cancelled": cancelled,
+                },
+            )
+        except Exception as error:
+            with state_lock:
+                matched = find_task_unlocked(task_id)
+                if matched is not None:
+                    matched["status"] = "failed"
+                    matched["finished_at"] = time.time()
+                    matched["summary"] = {"total": len(tasks), "success": succeeded, "failed": failed_items, "error": str(error)}
+                    matched["progress"] = {}
+                state["active_task_id"] = None
+                state["is_processing"] = False
+                trim_task_history()
+            broadcast_log(f"❌ 任務 {task_id} 失敗: {error}")
+        finally:
+            emit_task_queue_state()
+            queue_signal.set()
+
     @socketio.on("connect")
     def handle_connect():
         role = request.args.get("role", "player").lower().strip()
         state["client_roles"][request.sid] = role if role in (CONTROL_ROLES | {"player"}) else "player"
+        ensure_task_worker_started()
         emit("playback_snapshot", playback_snapshot())
         emit("playback_state", playback_snapshot())
         emit("update_queue_state", queue_payload())
         emit("apply_effect", state["effects"])
+        emit("task_queue_state", queue_state(state["processing_tasks"], state["active_task_id"]))
 
     @socketio.on("disconnect")
     def handle_disconnect():
@@ -521,11 +750,9 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
 
     @socketio.on("start_download")
     def handle_start_download(data):
-        if state["is_processing"]:
-            broadcast_log("⚠️ 系統正在處理其他歌曲，請稍候。")
-            return
         if not can_control():
             return
+        data = data or {}
 
         url = (data.get("url") or "").strip()
         try:
@@ -542,6 +769,8 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
         }
         manual_singer = (data.get("singer") or "").strip()
         manual_lyrics = (data.get("lyrics_text") or "").strip()
+        priority = normalize_priority(data.get("priority", 0))
+        max_retries = max(0, min(3, int(data.get("max_retries", 0) or 0)))
 
         try:
             if _is_playlist_url(url):
@@ -574,88 +803,96 @@ def register_socket_handlers(socketio: SocketIO, settings: AppSettings, log_cb: 
             broadcast_log(f"❌ playlist 讀取失敗: {error}")
             return
 
-        state["is_processing"] = True
+        label = manual_title or (tasks[0].get("title") if tasks else "新任務")
+        task_record = create_task_record(
+            tasks=tasks,
+            options=options,
+            priority=priority,
+            label=label,
+            max_retries=max_retries,
+        )
+        broadcast_log(f"📝 任務已排入佇列：#{task_record['task_id']}（priority={priority}）")
+        emit_task_queue_state()
+        queue_signal.set()
 
-        def run_process():
-            try:
-                from .unified_nightingale import KTVProcessor  # pylint: disable=import-outside-toplevel
+    @socketio.on("task_queue_status")
+    def handle_task_queue_status():
+        emit("task_queue_state", queue_state(state["processing_tasks"], state["active_task_id"]))
 
-                socketio.emit("task_status", {"status": "busy"})
-                processor = KTVProcessor(settings=settings, log_cb=broadcast_log)
-                total = len(tasks)
-                succeeded = 0
-                failed_items = []
+    @socketio.on("task_cancel")
+    def handle_task_cancel(data):
+        if not can_control():
+            return
+        try:
+            task_id = int((data or {}).get("task_id"))
+        except (TypeError, ValueError):
+            return
+        with state_lock:
+            task = find_task_unlocked(task_id)
+            if task is None:
+                return
+            if task.get("status") == "pending":
+                task["status"] = "cancelled"
+                task["finished_at"] = time.time()
+                task["summary"] = {"cancelled": True, "reason": "cancelled_before_start"}
+                trim_task_history()
+            elif task.get("status") == "running":
+                task["cancel_requested"] = True
+            else:
+                return
+        broadcast_log(f"🛑 已要求取消任務 #{task_id}")
+        emit_task_queue_state()
+        queue_signal.set()
 
-                for index, task in enumerate(tasks, start=1):
-                    title = task["title"]
-                    provided_singer = (task.get("singer") or "").strip()
-                    provided_lyrics = (task.get("lyrics_text") or "").strip()
-                    socketio.emit(
-                        "task_progress",
-                        {
-                            "phase": "processing",
-                            "current": index,
-                            "total": total,
-                            "title": title,
-                            "attempt": 1,
-                        },
-                    )
-                    success = False
-                    for attempt in range(settings.download_retry_count + 1):
-                        socketio.emit(
-                            "task_progress",
-                            {
-                                "phase": "processing",
-                                "current": index,
-                                "total": total,
-                                "title": title,
-                                "attempt": attempt + 1,
-                            },
-                        )
-                        success = processor.process_song(
-                            task["url"],
-                            title,
-                            options={
-                                **options,
-                                "singer": provided_singer,
-                                "singer_is_manual": task.get("singer_is_manual", False),
-                                "youtube_title": task.get("youtube_title", ""),
-                                "title_is_auto": task.get("title_is_auto", False),
-                                "lyrics_text": provided_lyrics,
-                            },
-                        )
-                        if success:
-                            break
-                        time.sleep(0.8)
+    @socketio.on("task_retry")
+    def handle_task_retry(data):
+        if not can_control():
+            return
+        try:
+            task_id = int((data or {}).get("task_id"))
+        except (TypeError, ValueError):
+            return
+        with state_lock:
+            source = find_task_unlocked(task_id)
+            if source is None:
+                return
+            if source.get("status") not in {"failed", "cancelled"}:
+                return
+            retries = int(source.get("retries", 0))
+            max_retries = int(source.get("max_retries", 0))
+            if retries >= max_retries:
+                return
+            new_task = make_retry_task(source, state["next_task_id"])
+            state["next_task_id"] += 1
+            state["processing_tasks"].append(new_task)
+        broadcast_log(f"🔁 任務 #{task_id} 已重試為 #{new_task['task_id']}")
+        emit_task_queue_state()
+        queue_signal.set()
 
-                    if success:
-                        succeeded += 1
-                    else:
-                        failed_items.append(title)
-
-                update_library_index(settings.songs_dir, settings.library_index_path)
-                if succeeded:
-                    socketio.emit("refresh_list")
-
-                socketio.emit(
-                    "task_progress",
-                    {
-                        "phase": "done",
-                        "total": total,
-                        "success": succeeded,
-                        "failed": failed_items,
-                    },
-                )
-            finally:
-                state["is_processing"] = False
-                socketio.emit("task_status", {"status": "idle"})
-
-        broadcast_log("=== 開始新任務 ===")
-        threading.Thread(target=run_process, daemon=True).start()
+    @socketio.on("task_set_priority")
+    def handle_task_set_priority(data):
+        if not can_control():
+            return
+        try:
+            task_id = int((data or {}).get("task_id"))
+        except (TypeError, ValueError):
+            return
+        priority = normalize_priority((data or {}).get("priority", 0))
+        with state_lock:
+            task = find_task_unlocked(task_id)
+            if task is None or task.get("status") != "pending":
+                return
+            task["priority"] = priority
+        broadcast_log(f"📌 任務 #{task_id} 優先序已調整為 {priority}")
+        emit_task_queue_state()
+        queue_signal.set()
 
     @socketio.on("update_ytdlp")
     def handle_update_ytdlp():
         if not can_control():
+            return
+        if state["is_processing"]:
+            broadcast_log("⚠️ 目前有下載處理任務進行中，請稍後更新 yt-dlp。")
             return
 
         def run_update():
